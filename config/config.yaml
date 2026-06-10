@@ -95,7 +95,7 @@ training:
   
   # Hyperparameter optimization
   n_trials: 25  # Number of Optuna optimization trials
-  optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (25%)
+  optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
 
 # ----------------------------------------------------------------------------
@@ -156,3 +156,15 @@ blast:
   evalue:       10                        # E-value threshold for reporting hits
   word_size:    11                        # Seed word size (11 is standard for short seqs)
   threads:      8                         # CPU threads for local BLAST only
+
+# ----------------------------------------------------------------------------
+# NCBI ENTREZ PARAMETERS (Step 09 — biological summary)
+# ----------------------------------------------------------------------------
+# 09_biological_summary.py queries NCBI Entrez efetch to resolve gene names.
+# NCBI's Terms of Use REQUIRE a valid contact e-mail; a placeholder address
+# (e.g. user@example.com) risks an IP ban. Set your real e-mail below.
+# An optional API key raises the rate limit from 3 to 10 requests/sec:
+#   https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
+ncbi:
+  entrez_email: ""    # REQUIRED — set to your real e-mail before running Step 09
+  api_key:      ""     # OPTIONAL — NCBI API key for a higher rate limit

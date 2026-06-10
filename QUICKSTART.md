@@ -49,6 +49,10 @@ python scripts/07_explainability.py
 
 # Step 08: Runs the automated Nextflow pipeline against CARD and NCBI
 python scripts/08_blast_annotation.py
+
+# Step 09: Generates the final publication-ready biological report (Markdown)
+#          Requires config.yaml -> ncbi.entrez_email to be set.
+python scripts/09_biological_summary.py
 ```
 
 ---

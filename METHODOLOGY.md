@@ -170,6 +170,16 @@ $$\texttt{colsample\\_bytree} = \frac{1}{\sqrt{5 \times 10^6}} \approx \frac{1}{
 
 This means each tree sees only ~0.045% of features — a massive regularization effect that simultaneously reduces computation from $\mathcal{O}(p \cdot n)$ per split to $\mathcal{O}(\sqrt{p} \cdot n)$.
 
+> **Implementation note.** The $1/\sqrt{p}$ value is used as the *anchor* of the
+> Optuna search space rather than a single fixed value. `04_optimization.py`
+> reads the actual feature count $p$ from `features.txt` and searches
+> `colsample_bytree` over a **log-scale window bracketing $1/\sqrt{p}$**
+> (`compute_colsample_range()`: roughly $[0.5/\sqrt{p},\, 20/\sqrt{p}]$). This
+> keeps the search consistent with the square-root heuristic while letting the
+> optimizer fine-tune around it. (Earlier versions hardcoded a fixed
+> `[0.05, 0.30]` window — ~100× larger than $1/\sqrt{p}$ — which contradicted
+> this derivation; that discrepancy has been removed.)
+
 #### Early Stopping for `n_estimators`
 
 Rather than letting Optuna randomly search over `n_estimators`, we **fix `num_boost_round = 1000`** and use XGBoost's built-in early stopping (patience = `early_stopping_rounds`). The optimal number of trees is determined empirically:

@@ -26,8 +26,6 @@ matplotlib.use('Agg')  # Force non-GUI backend to prevent MacOS process hang
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
-import os
-import glob
 from tqdm import tqdm
 import warnings
 import gc
@@ -168,9 +166,15 @@ def analyze_kmer_databases(sample_size=None):
     Q3 = df_comp['Unique_Kmers'].quantile(0.75)
     IQR = Q3 - Q1
     
+    # Asymmetric IQR fences (intentional, not the textbook 1.5x on both sides):
+    #   - Lower fence 1.5*IQR  -> flag incomplete / fragmented assemblies.
+    #   - Upper fence 3.0*IQR  -> more tolerant on the high side, because real
+    #     E. coli genome-size variation (large plasmids, accessory genome)
+    #     inflates unique-k-mer counts; only severe contamination / chimeric
+    #     assemblies should be removed, so the upper fence is widened.
     lower_bound = Q1 - 1.5 * IQR
     upper_bound = Q3 + 3.0 * IQR
-    
+
     # Identify outliers
     outliers = df_comp[(df_comp['Unique_Kmers'] < lower_bound) | (df_comp['Unique_Kmers'] > upper_bound)].copy()
     
@@ -277,9 +281,11 @@ def plot_genome_complexity(complexities, outliers_df):
     Q1 = df['Unique_Kmers_M'].quantile(0.25)
     Q3 = df['Unique_Kmers_M'].quantile(0.75)
     IQR = Q3 - Q1
+    # Asymmetric fences — see analyze_kmer_databases() for rationale (tolerant
+    # upper bound for natural genome-size variation).
     lower_bound = Q1 - 1.5 * IQR
     upper_bound = Q3 + 3.0 * IQR
-    
+
     # Setup Dual-Pane Figure
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), gridspec_kw={'width_ratios': [2, 1]})
     fig.suptitle('Genome Complexity (Unique K-mers) QC Analysis', fontsize=18, fontweight='bold', y=1.02)
@@ -410,7 +416,26 @@ def calculate_noise_threshold(valid_genomes_list):
         elbow_point = x_vals[elbow_index]
                 
         print(f"  -> Mathematically Calculated Noise Threshold (Elbow): {elbow_point}")
-        
+
+        # Persist the recommendation so it is not lost. We deliberately do NOT
+        # overwrite config.yaml automatically (min_support is a scientific
+        # decision the user should make explicitly); instead we write an
+        # advisory file and print the current config value for comparison.
+        try:
+            current_min_support = config['preprocessing'].get('min_support', 'N/A')
+            rec_file = OUTPUT_DIR / "recommended_min_support.txt"
+            with open(rec_file, 'w', encoding='utf-8') as rf:
+                rf.write(f"recommended_min_support: {elbow_point}\n")
+                rf.write(f"current_config_min_support: {current_min_support}\n")
+                rf.write("method: kneedle_max_distance_to_chord_on_document_frequency_spectrum\n")
+            print(f"  -> Saved advisory to: {rec_file.name} "
+                  f"(current config min_support = {current_min_support})")
+            if current_min_support != 'N/A' and elbow_point != current_min_support:
+                print(f"  ⚠ NOTE: computed elbow ({elbow_point}) differs from config "
+                      f"min_support ({current_min_support}). Update config.yaml manually if desired.")
+        except Exception as e:
+            print(f"  ⚠ Could not write min_support advisory: {e}")
+
         # Visualization
         plt.figure(figsize=(10, 6))
         ax = sns.lineplot(x=x_vals, y=y_vals, color='#4c72b0', marker='o', linewidth=2)
@@ -419,7 +444,11 @@ def calculate_noise_threshold(valid_genomes_list):
         plt.axvline(x=elbow_point, color='red', linestyle='--', linewidth=2)
         
         plt.title('K-mer Document Frequency Spectrum (Prevalence)', fontsize=16, pad=20)
-        plt.xlabel('Number of Genomes (X)', fontsize=12)
+        # NOTE: the x-axis is KMC occurrence multiplicity across the concatenated
+        # genome set. For binary assemblies (one copy per genome) this closely
+        # approximates document frequency (= number of genomes), but they are
+        # not strictly identical for k-mers that repeat within a single genome.
+        plt.xlabel('K-mer Multiplicity ≈ Number of Genomes (X)', fontsize=12)
         plt.ylabel('Number of Unique K-mers (Y, Log Scale)', fontsize=12)
         
         # Annotate
@@ -480,7 +509,7 @@ if __name__ == "__main__":
     gc.collect()
     
     calculate_noise_threshold(valid_genomes_list)
-    
-    print("\n=" * 60)
+
+    print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
     print("=" * 60)

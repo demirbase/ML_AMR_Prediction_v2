@@ -33,8 +33,56 @@ from Bio import Entrez, SeqIO
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# NCBI requires a registered e-mail for Entrez queries.
-Entrez.email = "user@example.com"
+# NCBI Entrez identification (email / optional api_key) is configured at runtime
+# from config.yaml in configure_entrez(); see main(). A fake/placeholder email
+# (e.g. user@example.com) violates NCBI's Terms of Use and risks an IP ban, so
+# we never hardcode one here.
+
+# ----------------------------------------------------------------------------
+# BLAST confidence tiers for short (k-mer) alignments
+# ----------------------------------------------------------------------------
+# A 21-mer producing an E-value of 1.5 is NOT "confirmed" homology. We grade
+# every hit so the report cannot present weak matches as findings (was P-07).
+CONFIRMED_MAX_EVALUE = 1e-3
+CONFIRMED_MIN_IDENT  = 95.0
+CANDIDATE_MAX_EVALUE = 1.0
+CANDIDATE_MIN_IDENT  = 90.0
+# Hits weaker than the candidate tier are dropped from the report entirely.
+REPORT_MAX_EVALUE    = CANDIDATE_MAX_EVALUE
+
+
+def classify_confidence(pident, evalue):
+    """Grade a BLAST hit into confirmed / candidate / weak by E-value + identity."""
+    try:
+        pident = float(pident)
+        evalue = float(evalue)
+    except (TypeError, ValueError):
+        return "weak"
+    if evalue <= CONFIRMED_MAX_EVALUE and pident >= CONFIRMED_MIN_IDENT:
+        return "confirmed"
+    if evalue <= CANDIDATE_MAX_EVALUE and pident >= CANDIDATE_MIN_IDENT:
+        return "candidate"
+    return "weak"
+
+
+def configure_entrez(config):
+    """Configure NCBI Entrez identity from config; warn (don't crash) if unset."""
+    ncbi_cfg = config.get('ncbi', {}) or {}
+    email = (ncbi_cfg.get('entrez_email') or "").strip()
+    api_key = (ncbi_cfg.get('api_key') or "").strip()
+
+    if not email:
+        print("WARNING: ncbi.entrez_email is not set in config.yaml.")
+        print("         NCBI may rate-limit or ban requests without a valid e-mail.")
+        print("         Set config['ncbi']['entrez_email'] before running Step 09.")
+    else:
+        Entrez.email = email
+
+    # An API key raises the NCBI rate limit from 3 to 10 requests/sec and is the
+    # recommended way to avoid throttling/bans for many sequential efetch calls.
+    if api_key:
+        Entrez.api_key = api_key
+        print("  ✓ NCBI api_key configured (higher rate limit enabled).")
 
 
 # ============================================================================
@@ -181,6 +229,11 @@ def main():
     print("Loading configuration...")
     config = load_config()
     antibiotic = config['project']['target_antibiotic']
+    top_n = config.get('analysis', {}).get('top_n_features', 50)
+
+    # Configure NCBI Entrez identity (email / api_key) from config — never a
+    # hardcoded placeholder e-mail (NCBI ToS / ban risk).
+    configure_entrez(config)
 
     # ------------------------------------------------------------------
     # Resolve paths from config
@@ -196,7 +249,8 @@ def main():
         print(f"Error: Directory {explain_dir} does not exist.")
         sys.exit(1)
 
-    csv_file  = explain_dir / f"01_top_50_features_{antibiotic}.csv"
+    # Track top_n_features from config (07 writes 01_top_{top_n}_features).
+    csv_file  = explain_dir / f"01_top_{top_n}_features_{antibiotic}.csv"
     card_file = explain_dir / f"03_card_blast_results_{antibiotic}.tsv"
     ncbi_file = explain_dir / f"04_ncbi_blast_results_{antibiotic}.tsv"
     out_file  = explain_dir / "05_final_biological_report.md"
@@ -224,10 +278,15 @@ def main():
         df_card = pd.read_csv(card_file, sep='\t', header=None, names=tsv_cols)
         df_card['pident'] = pd.to_numeric(df_card['pident'], errors='coerce')
         df_card['evalue'] = pd.to_numeric(df_card['evalue'], errors='coerce')
+        # Drop clearly-insignificant hits (E > 1.0 for a 21-mer is noise), then
+        # grade the survivors into confirmed/candidate tiers. The previous
+        # E ≤ 50 filter let weak/meaningless alignments through as "findings".
         df_card = df_card[
-            (df_card['pident'] >= 90.0) & (df_card['evalue'] <= 50.0)
+            (df_card['pident'] >= CANDIDATE_MIN_IDENT) & (df_card['evalue'] <= REPORT_MAX_EVALUE)
         ].copy()
         df_card['Gene_Match'] = df_card['sseqid'].apply(extract_card_gene)
+        df_card['Confidence'] = df_card.apply(
+            lambda r: classify_confidence(r['pident'], r['evalue']), axis=1)
     else:
         print(f"Warning: {card_file} is missing or empty.")
         df_card = pd.DataFrame(columns=tsv_cols + ['Gene_Match'])
@@ -245,11 +304,13 @@ def main():
         df_ncbi['sstart'] = pd.to_numeric(df_ncbi['sstart'], errors='coerce').fillna(0).astype(int)
         df_ncbi['send']   = pd.to_numeric(df_ncbi['send'],   errors='coerce').fillna(0).astype(int)
         df_ncbi = df_ncbi[
-            (df_ncbi['pident'] >= 90.0) & (df_ncbi['evalue'] <= 50.0)
+            (df_ncbi['pident'] >= CANDIDATE_MIN_IDENT) & (df_ncbi['evalue'] <= REPORT_MAX_EVALUE)
         ].copy()
+        df_ncbi['Confidence'] = df_ncbi.apply(
+            lambda r: classify_confidence(r['pident'], r['evalue']), axis=1)
     else:
         print(f"Warning: {ncbi_file} is missing or empty.")
-        df_ncbi = pd.DataFrame(columns=tsv_cols)
+        df_ncbi = pd.DataFrame(columns=tsv_cols + ['Confidence'])
 
     # ------------------------------------------------------------------
     # Generate Markdown report
@@ -259,6 +320,10 @@ def main():
     with open(out_file, "w") as f:
         f.write("# Final Biological Report\n")
         f.write(f"**Target Antibiotic:** {antibiotic.capitalize()}\n\n")
+        f.write("**Confidence tiers** (short-alignment BLAST grading):\n")
+        f.write(f"- `confirmed` — E ≤ {CONFIRMED_MAX_EVALUE:g} and identity ≥ {CONFIRMED_MIN_IDENT:g}%\n")
+        f.write(f"- `candidate` — E ≤ {CANDIDATE_MAX_EVALUE:g} and identity ≥ {CANDIDATE_MIN_IDENT:g}%\n")
+        f.write(f"- Weaker hits (E > {REPORT_MAX_EVALUE:g}) are excluded from this report.\n\n")
         f.write("---\n\n")
 
         for _, row in df_features.iterrows():
@@ -282,7 +347,8 @@ def main():
                     f.write(
                         f"- {hit['Gene_Match']}, "
                         f"Identity: {hit['pident']}%, "
-                        f"E-value: {hit['evalue']}\n"
+                        f"E-value: {hit['evalue']} "
+                        f"[{hit.get('Confidence', 'n/a')}]\n"
                     )
             else:
                 f.write("*No high-confidence hits*\n")
@@ -303,10 +369,13 @@ def main():
                     f.write(
                         f"- {gene_label}, "
                         f"Identity: {hit['pident']}%, "
-                        f"E-value: {hit['evalue']}\n"
+                        f"E-value: {hit['evalue']} "
+                        f"[{hit.get('Confidence', 'n/a')}]\n"
                     )
-                    # Be polite to the NCBI API
-                    time.sleep(0.3)
+                    # Be polite to the NCBI API. With an api_key the allowance is
+                    # 10 req/s (0.1s); without one it is 3 req/s, so 0.34s is the
+                    # safe floor. Use the looser delay when no key is configured.
+                    time.sleep(0.1 if getattr(Entrez, 'api_key', None) else 0.34)
             else:
                 f.write("*No high-confidence hits*\n")
 

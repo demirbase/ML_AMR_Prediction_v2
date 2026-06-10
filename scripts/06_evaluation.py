@@ -59,6 +59,9 @@ import seaborn as sns
 import sys
 from sklearn.calibration import calibration_curve
 
+# Shared label-slicing helper (single source of truth) — see scripts/utils.py
+from utils import get_y_chunk
+
 
 # ============================================================================
 # LOAD CONFIGURATION FROM YAML
@@ -97,22 +100,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def get_y_chunk(y_all, chunk_id, chunk_size, total_len):
-    """
-    Extract label subset for a specific data chunk.
-    
-    Args:
-        y_all: Complete array of all labels
-        chunk_id: Chunk identifier (0-indexed)
-        chunk_size: Number of samples per chunk
-        total_len: Total number of samples
-    
-    Returns:
-        Subset of labels for the specified chunk
-    """
-    start = chunk_id * chunk_size
-    end = min((chunk_id + 1) * chunk_size, total_len)
-    return y_all[start:end]
+# get_y_chunk() is imported from utils.py (shared with 04 and 05).
 
 
 def load_test_files_from_config():
@@ -186,24 +174,6 @@ def load_test_files_from_config():
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}")
         sys.exit(1)
-
-
-def get_y_chunk_legacy(y_all, chunk_id, chunk_size, total_len):
-    """
-    Extract label subset for a specific data chunk.
-    
-    Args:
-        y_all: Complete array of all labels
-        chunk_id: Chunk identifier (0-indexed)
-        chunk_size: Number of samples per chunk
-        total_len: Total number of samples
-    
-    Returns:
-        Subset of labels for the specified chunk
-    """
-    start = chunk_id * chunk_size
-    end = min((chunk_id + 1) * chunk_size, total_len)
-    return y_all[start:end]
 
 
 def load_test_data(y_all, all_chunk_files, test_filenames):
@@ -340,7 +310,7 @@ def plot_confusion_matrix_enhanced(y_true, y_pred, output_dir, antibiotic):
     
     plt.title(f'Confusion Matrix: {antibiotic.title()} Resistance Prediction', 
               fontsize=14, fontweight='bold', pad=20)
-    plt.suptitle("(Threshold determined by Youden's J)", fontsize=9, color='gray', y=0.01)
+    plt.suptitle("(Unbiased threshold from training; no test-set tuning)", fontsize=9, color='gray', y=0.01)
     plt.ylabel('True Label', fontsize=12)
     plt.xlabel('Predicted Label', fontsize=12)
     plt.xticks([0.5, 1.5], ['Susceptible', 'Resistant'], rotation=0)
@@ -509,7 +479,7 @@ def plot_probability_distribution(y_true, y_prob, output_dir, antibiotic, thresh
     sns.kdeplot(y_prob[y_true == 1], fill=True, color='#D62246', label='True: Resistant (1)', alpha=0.5)
 
     plt.axvline(x=threshold, color='black', linestyle='--', linewidth=1.5,
-                label=f"Optimal Threshold = {threshold:.4f} (Youden's J)")
+                label=f"Operating Threshold = {threshold:.4f} (training-derived)")
 
     plt.xlabel('Predicted Probability of Resistance', fontsize=12)
     plt.ylabel('Density', fontsize=12)
@@ -563,6 +533,52 @@ def plot_calibration_curve_analysis(y_true, y_prob, output_dir, antibiotic):
     
     plt.close()
     print(f"  ✓ Calibration curve saved: {output_path.name}")
+
+
+def bootstrap_metric_ci(y_true, y_prob, metric_fn, n_bootstraps=1000,
+                        random_state=42, alpha=0.05):
+    """
+    Estimate a percentile bootstrap confidence interval for a probability-based
+    metric (e.g. ROC-AUC, average precision).
+
+    A single train/test split yields a point estimate with no variance
+    information — reviewers rightly object to "AUC = 0.99" reported without an
+    interval (B15/P-05). Resampling the test set with replacement gives an
+    empirical sampling distribution and a 95% CI, which is the minimal,
+    tractable robustness check for an out-of-core pipeline (full k-fold CV
+    remains future work).
+
+    Args:
+        y_true:        Ground-truth labels (array).
+        y_prob:        Predicted probabilities (array).
+        metric_fn:     Callable (y_true, y_prob) -> float.
+        n_bootstraps:  Number of resamples.
+        random_state:  Seed for reproducibility.
+        alpha:         Significance level (0.05 -> 95% CI).
+
+    Returns:
+        tuple(point, lower, upper): point estimate and CI bounds (np.nan if the
+        metric is undefined, e.g. a resample with a single class).
+    """
+    y_true = np.asarray(y_true)
+    y_prob = np.asarray(y_prob)
+    rng = np.random.RandomState(random_state)
+    n = len(y_true)
+
+    point = metric_fn(y_true, y_prob)
+    scores = []
+    for _ in range(n_bootstraps):
+        idx = rng.randint(0, n, n)
+        # Skip degenerate resamples that contain only one class
+        if len(np.unique(y_true[idx])) < 2:
+            continue
+        scores.append(metric_fn(y_true[idx], y_prob[idx]))
+
+    if not scores:
+        return point, np.nan, np.nan
+    lower = float(np.percentile(scores, 100 * (alpha / 2)))
+    upper = float(np.percentile(scores, 100 * (1 - alpha / 2)))
+    return float(point), lower, upper
 
 
 def save_comprehensive_metrics(y_true, y_pred, y_prob, best_thresh, output_dir, antibiotic):
@@ -734,8 +750,8 @@ def main():
     # ------------------------------------------------------------------------
     # STEP 4: Generate Predictions
     # ------------------------------------------------------------------------
-    print("\n[STEP 4/6] Generating predictions...")
-    
+    print("\n[STEP 3/6] Generating predictions...")
+
     try:
         dtest = xgb.DMatrix(X_test, nthread=N_JOBS)
         y_prob = model.predict(dtest)
@@ -747,41 +763,30 @@ def main():
         sys.exit(1)
     
     # ------------------------------------------------------------------------
-    # STEP 4b: Dynamic Optimal Threshold via Youden's J Statistic
+    # STEP 3b: Operating threshold (NO DATA LEAKAGE)
     # ------------------------------------------------------------------------
+    # CRITICAL FIX (was P-01 / B02): the previous version computed Youden's J on
+    # the TEST set and OVERWROTE the config threshold. Optimising the decision
+    # threshold on the same data you report metrics on is textbook data leakage
+    # and inflates Sensitivity/Specificity — a guaranteed reviewer rejection.
+    #
+    # We now apply the threshold that was fixed BEFORE seeing the test set
+    # (training-derived, written by 05_model_training.py and loaded from config).
+    # Youden's J on the test set is still computed and printed for INFORMATION
+    # ONLY — it is never applied and never written back to config.
     fpr_roc, tpr_roc, roc_thresholds = roc_curve(y_test, y_prob)
     youden_j = tpr_roc - fpr_roc
     optimal_idx = np.argmax(youden_j)
-    optimal_threshold = float(roc_thresholds[optimal_idx])
-    
-    print(f"\n✓ Dynamically calculated optimal clinical threshold (Youden's J): {optimal_threshold:.4f}")
-    print(f"  (Replaces config default: {best_thresh:.4f})")
+    youden_threshold_test = float(roc_thresholds[optimal_idx])
 
-    # Persist the new threshold back into config_{antibiotic}.yaml
-    antibiotic_config_path = PROJECT_ROOT / "config" / f"config_{TARGET_ANTIBIOTIC}.yaml"
-    try:
-        with open(antibiotic_config_path, 'r', encoding='utf-8') as f:
-            ab_config = yaml.safe_load(f)
-        
-        if 'evaluation' not in ab_config:
-            ab_config['evaluation'] = {}
-        ab_config['evaluation']['optimal_threshold'] = round(optimal_threshold, 4)
-        ab_config['evaluation']['threshold_type'] = "Youden's J Statistic (Maximized Sensitivity/Specificity)"
-        
-        with open(antibiotic_config_path, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(ab_config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        
-        print(f"✓ Updated clinical threshold saved to config_{TARGET_ANTIBIOTIC}.yaml")
-    except Exception as e:
-        print(f"WARNING: Could not persist threshold to config: {e}")
-    
-    # Use optimal_threshold as the operative threshold from this point forward
-    best_thresh = optimal_threshold
-    
+    print(f"\n[INFO] Operating threshold (from training, applied): {best_thresh:.4f}")
+    print(f"[INFO] Test-set Youden's J threshold (reported only, NOT applied): {youden_threshold_test:.4f}")
+    print("[INFO] Config is NOT modified by this script (data-leakage prevention).")
+
     # ------------------------------------------------------------------------
-    # STEP 5: Applying Optimal Threshold and Performance Evaluation
+    # STEP 5: Applying the unbiased threshold and Performance Evaluation
     # ------------------------------------------------------------------------
-    print("\n[STEP 5/6] Evaluating performance with Youden's J optimal threshold...")
+    print("\n[STEP 4/6] Evaluating performance with the unbiased (training-derived) threshold...")
     print(f"  Applying Threshold: {best_thresh:.4f}")
     
     y_pred_opt = (y_prob >= best_thresh).astype(int)
@@ -794,21 +799,37 @@ def main():
     acc = accuracy_score(y_test, y_pred_opt)
     balanced_acc = balanced_accuracy_score(y_test, y_pred_opt)
     roc_auc = roc_auc_score(y_test, y_prob)
-    
-    precision, recall, _ = precision_recall_curve(y_test, y_prob)
-    pr_auc = auc(recall, precision)
-    
+
+    # Use average_precision_score for PR-AUC (consistent with
+    # save_comprehensive_metrics at the bottom of this file). The trapezoidal
+    # auc(recall, precision) over precision_recall_curve points can disagree
+    # with AP due to interpolation, producing two different "PR-AUC" numbers in
+    # the same report.
+    pr_auc = average_precision_score(y_test, y_prob)
+
     kappa = cohen_kappa_score(y_test, y_pred_opt)
     mcc = matthews_corrcoef(y_test, y_pred_opt)
     
+    # Bootstrap 95% confidence intervals (variance estimate for the single split)
+    roc_auc_pt, roc_lo, roc_hi = bootstrap_metric_ci(y_test, y_prob, roc_auc_score)
+    pr_auc_pt, pr_lo, pr_hi = bootstrap_metric_ci(y_test, y_prob, average_precision_score)
+
     print(f"Accuracy                   : {acc:.4f}")
     print(f"Balanced Accuracy          : {balanced_acc:.4f}")
-    print(f"ROC AUC Score              : {roc_auc:.4f}")
-    print(f"Precision-Recall AUC       : {pr_auc:.4f}")
+    print(f"ROC AUC Score              : {roc_auc:.4f}  (95% CI: {roc_lo:.4f}–{roc_hi:.4f})")
+    print(f"Precision-Recall AUC       : {pr_auc:.4f}  (95% CI: {pr_lo:.4f}–{pr_hi:.4f})")
     print(f"Cohen's Kappa              : {kappa:.4f}")
     print(f"Matthews Correlation Coef  : {mcc:.4f}")
-    print(f"Optimal Threshold          : {best_thresh:.2f}")
+    print(f"Operating Threshold        : {best_thresh:.4f}")
     print("=" * 80)
+
+    # Persist the bootstrap CIs alongside the other evaluation artefacts
+    pd.DataFrame([{
+        'Antibiotic': TARGET_ANTIBIOTIC,
+        'ROC_AUC': roc_auc_pt, 'ROC_AUC_CI_low': roc_lo, 'ROC_AUC_CI_high': roc_hi,
+        'PR_AUC': pr_auc_pt, 'PR_AUC_CI_low': pr_lo, 'PR_AUC_CI_high': pr_hi,
+        'n_bootstraps': 1000
+    }]).to_csv(OUTPUT_DIR / f'08_bootstrap_ci_{TARGET_ANTIBIOTIC}.csv', index=False)
     
     print("\nDetailed Classification Report:")
     print("-" * 80)
@@ -850,9 +871,9 @@ def main():
     # ------------------------------------------------------------------------
     # STEP 6: Generate Publication-Quality Visualizations
     # ------------------------------------------------------------------------
-    print("\n[STEP 6/6] Generating publication-quality outputs...")
+    print("\n[STEP 5/6] Generating publication-quality outputs...")
     print("=" * 80)
-    
+
     # Save comprehensive metrics CSV
     save_comprehensive_metrics(
         y_test, 

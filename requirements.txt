@@ -28,7 +28,14 @@ pyyaml>=5.4.0               # YAML configuration file parsing
 # ----------------------------------------------------------------------------
 matplotlib>=3.4.0         # Plotting (for visualizations)
 seaborn>=0.11.0           # Statistical visualizations
-shap>=0.40.0              # Model explainability
+
+# Bioinformatics
+# ----------------------------------------------------------------------------
+biopython>=1.79           # NCBI Entrez / SeqIO (Step 09 biological summary)
+# NOTE: `shap` was listed previously but is NOT imported anywhere in the
+#       pipeline (07_explainability.py uses XGBoost Gain importance). It was a
+#       dead dependency and has been removed. Re-add it if SHAP-based
+#       explanations are ever implemented.
 
 # Optional: Jupyter Notebook Support
 # ----------------------------------------------------------------------------

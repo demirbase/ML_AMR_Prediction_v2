@@ -29,11 +29,14 @@ Hyperparameter Search Space:
     - learning_rate: [0.01, 0.3] - Controls gradient descent step size
     - max_depth: [3, 12] - Maximum tree depth to prevent overfitting
     - subsample: [0.6, 1.0] - Fraction of samples used per tree
-    - colsample_bytree: [0.6, 1.0] - Fraction of features used per tree
+    - colsample_bytree: log-scale window around 1/√p (the square-root heuristic
+      from METHODOLOGY.md), derived dynamically from the feature count
     - min_child_weight: [1, 10] - Minimum sum of instance weight in child node
     - gamma: [0, 5] - Minimum loss reduction for further partition
-    - scale_pos_weight: [1.0, 10.0] - Balances positive/negative weights
-    - n_estimators: [100, 600] - Number of boosting rounds
+    - n_estimators: determined by early stopping (not tuned directly)
+
+    Class imbalance is handled in the final training stage (05) via Dynamic
+    Instance Weighting, not via scale_pos_weight here (avoids double-counting).
 """
 
 # ============================================================================
@@ -51,6 +54,9 @@ from sklearn.model_selection import train_test_split
 import sys
 import datetime
 import shutil
+
+# Shared label-slicing helper (single source of truth) — see scripts/utils.py
+from utils import get_y_chunk
 
 
 # ============================================================================
@@ -86,7 +92,11 @@ EARLY_STOPPING_ROUNDS = config['xgboost_params']['early_stopping_rounds']
 # XGBoost base parameters (fetched from config)
 BASE_PARAMS = {
     'objective': config['xgboost_params'].get('objective', 'binary:logistic'),
-    'eval_metric': 'aucpr',  # Changed to PR-AUC to heavily penalize False Negatives
+    # Read the evaluation metric from config (was hardcoded 'aucpr', which
+    # silently overrode config.yaml and mislabelled the reported score as
+    # "ROC AUC"). With config eval_metric: "auc", study.best_value is a genuine
+    # ROC AUC, consistent with the metadata field `best_auc_score`.
+    'eval_metric': config['xgboost_params'].get('eval_metric', 'auc'),
     'tree_method': config['xgboost_params'].get('tree_method', 'hist'),
     'nthread': config['xgboost_params'].get('n_jobs', -1),
     'device': config['xgboost_params'].get('device', 'cpu'),
@@ -110,22 +120,46 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def get_y_chunk(y_all, chunk_id, chunk_size, total_len):
+# get_y_chunk() is imported from utils.py (shared with 05 and 06).
+
+
+def count_features(matrix_dir):
     """
-    Extract label subset for a specific data chunk.
-    
-    Args:
-        y_all: Complete array of all labels
-        chunk_id: Chunk identifier (0-indexed)
-        chunk_size: Number of samples per chunk
-        total_len: Total number of samples
-    
+    Count the number of k-mer features (lines in features.txt).
+
+    Used to derive the √p column-subsampling range so the Optuna search space
+    is anchored to the actual feature dimensionality (see objective()).
+
     Returns:
-        Subset of labels corresponding to the specified chunk
+        int: number of features, or 0 if features.txt is unavailable.
     """
-    start = chunk_id * chunk_size
-    end = min((chunk_id + 1) * chunk_size, total_len)
-    return y_all[start:end]
+    features_file = matrix_dir / "features.txt"
+    if not features_file.exists():
+        return 0
+    with open(features_file, 'r', encoding='utf-8') as f:
+        return sum(1 for _ in f)
+
+
+def compute_colsample_range(n_features):
+    """
+    Derive a colsample_bytree search range centred on the √p heuristic.
+
+    METHODOLOGY.md motivates colsample_bytree ≈ 1/√p (the random-forest square-
+    root heuristic). Rather than hardcoding a fixed [0.05, 0.30] window — which
+    is ~100x larger than 1/√p for p≈5M and invalidated the stated methodology —
+    we build a log-scale window bracketing 1/√p so Optuna explores values
+    consistent with the theory while retaining flexibility.
+
+    Returns:
+        tuple(float, float): (lower, upper) bounds for trial.suggest_float(log=True).
+    """
+    if n_features and n_features > 1:
+        sqrt_p_ratio = 1.0 / np.sqrt(n_features)          # e.g. ≈ 4.5e-4 at p≈5M
+        col_lower = max(sqrt_p_ratio * 0.5, 1e-5)
+        col_upper = min(max(sqrt_p_ratio * 20.0, 1e-2), 1.0)
+        return float(col_lower), float(col_upper)
+    # Fallback when feature count is unknown: a conservative low-fraction range.
+    return 1e-4, 1e-1
 
 
 def analyze_and_stratify_all_chunks(y_all, all_files, chunk_size, test_fraction, optuna_fraction):
@@ -444,7 +478,7 @@ def save_antibiotic_specific_config(study, base_params, target_antibiotic, confi
     with open(antibiotic_config_path, 'w', encoding='utf-8') as f:
         # Add header comment
         f.write("# " + "=" * 78 + "\n")
-        f.write("# AUTO-GENERATED CONFIGURATION: {target_antibiotic.upper()}\n")
+        f.write(f"# AUTO-GENERATED CONFIGURATION: {target_antibiotic.upper()}\n")
         f.write("# " + "=" * 78 + "\n")
         f.write("# Generated by: 04_optimization.py\n")
         f.write(f"# Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -460,45 +494,55 @@ def save_antibiotic_specific_config(study, base_params, target_antibiotic, confi
     return antibiotic_config_path
 
 
-def objective(trial, dtrain, dval, base_params):
+def objective(trial, dtrain, dval, base_params, colsample_range):
     """
     Optuna objective function for hyperparameter optimization.
-    
+
     This function is called by Optuna for each trial. It suggests a set of
     hyperparameters, trains an XGBoost model, and returns the validation
     performance metric (ROC AUC) for optimization.
-    
+
     Hyperparameter Ranges Explained:
         - learning_rate [0.01, 0.3]: Lower values more stable but slower
         - max_depth [3, 12]: Deeper trees can model complex patterns but overfit
         - subsample [0.6, 1.0]: Using subset of data per tree prevents overfitting
-        - colsample_bytree [0.6, 1.0]: Using subset of features adds diversity
+        - colsample_bytree (log-scale window around 1/√p): aligns with the
+          square-root heuristic in METHODOLOGY.md (see compute_colsample_range)
         - min_child_weight [1, 10]: Higher values more conservative (less overfitting)
         - gamma [0, 5]: Regularization parameter (minimum loss reduction)
-        - scale_pos_weight [1.0, 10.0]: Addresses class imbalance
-        - n_estimators [100, 600]: More trees improve performance but increase training time
-    
+        - n_estimators: determined by early stopping (saved as a user attr)
+
+    NOTE on class imbalance: scale_pos_weight is intentionally NOT tuned here.
+    The final model (05_model_training.py) handles imbalance via per-chunk
+    Dynamic Instance Weighting (neg/pos ratio applied to the DMatrix). Tuning
+    scale_pos_weight in HPO and then weighting again in training would
+    double-count the imbalance correction.
+
     Args:
         trial: Optuna trial object
         dtrain: XGBoost DMatrix for training
         dval: XGBoost DMatrix for validation
         base_params: Fixed XGBoost parameters (objective, eval_metric, etc.)
-    
+        colsample_range: (lower, upper) bounds for colsample_bytree, derived
+            from the feature count via compute_colsample_range().
+
     Returns:
         float: Best validation ROC AUC score achieved during training
     """
     # Create parameter dictionary starting with base parameters
     params = base_params.copy()
-    
+
+    col_lower, col_upper = colsample_range
+
     # Add trial-specific hyperparameters
     params.update({
         'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
         'max_depth': trial.suggest_int('max_depth', 3, 12),
         'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.05, 0.3),  # Reduced to 5-30% for 48M features
+        # √p-anchored, log-scale window (see compute_colsample_range / METHODOLOGY.md)
+        'colsample_bytree': trial.suggest_float('colsample_bytree', col_lower, col_upper, log=True),
         'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
         'gamma': trial.suggest_float('gamma', 0, 5),
-        #'scale_pos_weight': trial.suggest_float('scale_pos_weight', 1.0, 10.0),
     })
     
     # Train model with early stopping (let XGBoost find the optimal trees)
@@ -652,7 +696,7 @@ def main():
     # STEP 2: Stratified Data Splitting
     # ------------------------------------------------------------------------
     # Split data using new fractional strategy
-    print("\n[STEP 2/6] Dynamic Stratified Chunk Splitting...")
+    print("\n[STEP 2/5] Dynamic Stratified Chunk Splitting...")
     train_files, train_filenames, test_files, test_filenames, optuna_files, optuna_filenames = analyze_and_stratify_all_chunks(
         y_all=y_all,
         all_files=all_files,
@@ -664,15 +708,25 @@ def main():
     # ------------------------------------------------------------------------
     # STEP 3: Prepare Optuna Data
     # ------------------------------------------------------------------------
-    print("\n[STEP 3/6] Loading data for hyperparameter optimization...")
-    
+    print("\n[STEP 3/5] Loading data for hyperparameter optimization...")
+
     dtrain_opt, dval_opt = load_data_for_optuna(optuna_files, y_all, CHUNK_SIZE)
+
+    # Derive the √p-anchored colsample_bytree search range from the feature count
+    n_features = count_features(MATRIX_DIR)
+    colsample_range = compute_colsample_range(n_features)
+    if n_features:
+        print(f"  ✓ Features (p): {n_features:,} | 1/√p ≈ {1.0/np.sqrt(n_features):.2e}")
+    else:
+        print("  ⚠ features.txt not found; using fallback colsample_bytree range.")
+    print(f"  ✓ colsample_bytree search range (log-scale): "
+          f"[{colsample_range[0]:.2e}, {colsample_range[1]:.2e}]")
     
     # ------------------------------------------------------------------------
     # STEP 4: Run Optuna Optimization
     # ------------------------------------------------------------------------
     
-    print("\n[STEP 5/5] Running Optuna hyperparameter optimization...")
+    print("\n[STEP 4/5] Running Optuna hyperparameter optimization...")
     print("=" * 80)
     print(f"Starting {N_TRIALS} trials (this may take 10-30 minutes)")
     print("=" * 80)
@@ -686,7 +740,7 @@ def main():
     # Run optimization with Graceful Shutdown (Fault Tolerance)
     try:
         study.optimize(
-            lambda trial: objective(trial, dtrain_opt, dval_opt, BASE_PARAMS),
+            lambda trial: objective(trial, dtrain_opt, dval_opt, BASE_PARAMS, colsample_range),
             n_trials=N_TRIALS,
             show_progress_bar=False
         )

@@ -28,7 +28,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
 import scipy.sparse as sp
-import glob
 from tqdm import tqdm
 import warnings
 import gc
@@ -149,9 +148,13 @@ def plot_class_balance(y_df):
     
     plt.figure(figsize=(8, 6))
     
+    # Assign x to `hue` + legend=False: required by seaborn >=0.14 to use a
+    # per-category palette without triggering the deprecated-palette warning.
     ax = sns.barplot(x=['Susceptible (0)', 'Resistant (1)'], y=[sus, res],
-                     palette=['#1f78b4', '#d95f02'])
-                     
+                     hue=['Susceptible (0)', 'Resistant (1)'],
+                     palette=['#1f78b4', '#d95f02'], legend=False)
+
+
     # Annotate with exact numbers and percentages
     for i, v in enumerate([sus, res]):
         pct = (v / total) * 100
@@ -376,84 +379,50 @@ def plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR):
 
 
 def plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data):
-    print("\nGenerating Exact Global SVD Separability Proof (100% Data Deduction)...")
+    print("\nGenerating Global SVD Separability Proof (Truncated SVD, all k-mers)...")
     output_path_2d = OUTPUT_DIR / f"05_svd_2d_separability_{TARGET_ANTIBIOTIC}.png"
     output_path_3d = OUTPUT_DIR / f"05_svd_3d_separability_{TARGET_ANTIBIOTIC}.png"
-    
+
     if output_path_2d.exists() and output_path_3d.exists():
         print(" -> Skipping SVD: 2D and 3D plots already exist.")
         return
-        
-    chunk_files = sorted(list(MATRIX_DIR.glob(f"X_{TARGET_ANTIBIOTIC}_part_*.npz")), 
+
+    chunk_files = sorted(list(MATRIX_DIR.glob(f"X_{TARGET_ANTIBIOTIC}_part_*.npz")),
                          key=lambda x: int(x.stem.split('_part_')[1]))
     if not chunk_files: return
-        
+
     try:
-        import scipy.sparse as sp
-        from scipy.linalg import eigh
-        from mpl_toolkits.mplot3d import Axes3D
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import gc
-        import numpy as np
-        
-        print("  [Pass 1/3] Scanning chunk dimensions...")
-        offsets = []
-        current_idx = 0
-        for f in chunk_files:
-            mat = sp.load_npz(f)
-            r = mat.shape[0]
-            offsets.append((current_idx, current_idx + r))
-            current_idx += r
-            del mat
-            
-        N_total = current_idx
-        K = np.zeros((N_total, N_total), dtype=np.float32)
-        
-        print("  [Pass 2/3] Computing Exact Gram Matrix (XX^T) safely...")
-        print("             Strategy: Safe Dual-Load (Max ~5GB RAM). Processing 48M+ features...")
-        
-        for i in tqdm(range(len(chunk_files)), desc="Block Matrix Multiplication (Outer)"):
-            start_i, end_i = offsets[i]
-            # Load as float32 to optimize BLAS dot product speed
-            X_i = sp.load_npz(chunk_files[i]).astype(np.float32)
-            
-            # Diagonal Block
-            K[start_i:end_i, start_i:end_i] = X_i.dot(X_i.T).toarray()
-            
-            # Off-diagonal Blocks
-            for j in range(i + 1, len(chunk_files)):
-                start_j, end_j = offsets[j]
-                X_j = sp.load_npz(chunk_files[j]).astype(np.float32)
-                
-                block = X_i.dot(X_j.T).toarray()
-                K[start_i:end_i, start_j:end_j] = block
-                K[start_j:end_j, start_i:end_i] = block.T
-                
-                del X_j
-                gc.collect()
-                
-            del X_i
-            gc.collect()
-            
-        print("  [Pass 3/3] Extracting Principal Components via Eigendecomposition...")
-        # Diagonalize the full Gram matrix
-        evals, evecs = eigh(K)
-        
-        # Sort and take top 3 components
-        evals = evals[-3:][::-1]
-        evecs = evecs[:, -3:][:, ::-1]
-        
-        # Compute Variance Ratio
-        trace_K = np.trace(K)
-        var_ratio = evals / trace_K
-        
-        # Project into 3D Space (X_proj = U * sqrt(Sigma))
-        X_proj = evecs * np.sqrt(np.maximum(evals, 0))
-        
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3d projection)
+
+        # ------------------------------------------------------------------
+        # SCALABILITY FIX (was B08/P-12):
+        # The previous implementation materialised the full N x N Gram matrix
+        # (XX^T) as a dense float32 array, which is O(N^2) RAM — ~10 GB at
+        # N=50,000 — and could OOM the machine. We instead run sklearn's
+        # TruncatedSVD directly on the stacked SPARSE matrix. TruncatedSVD uses
+        # randomized SVD and never densifies the feature space, so peak memory
+        # scales with the (sparse) data, not N^2.
+        # ------------------------------------------------------------------
+        print("  [Pass 1/2] Stacking sparse chunks (kept sparse, no densification)...")
+        X_stacked = sp.vstack([sp.load_npz(f) for f in tqdm(chunk_files, desc="Loading chunks")])
+        X_stacked = X_stacked.astype(np.float32).tocsr()
+
+        n_components = 3
+        if min(X_stacked.shape) <= n_components:
+            print(f"  ⚠ Matrix too small for {n_components} components; skipping SVD.")
+            return
+
+        print(f"  [Pass 2/2] Computing TruncatedSVD ({n_components} components)...")
+        svd = TruncatedSVD(n_components=n_components, random_state=42)
+        X_proj = svd.fit_transform(X_stacked)
+        var_ratio = svd.explained_variance_ratio_
+
+        del X_stacked
+        gc.collect()
+
         N = X_proj.shape[0]
         y_global = y_data['label'].iloc[:N].values
-        
+
         print("  Generating Plots...")
         # 2D Plot
         plt.figure(figsize=(10, 8))
@@ -491,10 +460,11 @@ def plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data):
         print(f" -> Saved 3D plot: {output_path_3d.name}")
         
     except Exception as e:
-        print(f"  ⚠ Failed to generate Exact SVD: {e}")
+        print(f"  ⚠ Failed to generate Truncated SVD: {e}")
     finally:
-        try: del K, X_proj, evecs, evals
-        except: pass
+        # Locals (X_stacked, X_proj, svd) are released when the function
+        # returns; an explicit collection here reclaims the large arrays
+        # promptly on memory-constrained machines.
         gc.collect()
 
 # ============================================================================
@@ -513,8 +483,8 @@ if __name__ == "__main__":
     plot_chunk_memory_footprint(chunk_data)
     plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR)
     plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data)
-    
-    print("\n=" * 60)
+
+    print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
     print("=" * 60)
 

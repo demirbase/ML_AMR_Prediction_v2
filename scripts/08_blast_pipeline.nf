@@ -72,8 +72,9 @@ process CARD_BLAST {
 // PROCESS 2: Remote BLAST against NCBI nt (no local DB required)
 // ---------------------------------------------------------------------------
 process NCBI_REMOTE_BLAST {
-    tag        "NCBI remote | ${params.antibiotic}"
-    publishDir params.outdir, mode: 'copy', overwrite: true
+    tag           "NCBI remote | ${params.antibiotic}"
+    publishDir    params.outdir, mode: 'copy', overwrite: true
+    errorStrategy 'ignore'   // A remote/network failure must not abort the CARD process
 
     input:
     path fasta

@@ -165,8 +165,11 @@ def extract_top_features():
         # Extract the indices we need
         needed_indices = set()
         for feat_name, score in sorted_importance:
-            # Parse feature index from name (e.g., 'f123' -> 123)
-            idx = int(feat_name.replace('f', ''))
+            # Parse feature index from name (e.g., 'f123' -> 123).
+            # Use [1:] to strip ONLY the leading 'f' prefix. replace('f','')
+            # would also delete any 'f' inside the token — harmless for the
+            # all-digit indices XGBoost emits, but fragile; [1:] is exact.
+            idx = int(feat_name[1:])
             needed_indices.add(idx)
         
         print(f"  Feature indices to map: {len(needed_indices)}")
@@ -221,8 +224,8 @@ def extract_top_features():
         fasta_lines = []
         
         for rank, (feat_name, score) in enumerate(sorted_importance, 1):
-            # Extract feature index
-            idx = int(feat_name.replace('f', ''))
+            # Extract feature index (strip only the leading 'f' prefix)
+            idx = int(feat_name[1:])
             
             # Get k-mer sequence (use 'UNKNOWN' if not found)
             kmer_seq = features_map.get(idx, "UNKNOWN")
@@ -283,8 +286,8 @@ def extract_top_features():
     print("     → Search against bacterial genomes database")
     print("     → Identify if k-mers match known resistance genes")
     print("  2. Literature Review:")
-    print("     → Check if identified genes are documented for ciprofloxacin resistance")
-    print("     → Look for quinolone resistance mechanisms (e.g., gyrA, parC mutations)")
+    print(f"     → Check if identified genes are documented for {TARGET_ANTIBIOTIC} resistance")
+    print(f"     → Look for known {TARGET_ANTIBIOTIC} resistance mechanisms / target genes")
     print("  3. Experimental Validation:")
     print("     → Design primers targeting these k-mers")
     print("     → Validate presence in resistant vs susceptible isolates")

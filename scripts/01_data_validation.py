@@ -27,23 +27,14 @@ import pandas as pd
 import yaml
 from pathlib import Path
 
+# Shared antibiotic classification (single source of truth — see scripts/constants.py)
+from constants import ANTIBIOTIC_CLASSES
+
 # ============================================================================
 # CONFIGURATION: CROSS-PLATFORM COMPATIBLE PATHS
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
-
-# Antibiotic Classification System
-ANTIBIOTIC_CLASSES = {
-    'Penicillins': ['ampicillin', 'amoxicillin', 'amoxicillin/clavulanic acid', 'piperacillin/tazobactam', 'ampicillin/sulbactam', 'penicillin', 'carbenicillin', 'piperacillin', 'ticarcillin/clavulanic acid'],
-    'Cephalosporins': ['ceftazidime', 'cefotaxime', 'cefuroxime', 'ceftriaxone', 'cefepime', 'cefoxitin', 'cephalothin', 'cefazolin', 'ceftiofur', 'cefpodoxime', 'cefotetan', 'ceftazidime/avibactam', 'ceftaroline', 'cephalexin', 'cefpodoxime_clavulanic_acid', 'ceftolozane/tazobactam', 'cefotaxime/clavulanic acid'],
-    'Beta-Lactams: Carbapenems & Others': ['meropenem', 'imipenem', 'ertapenem', 'doripenem', 'aztreonam', 'beta-lactam', 'sulbactam'],
-    'Aminoglycosides': ['gentamicin', 'amikacin', 'tobramycin', 'streptomycin', 'kanamycin', 'apramycin', 'neomycin', 'netilmicin'],
-    'Quinolones': ['ciprofloxacin', 'norfloxacin', 'levofloxacin', 'nalidixic acid', 'moxifloxacin', 'ofloxacin'],
-    'Folate Pathway Inhibitors': ['trimethoprim/sulfamethoxazole', 'trimethoprim', 'sulfamethoxazole', 'sulfisoxazole'],
-    'Tetracyclines': ['tigecycline', 'tetracycline', 'doxycycline', 'minocycline', 'oxytetracycline'],
-    'Others': ['chloramphenicol', 'nitrofurantoin', 'azithromycin', 'colistin', 'fosfomycin', 'erythromycin', 'lincomycin', 'rifampin', 'clindamycin', 'clarithromycin', 'daptomycin', 'linezolid', 'polymyxin B', 'teicoplanin', 'vancomycin']
-}
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -212,9 +203,12 @@ def check_data() -> None:
                 col_data = pd.to_numeric(df_final[antibiotic], errors='coerce')
                 counts = col_data.value_counts()
 
-                # Robust sum - gracefully handling both strictly integer or float encoded tags
-                resistant = int(counts.get(1.0, 0) + counts.get(1, 0))
-                susceptible = int(counts.get(0.0, 0) + counts.get(0, 0))
+                # After pd.to_numeric the index is float64, so 1.0 and 1 reference
+                # the SAME bucket. Summing counts.get(1.0) + counts.get(1) would
+                # double-count every resistant/susceptible isolate. Use the float
+                # keys only (matches the correct logic in 01b/03).
+                resistant = int(counts.get(1.0, 0))
+                susceptible = int(counts.get(0.0, 0))
                 total = resistant + susceptible
 
                 if total > 0:

@@ -43,6 +43,9 @@ import random
 import datetime
 import shutil
 
+# Shared label-slicing helper (single source of truth) — see scripts/utils.py
+from utils import get_y_chunk
+
 
 # ============================================================================
 # LOAD CONFIGURATION FROM YAML
@@ -80,9 +83,6 @@ BASE_PARAMS = {
 # Antibiotic-specific paths will be constructed using target_antibiotic
 MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
 MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-
-# Create output directory
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Create output directory
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -204,23 +204,7 @@ def load_optimized_hyperparameters():
         sys.exit(1)
 
 
-def get_y_chunk(y_all, chunk_id, chunk_size, total_len):
-    """
-    Extract label subset for a specific chunk.
-    
-    Args:
-        y_all: Complete label array
-        chunk_id: Chunk identifier
-        chunk_size: Samples per chunk
-        total_len: Total number of samples
-    
-    Returns:
-        Label subset for the chunk
-    """
-    start = chunk_id * chunk_size
-    end = min((chunk_id + 1) * chunk_size, total_len)
-    return y_all[start:end]
-
+# get_y_chunk() is imported from utils.py (shared with 04 and 06).
 
 
 # ============================================================================
@@ -247,34 +231,49 @@ def final_training_incremental(best_params, train_files, y_all):
     print("=" * 80)
     
     total_trees = best_params.pop('n_estimators', 100)
-    
-    # To distribute learning globally, we train 1 tree per chunk across multiple epochs
+
+    # To distribute learning globally, we train 1 tree per chunk across multiple
+    # epochs. ceil() can overshoot the Optuna-tuned tree budget by up to
+    # (len(train_files) - 1) trees; we therefore compute the epoch count with
+    # ceil() but stop early once exactly `total_trees` have been added, so the
+    # final model honours the tuned n_estimators instead of overshooting.
     epochs = max(1, int(np.ceil(total_trees / len(train_files))))
-    actual_total_trees = epochs * len(train_files)
-    
-    print(f"Target trees (Optuna): {total_trees} | Epochs required: {epochs}")
-    print(f"Strategy: 1 tree/chunk/epoch -> Total final trees: {actual_total_trees}")
+
+    print(f"Target trees (Optuna): {total_trees} | Max epochs: {epochs}")
+    print("Strategy: 1 tree/chunk/epoch, capped at the tuned tree budget")
     print("=" * 80)
-    
+
     params = best_params.copy()
+    # Pop scale_pos_weight ONCE (before the loop) to avoid double-dipping with
+    # the per-chunk Dynamic Instance Weighting applied below. Calling it every
+    # iteration was redundant (the key is already gone after the first pop).
+    params.pop('scale_pos_weight', None)
     model = None
-    
+    trees_built = 0
+
+    # Dedicated RNG instance so shuffling is reproducible WITHOUT mutating the
+    # process-global random state (the previous random.seed() call reseeded the
+    # global RNG every epoch, an unexpected side effect for any other consumer).
+    rng = random.Random(RANDOM_SEED)
+
     for epoch in range(epochs):
+        if trees_built >= total_trees:
+            break
         print(f"\n--- EPOCH {epoch+1}/{epochs} ---")
-        
-        # CRITICAL FIX: Shuffle chunks to destroy the Resistance-Ratio sorting bias
+
+        # CRITICAL FIX: Shuffle chunks to destroy the Resistance-Ratio sorting bias.
+        # Per-epoch reseed keeps each epoch's order reproducible yet distinct.
         shuffled_files = train_files.copy()
-        random.seed(RANDOM_SEED + epoch)
-        random.shuffle(shuffled_files)
-        
+        rng.seed(RANDOM_SEED + epoch)
+        rng.shuffle(shuffled_files)
+
         for i, chunk_file in enumerate(shuffled_files):
+            if trees_built >= total_trees:
+                break
             try:
                 X_chunk = load_npz(chunk_file)
                 chunk_num = int(chunk_file.stem.split('_')[-1])
                 y_chunk = get_y_chunk(y_all, chunk_num, CHUNK_SIZE, len(y_all))
-                
-                # Pop scale_pos_weight to avoid double-dipping with dynamic weights
-                params.pop('scale_pos_weight', None)
 
                 # Dynamic Instance Weighting (Solves Local Chunk Imbalance)
                 pos_count = np.sum(y_chunk)
@@ -291,14 +290,17 @@ def final_training_incremental(best_params, train_files, y_all):
 
                 # Train exactly 1 tree per chunk to distribute learning evenly
                 model = xgb.train(params, dtrain, num_boost_round=1, xgb_model=model)
+                trees_built += 1
 
                 del X_chunk, y_chunk, dtrain, weights
                 gc.collect()
             except Exception as e:
                 print(f"  ✗ ERROR in Chunk {chunk_file.name}: {e}")
                 sys.exit(1)
-        
+
         print(f"  ✓ Epoch {epoch+1} Complete. Current Trees in Model: {model.num_boosted_rounds()}")
+
+    print(f"\n  ✓ Training stopped at {trees_built} trees (tuned budget: {total_trees}).")
     
     # Dynamic Instance Weighting is active: threshold remains 0.5 (no double-dipping)
     print("\n[Threshold Configuration]")
@@ -506,15 +508,34 @@ def main():
         shutil.copy2(model_path, backup_model_path)
         print(f"✓ Timestamped Backup Model saved successfully: {backup_model_path.name} in {MODELS_DIR}")
         
-        # Save threshold to the antibiotic-specific config
+        # Save threshold to the antibiotic-specific config.
+        # This script is the SINGLE writer of the operating threshold:
+        # 06_evaluation.py now only REPORTS Youden's J and never overwrites the
+        # config (removing the previous test-set data leakage + write conflict).
         antibiotic_config['evaluation'] = {
             'optimal_threshold': float(round(float(optimal_threshold), 4)),
             'threshold_type': 'Dynamic_Instance_Weighting (0.5 — per-chunk neg/pos ratio applied to DMatrix)'
         }
-        
+
+        # Preserve the auto-generated comment header (leading '#' lines written
+        # by 04_optimization.py) so repeated runs stay idempotent and do not
+        # silently strip the provenance banner.
+        header_lines = []
+        try:
+            with open(antibiotic_config_path, 'r', encoding='utf-8') as hf:
+                for line in hf:
+                    if line.startswith('#') or line.strip() == '':
+                        header_lines.append(line)
+                    else:
+                        break
+        except Exception:
+            header_lines = []
+
         with open(antibiotic_config_path, 'w', encoding='utf-8') as f:
+            if header_lines:
+                f.writelines(header_lines)
             yaml.dump(antibiotic_config, f, default_flow_style=False, sort_keys=False)
-            
+
         print(f"✓ Unbiased Threshold saved to config: {antibiotic_config_path.name}")
         
     except Exception as e:
@@ -530,5 +551,14 @@ def main():
 # SCRIPT ENTRY POINT
 # ============================================================================
 if __name__ == "__main__":
-    main()
+    # Global guard: report any unhandled exception with a traceback and exit
+    # non-zero so a crash mid-training cannot leave a half-written model that a
+    # downstream step silently consumes.
+    import traceback
+    try:
+        main()
+    except Exception as e:
+        print(f"\nFATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 

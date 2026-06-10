@@ -45,17 +45,8 @@ plt.rcParams['font.family'] = 'sans-serif'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 
-# Shared Dictionary from 01_data_validation.py
-ANTIBIOTIC_CLASSES = {
-    'Penicillins': ['ampicillin', 'amoxicillin', 'amoxicillin/clavulanic acid', 'piperacillin/tazobactam', 'ampicillin/sulbactam', 'penicillin', 'carbenicillin', 'piperacillin', 'ticarcillin/clavulanic acid'],
-    'Cephalosporins': ['ceftazidime', 'cefotaxime', 'cefuroxime', 'ceftriaxone', 'cefepime', 'cefoxitin', 'cephalothin', 'cefazolin', 'ceftiofur', 'cefpodoxime', 'cefotetan', 'ceftazidime/avibactam', 'ceftaroline', 'cephalexin', 'cefpodoxime_clavulanic_acid', 'ceftolozane/tazobactam', 'cefotaxime/clavulanic acid'],
-    'Beta-Lactams: Carbapenems & Others': ['meropenem', 'imipenem', 'ertapenem', 'doripenem', 'aztreonam', 'beta-lactam', 'sulbactam'],
-    'Aminoglycosides': ['gentamicin', 'amikacin', 'tobramycin', 'streptomycin', 'kanamycin', 'apramycin', 'neomycin', 'netilmicin'],
-    'Quinolones': ['ciprofloxacin', 'norfloxacin', 'levofloxacin', 'nalidixic acid', 'moxifloxacin', 'ofloxacin'],
-    'Folate Pathway Inhibitors': ['trimethoprim/sulfamethoxazole', 'trimethoprim', 'sulfamethoxazole', 'sulfisoxazole'],
-    'Tetracyclines': ['tigecycline', 'tetracycline', 'doxycycline', 'minocycline', 'oxytetracycline'],
-    'Others': ['chloramphenicol', 'nitrofurantoin', 'azithromycin', 'colistin', 'fosfomycin', 'erythromycin', 'lincomycin', 'rifampin', 'clindamycin', 'clarithromycin', 'daptomycin', 'linezolid', 'polymyxin B', 'teicoplanin', 'vancomycin']
-}
+# Shared antibiotic classification (single source of truth — see scripts/constants.py)
+from constants import ANTIBIOTIC_CLASSES
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -400,6 +391,6 @@ if __name__ == "__main__":
     plot_target_antibiotic_deepdive(clean_df, TARGET_ANTIBIOTIC)
     plot_co_occurrence_heatmap(clean_df)
 
-    print("\n=" * 60)
+    print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
     print("=" * 60)

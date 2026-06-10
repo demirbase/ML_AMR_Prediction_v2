@@ -37,8 +37,6 @@ Memory Management Strategy:
 # ============================================================================
 import pandas as pd
 import numpy as np
-import subprocess
-import os
 import yaml
 from pathlib import Path
 from scipy.sparse import csr_matrix, save_npz
@@ -46,6 +44,9 @@ from tqdm import tqdm
 import sys
 import gc  # Garbage collector for explicit memory management
 import array
+
+# Shared safe subprocess wrapper (shlex-based, NO shell=True) — see scripts/utils.py
+from utils import run_command
 
 
 # ============================================================================
@@ -97,37 +98,9 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def run_command(command):
-    """
-    Execute a shell command with error handling and stderr capture.
-    
-    Stdout is suppressed to keep console output clean, while stderr is
-    captured and printed upon failure to aid in debugging KMC/kmc_tools errors.
-    
-    Args:
-        command (str): Shell command to execute
-    
-    Raises:
-        SystemExit: If command execution fails, with stderr message printed
-    """
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,   # Capture stderr for diagnostics
-            text=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR: Command failed: {command}")
-        print(f"Return code: {e.returncode}")
-        if e.stderr:
-            # Print first 5 lines of stderr to avoid flooding the console
-            stderr_lines = e.stderr.strip().splitlines()
-            for line in stderr_lines[:5]:
-                print(f"  STDERR: {line}")
-        sys.exit(1)
+# run_command() is imported from utils.py. It tokenises with shlex and runs
+# with shell=False, eliminating the previous shell-injection vector (a genome
+# ID / path containing shell metacharacters can no longer execute commands).
 
 
 # ============================================================================
@@ -303,7 +276,18 @@ def create_feature_matrix():
             
             # Run KMC on ALL genomes to identify k-mers meeting minimum support.
             # K-mer length uses K_LENGTH from config (consistent with 02_kmer_extraction.py).
-            # -ci{MIN_SUPPORT} filters rare k-mers present in fewer than MIN_SUPPORT genomes.
+            #
+            # IMPORTANT — semantics caveat:
+            #   -ci / -cx filter on the TOTAL OCCURRENCE COUNT of a k-mer across the
+            #   concatenated multi-FASTA input, NOT on the strict number of distinct
+            #   genomes it appears in (document frequency). For assembled bacterial
+            #   genomes most informative k-mers occur ~once per genome, so this
+            #   occurrence count is a close PROXY for genome prevalence. It can,
+            #   however, over-count k-mers that repeat within a single genome
+            #   (e.g. multi-copy elements, rRNA operons). This is an accepted
+            #   approximation here; a strict document-frequency filter would require
+            #   per-genome canonicalisation and is noted as future work.
+            # -ci{MIN_SUPPORT} filters rare k-mers (occurrence count < MIN_SUPPORT).
             kmc_cmd = (
                 f"{KMC_BIN} -k{K_LENGTH} -m{KMC_MEMORY_GB} -t{THREADS} "
                 f"-ci{MIN_SUPPORT} -cx{max_support} -fm @{global_genome_list} "
@@ -435,12 +419,20 @@ def create_feature_matrix():
         # shape = (number of genomes in chunk, total number of features)
         # dtype=np.int8 saves memory (only need 0 or 1)
         chunk_matrix = csr_matrix(
-            (np.ones(len(col_indices), dtype=np.int8), 
-             np.frombuffer(col_indices, dtype=np.int32), 
+            (np.ones(len(col_indices), dtype=np.int8),
+             np.frombuffer(col_indices, dtype=np.int32),
              np.frombuffer(indptr, dtype=np.int64)),
             shape=(len(chunk_genomes), num_features)
         )
-        
+
+        # Safety: guarantee strict binary (presence/absence) encoding. Each
+        # k-mer is dumped once per genome by kmc_tools, so duplicates should not
+        # occur — but if any (genome, k-mer) pair appeared twice, csr_matrix
+        # SUMS the values, yielding a 2 and silently breaking the binary
+        # assumption. Clamp any accumulated value back to 1.
+        if chunk_matrix.nnz > 0 and chunk_matrix.data.max() > 1:
+            np.clip(chunk_matrix.data, 0, 1, out=chunk_matrix.data)
+
         # Save chunk to disk in compressed sparse format
         save_npz(chunk_output_file, chunk_matrix)
         print(f"    ✓ Saved: {chunk_output_file}")
@@ -475,4 +467,13 @@ def create_feature_matrix():
 # SCRIPT ENTRY POINT
 # ============================================================================
 if __name__ == "__main__":
-    create_feature_matrix()
+    # Global guard: any unhandled exception (disk full, OOM, etc.) is reported
+    # with a full traceback and forces a non-zero exit, so a crash cannot leave
+    # partial outputs that a later run silently treats as complete.
+    import traceback
+    try:
+        create_feature_matrix()
+    except Exception as e:
+        print(f"\nFATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)

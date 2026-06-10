@@ -38,6 +38,13 @@ technical_review_report.md
 # Large k-mer feature matrix files (exceed GitHub's 100MB limit)
 data/processed/*/matrix/features.txt
 
+# Legacy / antibiotic-specific data directories (pre-Cookiecutter layout).
+# These hold generated per-antibiotic artefacts and must never be committed.
+data/ampicillin/
+data/cefotaxime/
+data/ciprofloxacin/
+data/gentamicin/
+
 # ============================================================================
 # MODELS
 # ============================================================================

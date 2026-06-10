@@ -12,10 +12,12 @@ K-mer Analysis Background:
     genes or regulatory elements. By representing each genome as a k-mer frequency
     vector, we can apply machine learning algorithms to identify resistance patterns.
     
-    K-mer length (k=31) is chosen to balance:
+    K-mer length (k=21, set via config.yaml `preprocessing.k_length`) is chosen
+    to balance (see METHODOLOGY.md for the full justification):
     - Specificity: Longer k-mers are more unique
     - Computational efficiency: Shorter k-mers are faster to process
-    - Biological relevance: 31-mers capture gene-level features
+    - Biological relevance: 21-mers capture gene-level features while keeping
+      the feature space tractable
 
 Multi-Antibiotic Architecture:
     K-mer databases are stored in antibiotic-specific directories to prevent
@@ -33,12 +35,10 @@ Technical Notes:
 # LIBRARY IMPORTS
 # ============================================================================
 import subprocess
-import os
 import yaml
 from pathlib import Path
 from tqdm import tqdm
 import sys
-import pandas as pd
 
 
 # ============================================================================
@@ -61,7 +61,12 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 K_LENGTH = config['preprocessing']['k_length']
 MEMORY_GB = config['preprocessing']['kmc_mem']
 THREADS = config['preprocessing']['threads']
-MIN_COUNT = 1  # Fixed for assembled genomes (not in config)
+# Minimum k-mer count threshold WITHIN a single genome. Fixed at 1 because
+# inputs are assembled genomes (not raw reads): every k-mer that exists should
+# be retained at this stage. Cross-genome rarity filtering (min_support) is
+# applied later, globally, in 03_matrix_construction.py. Falls back to config
+# if a `preprocessing.min_count` key is ever added.
+MIN_COUNT = config['preprocessing'].get('min_count', 1)
 
 # ============================================================================
 # CROSS-PLATFORM COMPATIBLE PATHS (ANTIBIOTIC-SPECIFIC)
@@ -171,8 +176,13 @@ def count_kmers():
         
         output_db = KMC_OUTPUTS_DIR / genome_id
         
-        # Skip if k-mer database already exists (resume capability)
-        if (KMC_OUTPUTS_DIR / f"{genome_id}.kmc_pre").exists():
+        # Skip if k-mer database already exists (resume capability).
+        # A complete KMC database is BOTH .kmc_pre and .kmc_suf. Requiring both
+        # prevents reusing a corrupt/partial database left behind by an
+        # interrupted run (which would silently produce truncated features).
+        kmc_pre = KMC_OUTPUTS_DIR / f"{genome_id}.kmc_pre"
+        kmc_suf = KMC_OUTPUTS_DIR / f"{genome_id}.kmc_suf"
+        if kmc_pre.exists() and kmc_suf.exists():
             skipped_count += 1
             continue
         
