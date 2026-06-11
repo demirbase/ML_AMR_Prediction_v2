@@ -1,69 +1,96 @@
-# ML AMR Prediction Framework - Quickstart Guide
+# ML AMR Prediction Framework — Quickstart
 
-This quickstart guide is designed to help researchers instantly spin up the `ML_AMR_Prediction_v2` pipeline. Follow these instructions to validate, extract, construct, train, evaluate, and biologically validate your dataset against a chosen antibiotic.
+Spin up the `ML_AMR_Prediction_v2` pipeline: validate → extract → construct →
+train → evaluate → biologically annotate, for a chosen organism + antibiotic.
 
-## 1. Prerequisites & Setup
+## 1. Prerequisites & setup
 
-Before executing the pipeline, ensure the following tools are installed and your standard Cookiecutter Data Science directories are properly populated.
+### Environment
 
-### Tool Requirements
-- [ ] **Python:** Version `3.9` or higher.
-- [ ] **KMC (K-mer Counter):** Version `3.2+`. Ensure the binaries are placed inside the `bin/` directory.
-- [ ] **BLAST+:** Mandatory for biological validation. 
-    - *macOS:* `brew install blast`
-    - *Conda:* `conda install -c bioconda blast`
-- [ ] **Nextflow:** Required to launch the `08_blast_pipeline.nf` workflow.
-    - *Install command:* `curl -s https://get.nextflow.io | bash` (Move `nextflow` to `/usr/local/bin/` afterward)
+- **Python** 3.10+
+- **conda (recommended):** `conda env create -f environment.yml && conda activate amr-prediction`
+  (installs KMC, BLAST+ and Nextflow too), **or** `pip install -r requirements.txt`
+  and install the external tools yourself.
 
-### Workspace Initialization
-- [ ] **Raw Genomes:** Place all your raw `.fna` files inside `data/raw/raw_genomes/`.
-- [ ] **Metadata:** Place your combined AMR classification labels in `data/external/metadata/genome_amr_matrix.csv`.
+### External tools
+
+- [ ] **KMC** ≥3.2 — k-mer counting (steps 02/03). Binaries expected under `bin/bin/`.
+- [ ] **BLAST+** ≥2.12 — homology search (step 08). `brew install blast` / `conda install -c bioconda blast`.
+- [ ] **Nextflow** ≥22.10 — runs `08_blast_pipeline.nf`. `curl -s https://get.nextflow.io | bash`.
+
+### Inputs (organism-scoped layout)
+
+For organism slug `ecoli` (set in `config/config.yaml → project.organism`):
+
+- [ ] **Raw genomes:** `.fna` files in `data/raw/ecoli/genomes/`
+- [ ] **Metadata:** phenotype labels in `data/external/ecoli/metadata/amr_phenotypes.csv`
+      (`Genome ID` column + one column per antibiotic, values 0/1)
+- [ ] **CARD DB** (step 08): `data/external/blast_db/card_nt/card.*`
+- [ ] **NCBI e-mail** (step 09): set `config/config.yaml → ncbi.entrez_email`
+
+> Adding a new organism: add a block to `config/registry/organisms.yaml`
+> (`enabled: true`), drop its data in `data/raw/{organism}/` and
+> `data/external/{organism}/`, then run the pipeline — no code changes.
 
 ---
 
-## 2. Pipeline Execution
+## 2. Configure the target
 
-The pipeline is split into explicit sequential steps designed to be robust and highly modular. Activate your Python environment (where requirements have been installed) and sequentially run the following:
+Edit `config/config.yaml`:
+
+```yaml
+project:
+  organism: "ecoli"            # registry slug (config/registry/organisms.yaml)
+  target_antibiotic: "gentamicin"
+```
+
+Key parameters also live here: `preprocessing` (k_length, min_support,
+chunk_size), `training` (n_trials, test/validation fractions), `analysis`
+(top_n_features), `blast`, `ncbi`.
+
+---
+
+## 3. Run the pipeline
 
 ```bash
-# Step 01: Validates raw data and metadata
-python scripts/01_data_validation.py
-
-# Step 02: Runs KMC to extract genomic features globally
-python scripts/02_kmer_extraction.py
-
-# Step 03: Builds out-of-core sparse frequency matrices (.npz chunks)
-python scripts/03_matrix_construction.py
-
-# Step 04: Executes Optuna for Bayesian hyperparameter tuning
-python scripts/04_optimization.py
-
-# Step 05: Trains the final out-of-core XGBoost model
-python scripts/05_model_training.py
-
-# Step 06: Evaluates accuracy and outputs clinical metrics/plots
-python scripts/06_evaluation.py
-
-# Step 07: Extracts mathematical Feature Importance to biology (FASTA)
-python scripts/07_explainability.py
-
-# Step 08: Runs the automated Nextflow pipeline against CARD and NCBI
-python scripts/08_blast_annotation.py
-
-# Step 09: Generates the final publication-ready biological report (Markdown)
-#          Requires config.yaml -> ncbi.entrez_email to be set.
-python scripts/09_biological_summary.py
+python scripts/01_data_validation.py     # metadata validation + EDA
+python scripts/02_kmer_extraction.py     # KMC k-mer counting
+python scripts/03_matrix_construction.py # sparse .npz matrix chunks
+python scripts/04_optimization.py        # Optuna HPO -> config_{antibiotic}.yaml
+python scripts/05_model_training.py      # out-of-core XGBoost -> model + manifest
+python scripts/06_evaluation.py          # metrics, ROC/PR, bootstrap CIs
+python scripts/07_explainability.py      # top k-mers -> CSV + FASTA
+python scripts/08_blast_annotation.py    # BLAST vs CARD + NCBI (Nextflow)
+python scripts/09_biological_summary.py  # confidence-tiered biological report
 ```
 
 ---
 
-## 3. Expected Outputs
+## 4. Expected outputs
 
-All data generated by the pipeline execution will be automatically classified and neatly routed.
+Per-run provenance lands in `runs/{organism}/{antibiotic}/{run_id}/`
+(`run_metadata.json`, `metrics.json`); the trained model + `manifest.json` in
+`models/{organism}/{antibiotic}/`.
 
-All generated plots, feature matrices, and biological `.tsv` result tables will be categorized inside the `results/{antibiotic}/` folder (e.g., `results/ciprofloxacin/`). Inside, you will find numbered analysis sub-directories corresponding closely to the steps executed above:
-- `01_data_exploration/`: Distribution pie charts and metadata statistics.
-- `02_matrix_qc/`: K-mer prevalence distributions and multidimensional separability metrics.
-- `03_model_optimization/`: Optuna history tracks and optimization curves.
-- `04_evaluation/`: Precision-Recall, ROC trajectories, and clinical metric CSVs.
-- `05_explainability/`: Annotated FASTA features alongside the final CARD and NCBI Nextflow BLAST reports.
+Analysis artifacts are routed to `results/{organism}/{antibiotic}/`:
+
+- `01_data_exploration/` — class distribution, missingness, co-occurrence
+- `02_matrix_qc/` — sparsity, prevalence, SVD separability
+- `03_model_optimization/` — Optuna history & importance
+- `04_evaluation/` — confusion matrix, ROC/PR, calibration, metrics CSV, bootstrap CIs
+- `05_explainability/` — top-feature CSV/FASTA + CARD/NCBI BLAST TSVs + final report
+
+Each plot is saved with its underlying `.csv` for figure reproduction.
+
+> `results/`, `logs/` and `runs/` are generated (not version-controlled).
+
+---
+
+## 5. Validate without a full run
+
+```bash
+pytest                 # smoke + unit (seconds)
+pytest -m integration  # tiny synthetic end-to-end (minutes); needs xgboost/KMC
+```
+
+See `tests/README.md` for details.

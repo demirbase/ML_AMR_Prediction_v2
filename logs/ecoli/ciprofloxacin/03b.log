@@ -1,91 +1,0 @@
-============================================================
-FEATURE MATRIX (03) STATISTICAL VALIDATION & VISUALIZATION
-============================================================
-Analyzing constructed feature matrices in: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/data/ciprofloxacin/matrix
-✓ Found 4147 Valid Genomes for ML.
-✓ Found 21 Matrix Chunks. Extracting statistics...
-Parsing Sparsity:   0%|          | 0/21 [00:00<?, ?it/s]Parsing Sparsity:   5%|▍         | 1/21 [00:12<04:03, 12.18s/it]Parsing Sparsity:  10%|▉         | 2/21 [00:24<03:55, 12.37s/it]Parsing Sparsity:  14%|█▍        | 3/21 [00:36<03:41, 12.33s/it]Parsing Sparsity:  19%|█▉        | 4/21 [00:49<03:29, 12.32s/it]Parsing Sparsity:  24%|██▍       | 5/21 [01:01<03:16, 12.31s/it]Parsing Sparsity:  29%|██▊       | 6/21 [01:14<03:06, 12.41s/it]Parsing Sparsity:  33%|███▎      | 7/21 [01:26<02:53, 12.41s/it]Parsing Sparsity:  38%|███▊      | 8/21 [01:38<02:41, 12.39s/it]Parsing Sparsity:  43%|████▎     | 9/21 [01:51<02:28, 12.38s/it]Parsing Sparsity:  48%|████▊     | 10/21 [02:03<02:16, 12.40s/it]Parsing Sparsity:  52%|█████▏    | 11/21 [02:16<02:04, 12.41s/it]Parsing Sparsity:  57%|█████▋    | 12/21 [02:28<01:52, 12.47s/it]Parsing Sparsity:  62%|██████▏   | 13/21 [02:41<01:40, 12.51s/it]Parsing Sparsity:  67%|██████▋   | 14/21 [02:54<01:27, 12.56s/it]Parsing Sparsity:  71%|███████▏  | 15/21 [03:06<01:15, 12.58s/it]Parsing Sparsity:  76%|███████▌  | 16/21 [03:19<01:03, 12.62s/it]Parsing Sparsity:  81%|████████  | 17/21 [03:31<00:50, 12.60s/it]Parsing Sparsity:  86%|████████▌ | 18/21 [03:44<00:37, 12.60s/it]Parsing Sparsity:  90%|█████████ | 19/21 [03:57<00:25, 12.63s/it]Parsing Sparsity:  95%|█████████▌| 20/21 [04:09<00:12, 12.63s/it]Parsing Sparsity: 100%|██████████| 21/21 [04:19<00:00, 11.62s/it]Parsing Sparsity: 100%|██████████| 21/21 [04:19<00:00, 12.34s/it]
-
-[Running Visualizations]
-Generating Final ML Class Balance...
- -> Skipping: 07_final_matrix_class_balance_ciprofloxacin.png already exists.
-Generating Matrix Sparsity Distribution...
- -> Skipping: 08_matrix_sparsity_check_ciprofloxacin.png already exists.
-Generating Chunk Memory Profile...
- -> Skipping: 09_matrix_memory_profile_ciprofloxacin.png already exists.
-
-Generating Global Feature Prevalence Distribution...
- -> Skipping: 11_global_feature_prevalence_distribution_ciprofloxacin.png already exists.
-
-Generating Exact Global SVD Separability Proof (100% Data Deduction)...
-  [Pass 1/3] Scanning chunk dimensions...
-  [Pass 2/3] Computing Exact Gram Matrix (XX^T) safely...
-             Strategy: Safe Dual-Load (Max ~5GB RAM). Processing 48M+ features...
-Block Matrix Multiplication (Outer):   0%|          | 0/21 [00:00<?, ?it/s]Block Matrix Multiplication (Outer):   5%|▍         | 1/21 [1:03:58<21:19:24, 3838.21s/it]Block Matrix Multiplication (Outer):  10%|▉         | 2/21 [2:04:55<19:41:46, 3731.94s/it]Block Matrix Multiplication (Outer):  14%|█▍        | 3/21 [3:03:12<18:07:22, 3624.57s/it]Block Matrix Multiplication (Outer):  19%|█▉        | 4/21 [3:57:25<16:25:22, 3477.78s/it]Block Matrix Multiplication (Outer):  24%|██▍       | 5/21 [4:50:28<14:59:05, 3371.60s/it]Block Matrix Multiplication (Outer):  29%|██▊       | 6/21 [5:39:02<13:23:58, 3215.90s/it]Block Matrix Multiplication (Outer):  33%|███▎      | 7/21 [6:25:18<11:56:49, 3072.14s/it]Block Matrix Multiplication (Outer):  38%|███▊      | 8/21 [7:07:17<10:27:30, 2896.18s/it]Block Matrix Multiplication (Outer):  43%|████▎     | 9/21 [7:45:11<9:00:19, 2701.64s/it] Block Matrix Multiplication (Outer):  48%|████▊     | 10/21 [8:20:14<7:41:24, 2516.76s/it]Block Matrix Multiplication (Outer):  52%|█████▏    | 11/21 [8:52:27<6:29:41, 2338.19s/it]Block Matrix Multiplication (Outer):  57%|█████▋    | 12/21 [9:21:27<5:23:24, 2156.11s/it]Block Matrix Multiplication (Outer):  62%|██████▏   | 13/21 [9:47:33<4:23:38, 1977.34s/it]Block Matrix Multiplication (Outer):  67%|██████▋   | 14/21 [10:10:39<3:29:50, 1798.60s/it]Block Matrix Multiplication (Outer):  71%|███████▏  | 15/21 [10:30:34<2:41:39, 1616.65s/it]Block Matrix Multiplication (Outer):  76%|███████▌  | 16/21 [10:47:44<2:00:00, 1440.12s/it]Block Matrix Multiplication (Outer):  81%|████████  | 17/21 [11:02:09<1:24:29, 1267.34s/it]Block Matrix Multiplication (Outer):  86%|████████▌ | 18/21 [11:13:29<54:32, 1090.83s/it]  Block Matrix Multiplication (Outer):  90%|█████████ | 19/21 [11:21:44<30:23, 911.71s/it] Block Matrix Multiplication (Outer):  95%|█████████▌| 20/21 [11:26:59<12:12, 732.53s/it]Block Matrix Multiplication (Outer): 100%|██████████| 21/21 [11:28:49<00:00, 545.89s/it]Block Matrix Multiplication (Outer): 100%|██████████| 21/21 [11:28:49<00:00, 1968.09s/it]
-  [Pass 3/3] Extracting Principal Components via Eigendecomposition...
-  Generating Plots...
- -> Saved 2D plot: 13_global_svd_2d_separability_ciprofloxacin.png
- -> Saved 3D plot: 14_global_svd_3d_separability_ciprofloxacin.png
-
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-All visualizations saved to: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/analysis_results/ciprofloxacin/data_exploration
-============================================================

@@ -1,92 +1,0 @@
-============================================================
-FEATURE MATRIX (03) STATISTICAL VALIDATION & VISUALIZATION
-============================================================
-Analyzing constructed feature matrices in: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/data/processed/gentamicin/matrix
-✓ Found 4191 Valid Genomes for ML.
-✓ Found 21 Matrix Chunks. Extracting statistics...
-Parsing Sparsity:   0%|          | 0/21 [00:00<?, ?it/s]Parsing Sparsity:   5%|▍         | 1/21 [00:12<04:12, 12.64s/it]Parsing Sparsity:  10%|▉         | 2/21 [00:25<04:01, 12.72s/it]Parsing Sparsity:  14%|█▍        | 3/21 [00:38<03:49, 12.75s/it]Parsing Sparsity:  19%|█▉        | 4/21 [00:50<03:37, 12.77s/it]Parsing Sparsity:  24%|██▍       | 5/21 [01:03<03:23, 12.74s/it]Parsing Sparsity:  29%|██▊       | 6/21 [01:16<03:11, 12.76s/it]Parsing Sparsity:  33%|███▎      | 7/21 [01:29<02:59, 12.82s/it]Parsing Sparsity:  38%|███▊      | 8/21 [01:42<02:46, 12.84s/it]Parsing Sparsity:  43%|████▎     | 9/21 [01:55<02:33, 12.80s/it]Parsing Sparsity:  48%|████▊     | 10/21 [02:07<02:20, 12.77s/it]Parsing Sparsity:  52%|█████▏    | 11/21 [02:20<02:07, 12.75s/it]Parsing Sparsity:  57%|█████▋    | 12/21 [02:33<01:54, 12.74s/it]Parsing Sparsity:  62%|██████▏   | 13/21 [02:45<01:41, 12.72s/it]Parsing Sparsity:  67%|██████▋   | 14/21 [02:58<01:29, 12.76s/it]Parsing Sparsity:  71%|███████▏  | 15/21 [03:11<01:17, 12.85s/it]Parsing Sparsity:  76%|███████▌  | 16/21 [03:24<01:04, 12.90s/it]Parsing Sparsity:  81%|████████  | 17/21 [03:37<00:51, 12.96s/it]Parsing Sparsity:  86%|████████▌ | 18/21 [03:50<00:38, 12.97s/it]Parsing Sparsity:  90%|█████████ | 19/21 [04:04<00:26, 13.04s/it]Parsing Sparsity:  95%|█████████▌| 20/21 [04:17<00:13, 13.09s/it]Parsing Sparsity: 100%|██████████| 21/21 [04:29<00:00, 12.93s/it]Parsing Sparsity: 100%|██████████| 21/21 [04:29<00:00, 12.85s/it]
-
-[Running Visualizations]
-Generating Final ML Class Balance...
- -> Saved: 01_class_balance_gentamicin.png
-Generating Matrix Sparsity Distribution...
- -> Saved: 02_sparsity_check_gentamicin.png
-Generating Chunk Memory Profile...
- -> Saved: 03_memory_profile_gentamicin.png
-
-Generating Global Feature Prevalence Distribution...
-Calculating Global Prevalence:   0%|          | 0/21 [00:00<?, ?it/s]Calculating Global Prevalence:   5%|▍         | 1/21 [00:20<06:46, 20.33s/it]Calculating Global Prevalence:  10%|▉         | 2/21 [00:39<06:13, 19.64s/it]Calculating Global Prevalence:  14%|█▍        | 3/21 [00:58<05:50, 19.48s/it]Calculating Global Prevalence:  19%|█▉        | 4/21 [01:17<05:29, 19.37s/it]Calculating Global Prevalence:  24%|██▍       | 5/21 [01:36<05:07, 19.19s/it]Calculating Global Prevalence:  29%|██▊       | 6/21 [01:55<04:47, 19.14s/it]Calculating Global Prevalence:  33%|███▎      | 7/21 [02:15<04:30, 19.30s/it]Calculating Global Prevalence:  38%|███▊      | 8/21 [02:34<04:10, 19.30s/it]Calculating Global Prevalence:  43%|████▎     | 9/21 [02:54<03:51, 19.27s/it]Calculating Global Prevalence:  48%|████▊     | 10/21 [03:13<03:31, 19.20s/it]Calculating Global Prevalence:  52%|█████▏    | 11/21 [03:32<03:11, 19.20s/it]Calculating Global Prevalence:  57%|█████▋    | 12/21 [03:51<02:52, 19.15s/it]Calculating Global Prevalence:  62%|██████▏   | 13/21 [04:10<02:32, 19.08s/it]Calculating Global Prevalence:  67%|██████▋   | 14/21 [04:29<02:14, 19.17s/it]Calculating Global Prevalence:  71%|███████▏  | 15/21 [04:49<01:55, 19.30s/it]Calculating Global Prevalence:  76%|███████▌  | 16/21 [05:08<01:36, 19.33s/it]Calculating Global Prevalence:  81%|████████  | 17/21 [05:27<01:16, 19.24s/it]Calculating Global Prevalence:  86%|████████▌ | 18/21 [05:46<00:57, 19.24s/it]Calculating Global Prevalence:  90%|█████████ | 19/21 [06:06<00:38, 19.23s/it]Calculating Global Prevalence:  95%|█████████▌| 20/21 [06:25<00:19, 19.24s/it]Calculating Global Prevalence: 100%|██████████| 21/21 [06:43<00:00, 18.89s/it]Calculating Global Prevalence: 100%|██████████| 21/21 [06:43<00:00, 19.21s/it]
- -> Saved: 04_feature_prevalence_gentamicin.png
-
-Generating Exact Global SVD Separability Proof (100% Data Deduction)...
-  [Pass 1/3] Scanning chunk dimensions...
-  [Pass 2/3] Computing Exact Gram Matrix (XX^T) safely...
-             Strategy: Safe Dual-Load (Max ~5GB RAM). Processing 48M+ features...
-Block Matrix Multiplication (Outer):   0%|          | 0/21 [00:00<?, ?it/s]Block Matrix Multiplication (Outer):   5%|▍         | 1/21 [2:47:08<55:42:57, 10028.87s/it]Block Matrix Multiplication (Outer):  10%|▉         | 2/21 [5:27:25<51:38:58, 9786.24s/it] Block Matrix Multiplication (Outer):  14%|█▍        | 3/21 [7:57:49<47:11:29, 9438.28s/it]Block Matrix Multiplication (Outer):  19%|█▉        | 4/21 [9:49:37<39:28:49, 8360.53s/it]Block Matrix Multiplication (Outer):  24%|██▍       | 5/21 [10:42:41<28:51:42, 6493.88s/it]Block Matrix Multiplication (Outer):  29%|██▊       | 6/21 [11:31:08<21:58:33, 5274.25s/it]Block Matrix Multiplication (Outer):  33%|███▎      | 7/21 [12:16:44<17:17:02, 4444.45s/it]Block Matrix Multiplication (Outer):  38%|███▊      | 8/21 [12:59:51<13:54:50, 3853.14s/it]Block Matrix Multiplication (Outer):  43%|████▎     | 9/21 [13:39:33<11:18:36, 3393.06s/it]Block Matrix Multiplication (Outer):  48%|████▊     | 10/21 [14:15:25<9:11:48, 3009.91s/it]Block Matrix Multiplication (Outer):  52%|█████▏    | 11/21 [14:48:37<7:29:45, 2698.60s/it]Block Matrix Multiplication (Outer):  57%|█████▋    | 12/21 [15:18:49<6:04:18, 2428.74s/it]Block Matrix Multiplication (Outer):  62%|██████▏   | 13/21 [15:45:58<4:51:31, 2186.49s/it]Block Matrix Multiplication (Outer):  67%|██████▋   | 14/21 [16:09:59<3:48:49, 1961.40s/it]Block Matrix Multiplication (Outer):  71%|███████▏  | 15/21 [16:30:44<2:54:31, 1745.27s/it]Block Matrix Multiplication (Outer):  76%|███████▌  | 16/21 [16:48:43<2:08:44, 1544.86s/it]Block Matrix Multiplication (Outer):  81%|████████  | 17/21 [17:03:47<1:30:08, 1352.06s/it]Block Matrix Multiplication (Outer):  86%|████████▌ | 18/21 [17:19:58<1:01:52, 1237.54s/it]Block Matrix Multiplication (Outer):  90%|█████████ | 19/21 [17:36:07<38:33, 1156.87s/it]  Block Matrix Multiplication (Outer):  95%|█████████▌| 20/21 [17:43:08<15:35, 935.96s/it] Block Matrix Multiplication (Outer): 100%|██████████| 21/21 [17:46:05<00:00, 708.27s/it]Block Matrix Multiplication (Outer): 100%|██████████| 21/21 [17:46:05<00:00, 3045.99s/it]
-  [Pass 3/3] Extracting Principal Components via Eigendecomposition...
-  Generating Plots...
- -> Saved 2D plot: 05_svd_2d_separability_gentamicin.png
- -> Saved 3D plot: 05_svd_3d_separability_gentamicin.png
-
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-All visualizations saved to: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/results/gentamicin/02_matrix_qc
-============================================================

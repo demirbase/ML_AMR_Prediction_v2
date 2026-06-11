@@ -1,2 +1,0 @@
-Antibiotic,Optimal_Threshold,Accuracy,Balanced_Accuracy,Sensitivity_Recall_TPR,Specificity_TNR,Precision_PPV,NPV,F1_Score,MCC,Cohen_Kappa,ROC_AUC,PR_AUC,True_Positives,True_Negatives,False_Positives,False_Negatives,Total_Samples,Resistant_Count,Susceptible_Count
-Ciprofloxacin,0.5,0.96875,0.96984398782344,0.9722222222222222,0.9674657534246576,0.9170305676855895,0.989492119089317,0.9438202247191011,0.922956374057562,0.9222007842160951,0.9902254566210047,0.9834484288118582,210,565,19,6,800,216,584

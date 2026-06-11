@@ -1,7 +1,0 @@
-Genome_ID,Predicted_Probability,True_Label,Predicted_Label,Error_Type
-562.100856,0.13579364,Resistant,Susceptible,False_Negative
-562.100883,0.22097011,Resistant,Susceptible,False_Negative
-562.100889,0.34053025,Resistant,Susceptible,False_Negative
-562.100893,0.44001675,Resistant,Susceptible,False_Negative
-562.13502,0.43875906,Resistant,Susceptible,False_Negative
-562.144911,0.18318304,Resistant,Susceptible,False_Negative

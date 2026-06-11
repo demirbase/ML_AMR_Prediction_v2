@@ -1,92 +1,0 @@
-============================================================
-FEATURE MATRIX (03) STATISTICAL VALIDATION & VISUALIZATION
-============================================================
-Analyzing constructed feature matrices in: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/data/processed/cefotaxime/matrix
-✓ Found 3785 Valid Genomes for ML.
-✓ Found 19 Matrix Chunks. Extracting statistics...
-Parsing Sparsity:   0%|          | 0/19 [00:00<?, ?it/s]Parsing Sparsity:   5%|▌         | 1/19 [00:12<03:43, 12.40s/it]Parsing Sparsity:  11%|█         | 2/19 [00:25<03:35, 12.65s/it]Parsing Sparsity:  16%|█▌        | 3/19 [00:37<03:21, 12.62s/it]Parsing Sparsity:  21%|██        | 4/19 [00:50<03:11, 12.75s/it]Parsing Sparsity:  26%|██▋       | 5/19 [01:03<02:56, 12.62s/it]Parsing Sparsity:  32%|███▏      | 6/19 [01:15<02:44, 12.63s/it]Parsing Sparsity:  37%|███▋      | 7/19 [01:28<02:32, 12.71s/it]Parsing Sparsity:  42%|████▏     | 8/19 [01:41<02:19, 12.66s/it]Parsing Sparsity:  47%|████▋     | 9/19 [01:53<02:06, 12.64s/it]Parsing Sparsity:  53%|█████▎    | 10/19 [02:06<01:53, 12.60s/it]Parsing Sparsity:  58%|█████▊    | 11/19 [02:18<01:40, 12.56s/it]Parsing Sparsity:  63%|██████▎   | 12/19 [02:31<01:28, 12.60s/it]Parsing Sparsity:  68%|██████▊   | 13/19 [02:44<01:15, 12.59s/it]Parsing Sparsity:  74%|███████▎  | 14/19 [02:56<01:03, 12.60s/it]Parsing Sparsity:  79%|███████▉  | 15/19 [03:09<00:50, 12.58s/it]Parsing Sparsity:  84%|████████▍ | 16/19 [03:21<00:37, 12.59s/it]Parsing Sparsity:  89%|████████▉ | 17/19 [03:34<00:25, 12.62s/it]Parsing Sparsity:  95%|█████████▍| 18/19 [03:47<00:12, 12.66s/it]Parsing Sparsity: 100%|██████████| 19/19 [03:58<00:00, 12.36s/it]Parsing Sparsity: 100%|██████████| 19/19 [03:58<00:00, 12.58s/it]
-
-[Running Visualizations]
-Generating Final ML Class Balance...
- -> Saved: 01_class_balance_cefotaxime.png
-Generating Matrix Sparsity Distribution...
- -> Saved: 02_sparsity_check_cefotaxime.png
-Generating Chunk Memory Profile...
- -> Saved: 03_memory_profile_cefotaxime.png
-
-Generating Global Feature Prevalence Distribution...
-Calculating Global Prevalence:   0%|          | 0/19 [00:00<?, ?it/s]Calculating Global Prevalence:   5%|▌         | 1/19 [00:19<05:58, 19.93s/it]Calculating Global Prevalence:  11%|█         | 2/19 [00:38<05:21, 18.89s/it]Calculating Global Prevalence:  16%|█▌        | 3/19 [00:56<04:57, 18.59s/it]Calculating Global Prevalence:  21%|██        | 4/19 [01:14<04:38, 18.54s/it]Calculating Global Prevalence:  26%|██▋       | 5/19 [01:32<04:16, 18.31s/it]Calculating Global Prevalence:  32%|███▏      | 6/19 [01:51<03:59, 18.39s/it]Calculating Global Prevalence:  37%|███▋      | 7/19 [02:10<03:44, 18.68s/it]Calculating Global Prevalence:  42%|████▏     | 8/19 [02:28<03:23, 18.46s/it]Calculating Global Prevalence:  47%|████▋     | 9/19 [02:46<03:03, 18.34s/it]Calculating Global Prevalence:  53%|█████▎    | 10/19 [03:04<02:44, 18.26s/it]Calculating Global Prevalence:  58%|█████▊    | 11/19 [03:22<02:25, 18.22s/it]Calculating Global Prevalence:  63%|██████▎   | 12/19 [03:41<02:07, 18.28s/it]Calculating Global Prevalence:  68%|██████▊   | 13/19 [03:59<01:49, 18.29s/it]Calculating Global Prevalence:  74%|███████▎  | 14/19 [04:18<01:31, 18.35s/it]Calculating Global Prevalence:  79%|███████▉  | 15/19 [04:36<01:13, 18.34s/it]Calculating Global Prevalence:  84%|████████▍ | 16/19 [04:54<00:55, 18.34s/it]Calculating Global Prevalence:  89%|████████▉ | 17/19 [05:13<00:36, 18.41s/it]Calculating Global Prevalence:  95%|█████████▍| 18/19 [05:31<00:18, 18.43s/it]Calculating Global Prevalence: 100%|██████████| 19/19 [05:48<00:00, 17.94s/it]Calculating Global Prevalence: 100%|██████████| 19/19 [05:48<00:00, 18.34s/it]
- -> Saved: 04_feature_prevalence_cefotaxime.png
-
-Generating Exact Global SVD Separability Proof (100% Data Deduction)...
-  [Pass 1/3] Scanning chunk dimensions...
-  [Pass 2/3] Computing Exact Gram Matrix (XX^T) safely...
-             Strategy: Safe Dual-Load (Max ~5GB RAM). Processing 48M+ features...
-Block Matrix Multiplication (Outer):   0%|          | 0/19 [00:00<?, ?it/s]Block Matrix Multiplication (Outer):   5%|▌         | 1/19 [59:30<17:51:08, 3570.46s/it]Block Matrix Multiplication (Outer):  11%|█         | 2/19 [1:55:51<16:20:07, 3459.28s/it]Block Matrix Multiplication (Outer):  16%|█▌        | 3/19 [2:48:20<14:44:39, 3317.48s/it]Block Matrix Multiplication (Outer):  21%|██        | 4/19 [3:37:49<13:14:57, 3179.80s/it]Block Matrix Multiplication (Outer):  26%|██▋       | 5/19 [4:23:40<11:45:52, 3025.21s/it]Block Matrix Multiplication (Outer):  32%|███▏      | 6/19 [5:06:44<10:22:56, 2875.11s/it]Block Matrix Multiplication (Outer):  37%|███▋      | 7/19 [5:46:43<9:03:55, 2719.63s/it] Block Matrix Multiplication (Outer):  42%|████▏     | 8/19 [6:23:22<7:48:10, 2553.70s/it]Block Matrix Multiplication (Outer):  47%|████▋     | 9/19 [6:57:00<6:37:43, 2386.40s/it]Block Matrix Multiplication (Outer):  53%|█████▎    | 10/19 [7:27:36<5:32:28, 2216.47s/it]Block Matrix Multiplication (Outer):  58%|█████▊    | 11/19 [7:55:05<4:32:21, 2042.70s/it]Block Matrix Multiplication (Outer):  63%|██████▎   | 12/19 [8:19:49<3:38:30, 1872.88s/it]Block Matrix Multiplication (Outer):  68%|██████▊   | 13/19 [8:41:07<2:49:15, 1692.60s/it]Block Matrix Multiplication (Outer):  74%|███████▎  | 14/19 [8:59:23<2:06:01, 1512.22s/it]Block Matrix Multiplication (Outer):  79%|███████▉  | 15/19 [9:14:42<1:28:54, 1333.65s/it]Block Matrix Multiplication (Outer):  84%|████████▍ | 16/19 [9:26:59<57:41, 1153.83s/it]  Block Matrix Multiplication (Outer):  89%|████████▉ | 17/19 [9:36:13<32:27, 973.64s/it] Block Matrix Multiplication (Outer):  95%|█████████▍| 18/19 [9:42:10<13:08, 788.34s/it]Block Matrix Multiplication (Outer): 100%|██████████| 19/19 [9:44:56<00:00, 601.26s/it]Block Matrix Multiplication (Outer): 100%|██████████| 19/19 [9:44:56<00:00, 1847.16s/it]
-  [Pass 3/3] Extracting Principal Components via Eigendecomposition...
-  Generating Plots...
- -> Saved 2D plot: 05_svd_2d_separability_cefotaxime.png
- -> Saved 3D plot: 05_svd_3d_separability_cefotaxime.png
-
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-=
-All visualizations saved to: /Users/erendemirbas/Desktop/IU_master/projects/ML_project_kopyasi/results/cefotaxime/02_matrix_qc
-============================================================
