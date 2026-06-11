@@ -559,8 +559,12 @@ def objective(trial, dtrain, dval, base_params, colsample_range):
         verbose_eval=False
     )
     
-    # Dynamically save the EXACT optimal tree count found by early stopping
-    trial.set_user_attr("n_estimators", model.best_iteration)
+    # Dynamically save the EXACT optimal tree count found by early stopping.
+    # best_iteration is 0-indexed (the index of the best round), so the number
+    # of trees to keep is best_iteration + 1. Storing best_iteration directly
+    # undercounts by one and, when the very first tree is best, yields 0 — which
+    # would make 05 train zero trees (model stays None). max(1, …) is a final guard.
+    trial.set_user_attr("n_estimators", max(1, int(model.best_iteration) + 1))
     
     # Return best validation score (ROC AUC)
     return model.best_score

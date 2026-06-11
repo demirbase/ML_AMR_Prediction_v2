@@ -233,7 +233,9 @@ def final_training_incremental(best_params, train_files, y_all):
     print("EPOCH-BASED INCREMENTAL MODEL TRAINING (SHUFFLED)")
     print("=" * 80)
     
-    total_trees = best_params.pop('n_estimators', 100)
+    # Guard against a degenerate tuned budget (0 or missing): always train at
+    # least one tree so the model is never left as None.
+    total_trees = max(1, int(best_params.pop('n_estimators', 100)))
 
     # To distribute learning globally, we train 1 tree per chunk across multiple
     # epochs. ceil() can overshoot the Optuna-tuned tree budget by up to
