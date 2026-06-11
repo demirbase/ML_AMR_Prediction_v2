@@ -148,8 +148,25 @@ def extract_top_features():
         )[:TOP_N]
         
         print(f"  ✓ Selected top {len(sorted_importance)} features")
+
+        # A model with no splits (e.g. a single-leaf stump on trivial data, or a
+        # fully-regularised model) yields an EMPTY importance dict. Handle this
+        # gracefully instead of crashing on sorted_importance[0]: write empty
+        # CSV + FASTA so downstream steps (08/09) still find their inputs.
+        if not sorted_importance:
+            print("  ⚠ WARNING: the model exposes no feature importances (no tree splits).")
+            print("    Writing empty top-feature outputs and stopping cleanly.")
+            empty_cols = ['Rank', 'Feature_ID', 'Feature_Index', 'Gain_Score',
+                          'Kmer_Sequence', 'Kmer_Length']
+            csv_path = OUTPUT_DIR / f"01_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.csv"
+            pd.DataFrame(columns=empty_cols).to_csv(csv_path, index=False, encoding='utf-8')
+            fasta_path = OUTPUT_DIR / f"02_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.fasta"
+            fasta_path.write_text("", encoding='utf-8')
+            print(f"  ✓ Wrote empty outputs: {csv_path.name}, {fasta_path.name}")
+            return
+
         print(f"  ✓ Importance range: {sorted_importance[0][1]:.2f} (max) to {sorted_importance[-1][1]:.2f} (min)")
-        
+
     except Exception as e:
         print(f"ERROR: Failed to extract feature importance: {e}")
         sys.exit(1)
