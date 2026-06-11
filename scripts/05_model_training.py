@@ -124,7 +124,8 @@ def load_optimized_hyperparameters():
         yaml.YAMLError: If the YAML file is malformed
     """
     # Define antibiotic-specific config path
-    antibiotic_config_path = CONFIG_DIR / f"config_{TARGET_ANTIBIOTIC}.yaml"
+    antibiotic_config_path = resolve_path('experiment_config', organism=ORGANISM,
+                                          antibiotic=TARGET_ANTIBIOTIC, config=config)
     
     if not antibiotic_config_path.exists():
         raise FileNotFoundError(
@@ -470,7 +471,8 @@ def main():
     
     # Load antibiotic-specific config to show optuna subset info
     try:
-        antibiotic_config_path = CONFIG_DIR / f"config_{TARGET_ANTIBIOTIC}.yaml"
+        antibiotic_config_path = resolve_path('experiment_config', organism=ORGANISM,
+                                              antibiotic=TARGET_ANTIBIOTIC, config=config)
         with open(antibiotic_config_path, 'r') as f:
             antibiotic_config = yaml.safe_load(f)
         optuna_count = antibiotic_config.get('data_split', {}).get('optuna_count', 'N/A')

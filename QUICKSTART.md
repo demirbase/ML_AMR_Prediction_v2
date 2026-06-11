@@ -56,7 +56,7 @@ chunk_size), `training` (n_trials, test/validation fractions), `analysis`
 python scripts/01_data_validation.py     # metadata validation + EDA
 python scripts/02_kmer_extraction.py     # KMC k-mer counting
 python scripts/03_matrix_construction.py # sparse .npz matrix chunks
-python scripts/04_optimization.py        # Optuna HPO -> config_{antibiotic}.yaml
+python scripts/04_optimization.py        # Optuna HPO -> config/experiments/{organism}/config_{antibiotic}.yaml
 python scripts/05_model_training.py      # out-of-core XGBoost -> model + manifest
 python scripts/06_evaluation.py          # metrics, ROC/PR, bootstrap CIs
 python scripts/07_explainability.py      # top k-mers -> CSV + FASTA

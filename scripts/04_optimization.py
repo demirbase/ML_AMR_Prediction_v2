@@ -449,8 +449,13 @@ def save_antibiotic_specific_config(study, base_params, target_antibiotic, confi
     Raises:
         IOError: If file write operation fails
     """
-    antibiotic_config_path = config_dir / f"config_{target_antibiotic}.yaml"
-    
+    # Organism-scoped experiment config (config/experiments/{organism}/...), so
+    # two organisms that share an antibiotic name (e.g. ecoli/gentamicin vs
+    # kpneumoniae/gentamicin) never overwrite each other's split + best params.
+    antibiotic_config_path = resolve_path('experiment_config', organism=ORGANISM,
+                                          antibiotic=target_antibiotic, config=config)
+    antibiotic_config_path.parent.mkdir(parents=True, exist_ok=True)
+
     # Merge standard best params with the dynamically found n_estimators
     final_best_params = study.best_params.copy()
     if "n_estimators" in study.best_trial.user_attrs:
@@ -836,7 +841,7 @@ def main():
             print("\n" + "=" * 80)
             print("NEXT STEPS")
             print("=" * 80)
-            print(f"1. Review optimized parameters in: config/config_{TARGET_ANTIBIOTIC}.yaml")
+            print(f"1. Review optimized parameters in: config/experiments/{ORGANISM}/config_{TARGET_ANTIBIOTIC}.yaml")
             print("2. Run final training with optimized hyperparameters:")
             print("   python scripts/05_model_training.py")
             print("=" * 80)

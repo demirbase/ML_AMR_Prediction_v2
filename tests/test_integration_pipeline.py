@@ -142,12 +142,11 @@ def test_pipeline_end_to_end(synthetic_dataset):
         assert (matrix_dir / f"y_{antibiotic}.csv").exists()
         assert any(matrix_dir.glob(f"X_{antibiotic}_part_*.npz")), "03 produced no matrix chunks"
 
-        # --- 04: optimization (writes config_testorg.yaml + run_metadata) -----
+        # --- 04: optimization (writes the organism-scoped experiment config) --
         _run_step("04_optimization.py")
-        assert (PROJECT_ROOT / "config" / f"config_{antibiotic}.yaml").exists() or \
-               (PROJECT_ROOT / "config" / "config_testorg.yaml").exists() or True
-        ab_cfg = PROJECT_ROOT / "config" / f"config_{antibiotic}.yaml"
-        assert ab_cfg.exists(), "04 did not write the antibiotic config"
+        ab_cfg = resolve_path("experiment_config", organism=organism,
+                              antibiotic=antibiotic, config=cfg)
+        assert ab_cfg.exists(), "04 did not write the organism-scoped antibiotic config"
 
         # --- 05: training (writes model + manifest.json) ---------------------
         _run_step("05_model_training.py")
