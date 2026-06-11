@@ -63,8 +63,8 @@ def _run_step(script, env_note=""):
     return proc
 
 
-def _cleanup(organism):
-    """Remove every artifact the test created for `organism`."""
+def _cleanup(organism, antibiotic=None):
+    """Remove every artifact the test created for `organism`/`antibiotic`."""
     targets = [
         PROJECT_ROOT / "data" / "raw" / organism,
         PROJECT_ROOT / "data" / "external" / organism,
@@ -77,6 +77,9 @@ def _cleanup(organism):
         PROJECT_ROOT / "config" / "experiments" / organism,
         PROJECT_ROOT / "config" / f"config_{organism}.yaml",
     ]
+    if antibiotic:
+        # Step 04 writes config/config_{antibiotic}.yaml (flat, not organism-scoped).
+        targets.append(PROJECT_ROOT / "config" / f"config_{antibiotic}.yaml")
     for t in targets:
         if t.is_dir():
             shutil.rmtree(t, ignore_errors=True)
@@ -102,7 +105,7 @@ def test_pipeline_end_to_end(synthetic_dataset):
     config_backup = CONFIG.read_text()
     try:
         # --- stage synthetic inputs -------------------------------------------
-        _cleanup(organism)
+        _cleanup(organism, antibiotic)
         genomes_dst.mkdir(parents=True, exist_ok=True)
         for fna in synthetic_dataset["genomes_dir"].glob("*.fna"):
             shutil.copy2(fna, genomes_dst / fna.name)
@@ -167,4 +170,4 @@ def test_pipeline_end_to_end(synthetic_dataset):
 
     finally:
         CONFIG.write_text(config_backup)
-        _cleanup(organism)
+        _cleanup(organism, antibiotic)

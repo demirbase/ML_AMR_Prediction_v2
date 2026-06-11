@@ -85,7 +85,10 @@ def synthetic_dataset(tmp_path):
     """
     rng = random.Random(1234)
     organism = "testorg"
-    antibiotic = "gentamicin"
+    # Deliberately NOT a real antibiotic name: step 04 writes
+    # config/config_{antibiotic}.yaml, so using e.g. "gentamicin" would clobber
+    # the user's real config_gentamicin.yaml. "testdrug" cannot collide.
+    antibiotic = "testdrug"
     k_length = 13            # small k for tiny genomes (config-driven downstream)
     motif = "ACGTACGTACGTACGT"  # planted resistance signal (>= k_length)
 
@@ -96,7 +99,12 @@ def synthetic_dataset(tmp_path):
     ids, labels = [], []
     for i in range(n):
         gid = f"test.{i+1}"
-        resistant = 1 if i < n // 2 else 0
+        # Interleave classes (R,S,R,S,…) so that every contiguous chunk the
+        # pipeline builds is class-balanced. This keeps the test set from being
+        # single-class (roc_auc needs both classes) and exercises the realistic
+        # mixed-chunk path. The pure-chunk edge case is covered separately by the
+        # base_score fix in 05_model_training.py.
+        resistant = 1 if i % 2 == 0 else 0
         seq = _random_dna(rng, 4000)
         if resistant:
             # Insert the motif a few times so it clears any min_support filter.

@@ -251,6 +251,15 @@ def final_training_incremental(best_params, train_files, y_all):
     # the per-chunk Dynamic Instance Weighting applied below. Calling it every
     # iteration was redundant (the key is already gone after the first pop).
     params.pop('scale_pos_weight', None)
+
+    # Pin base_score to the neutral 0.5. XGBoost >= 2.0 auto-estimates base_score
+    # from the (instance-weighted) label mean of the DMatrix; with per-chunk
+    # incremental training, a pure or heavily-weighted chunk can drive that
+    # estimate to exactly 0.0 or 1.0, which raises
+    # "base_score must be in (0,1) for the logistic loss" and aborts training.
+    # Fixing it makes every chunk train regardless of its class balance.
+    params.setdefault('base_score', 0.5)
+
     model = None
     trees_built = 0
 
