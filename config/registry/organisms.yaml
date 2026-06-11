@@ -1,0 +1,39 @@
+# ============================================================================
+# ORGANISM REGISTRY — single source of truth for multi-organism scale-out
+# ============================================================================
+# Adding a new organism = add a block here (enabled: true) + drop its data in
+# the matching data/raw/{organism}/ and data/external/{organism}/ folders.
+# No Python code changes are required (see SCALE_MLOPS_PLAN.md §9).
+# Accessed via scripts/lib/registry.py.
+# ============================================================================
+schema_version: "1.0"
+
+organisms:
+  ecoli:
+    display_name: "Escherichia coli"
+    taxid: 562
+    metadata_file: "data/external/ecoli/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/ecoli/genomes"
+    source: "BV-BRC"
+    download_date: "2026-06-01"
+    filter_criteria: "N50>=20000; max_contigs<=500; species=Escherichia coli"
+    # ML target antibiotics for this organism (subset of antibiotics.yaml):
+    antibiotics: [ampicillin, cefotaxime, ciprofloxacin, gentamicin]
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  # FUTURE ORGANISM TEMPLATE — disabled until data is available.
+  # Copy this block, fill in the paths, set enabled: true.
+  # ---------------------------------------------------------------------------
+  kpneumoniae:
+    display_name: "Klebsiella pneumoniae"
+    taxid: 573
+    metadata_file: "data/external/kpneumoniae/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/kpneumoniae/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
+    enabled: false

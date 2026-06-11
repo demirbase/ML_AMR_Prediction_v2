@@ -16,9 +16,17 @@ project:
   name: "AMR_Genomic_Project"
   description: "Machine learning-based antimicrobial resistance prediction using k-mer features"
   target_antibiotic: "gentamicin"  # Primary antibiotic for analysis
-  organism: "Escherichia coli"  # Target organism
+  organism: "ecoli"  # Organism registry slug (see config/registry/organisms.yaml)
+  organism_display: "Escherichia coli"  # Human-readable name (display only)
   model: "xgboost"  # ML model
   version: "M4-pro"
+
+# ----------------------------------------------------------------------------
+# REGISTRY (single source of truth for organisms & antibiotic classes)
+# ----------------------------------------------------------------------------
+registry:
+  organisms_file:   "config/registry/organisms.yaml"
+  antibiotics_file: "config/registry/antibiotics.yaml"
 
 # ----------------------------------------------------------------------------
 # DIRECTORY PATHS (Relative to project root)
@@ -65,6 +73,43 @@ paths:
   # ── External tool paths (system-specific) ─────────────────────────────────
   kmc_bin:       "bin/bin/kmc"        # Relative to project root
   kmc_tools_bin: "bin/bin/kmc_tools"  # Relative to project root
+
+# ----------------------------------------------------------------------------
+# ORGANISM-AWARE PATH TEMPLATES (SCALE_MLOPS_PLAN.md §4) — ADDITIVE / FORWARD
+# ----------------------------------------------------------------------------
+# These {organism}-scoped templates are consumed ONLY by scripts/lib/config.py
+# (resolve_path) and scripts/migrate_to_organism_layout.py. The legacy `paths:`
+# keys above are intentionally left untouched so the current numbered scripts
+# keep working on the existing single-organism layout. Once you run the
+# migration script and cut a script over to resolve_path(), it reads from here.
+paths_organism:
+  # Global / shared (organism-independent)
+  blast_db_dir:     "data/external/blast_db/card_nt"
+
+  # Organism-scoped
+  genomes_dir:      "data/raw/{organism}/genomes"
+  metadata_file:    "data/external/{organism}/metadata/amr_phenotypes.csv"
+  kmc_outputs_dir:  "data/interim/{organism}/kmc_outputs"
+  global_exploration_dir: "results/{organism}/global_exploration"
+
+  # Organism + antibiotic-scoped
+  matrix_dir:           "data/processed/{organism}/{antibiotic}/matrix"
+  models_dir:           "models/{organism}/{antibiotic}"
+  logs_dir:             "logs/{organism}/{antibiotic}"
+  analysis_results_dir: "results/{organism}/{antibiotic}"
+  experiment_config:    "config/experiments/{organism}/config_{antibiotic}.yaml"
+
+  # MLOps run metadata (SCALE_MLOPS_PLAN.md §7)
+  run_dir:              "runs/{organism}/{antibiotic}/{run_id}"
+
+# ----------------------------------------------------------------------------
+# PROVENANCE (reproducibility / future Knowledge Base — SCALE_MLOPS_PLAN.md §4.1)
+# ----------------------------------------------------------------------------
+provenance:
+  card_version:     null      # e.g. "CARD v3.2.9" — fill in before BLAST for citeability
+  kb_schema_version: "v0.1.0"
+  # NCBI Entrez identity is configured under the `ncbi:` section below
+  # (entrez_email / api_key); it is the single source for Step 09.
 
 # ----------------------------------------------------------------------------
 # DATA PREPROCESSING PARAMETERS

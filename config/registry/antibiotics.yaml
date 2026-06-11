@@ -1,0 +1,114 @@
+# ============================================================================
+# ANTIBIOTIC REGISTRY — single source of truth for antibiotic → class mapping
+# ============================================================================
+# Replaces the ANTIBIOTIC_CLASSES dictionary previously copy-pasted in
+# 01_data_validation.py and 01b_data_validation.py (audit B09/B10).
+# Accessed via scripts/lib/registry.py.
+#
+# Adding/renaming an antibiotic class = editing this file only. No code change.
+# ============================================================================
+schema_version: "1.0"
+
+classes:
+  penicillins:
+    display_name: "Penicillins"
+    members:
+      - ampicillin
+      - amoxicillin
+      - "amoxicillin/clavulanic acid"
+      - "piperacillin/tazobactam"
+      - "ampicillin/sulbactam"
+      - penicillin
+      - carbenicillin
+      - piperacillin
+      - "ticarcillin/clavulanic acid"
+
+  cephalosporins:
+    display_name: "Cephalosporins"
+    members:
+      - ceftazidime
+      - cefotaxime
+      - cefuroxime
+      - ceftriaxone
+      - cefepime
+      - cefoxitin
+      - cephalothin
+      - cefazolin
+      - ceftiofur
+      - cefpodoxime
+      - cefotetan
+      - "ceftazidime/avibactam"
+      - ceftaroline
+      - cephalexin
+      - cefpodoxime_clavulanic_acid
+      - "ceftolozane/tazobactam"
+      - "cefotaxime/clavulanic acid"
+
+  beta_lactams_carbapenems_others:
+    display_name: "Beta-Lactams: Carbapenems & Others"
+    members:
+      - meropenem
+      - imipenem
+      - ertapenem
+      - doripenem
+      - aztreonam
+      - beta-lactam
+      - sulbactam
+
+  aminoglycosides:
+    display_name: "Aminoglycosides"
+    members:
+      - gentamicin
+      - amikacin
+      - tobramycin
+      - streptomycin
+      - kanamycin
+      - apramycin
+      - neomycin
+      - netilmicin
+
+  quinolones:
+    display_name: "Quinolones"
+    members:
+      - ciprofloxacin
+      - norfloxacin
+      - levofloxacin
+      - "nalidixic acid"
+      - moxifloxacin
+      - ofloxacin
+
+  folate_pathway_inhibitors:
+    display_name: "Folate Pathway Inhibitors"
+    members:
+      - "trimethoprim/sulfamethoxazole"
+      - trimethoprim
+      - sulfamethoxazole
+      - sulfisoxazole
+
+  tetracyclines:
+    display_name: "Tetracyclines"
+    members:
+      - tigecycline
+      - tetracycline
+      - doxycycline
+      - minocycline
+      - oxytetracycline
+
+  others:
+    display_name: "Others"
+    members:
+      - chloramphenicol
+      - nitrofurantoin
+      - azithromycin
+      - colistin
+      - fosfomycin
+      - erythromycin
+      - lincomycin
+      - rifampin
+      - clindamycin
+      - clarithromycin
+      - daptomycin
+      - linezolid
+      - polymyxin B
+      - teicoplanin
+      - vancomycin

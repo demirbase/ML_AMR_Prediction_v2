@@ -27,8 +27,10 @@ import pandas as pd
 import yaml
 from pathlib import Path
 
-# Shared antibiotic classification (single source of truth — see scripts/constants.py)
-from constants import ANTIBIOTIC_CLASSES
+# Shared antibiotic classification — single source of truth in
+# config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
+from lib.registry import load_antibiotic_classes
+ANTIBIOTIC_CLASSES = load_antibiotic_classes()
 
 # ============================================================================
 # CONFIGURATION: CROSS-PLATFORM COMPATIBLE PATHS

@@ -45,6 +45,8 @@ import shutil
 
 # Shared label-slicing helper (single source of truth) — see scripts/utils.py
 from utils import get_y_chunk
+# MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
+from lib import run_metadata as rm
 
 
 # ============================================================================
@@ -392,6 +394,14 @@ def final_test(model, test_files, y_all, optimal_threshold):
     print(cm)
     print("\n" + "=" * 80)
 
+    return {
+        'accuracy': float(acc),
+        'roc_auc': float(auc),
+        'mcc': float(final_mcc),
+        'threshold': float(optimal_threshold),
+        'n_test_samples': int(len(y_true_all)),
+    }
+
 
 # ============================================================================
 # MAIN PIPELINE
@@ -493,7 +503,7 @@ def main():
     
     # Evaluate without test set leakage
     print("\n[5/5] Evaluating model...")
-    final_test(final_model, test_files, y_all, optimal_threshold)
+    train_metrics = final_test(final_model, test_files, y_all, optimal_threshold)
     
     # Save model
     model_path = MODELS_DIR / f"xgboost_{TARGET_ANTIBIOTIC}_final_v2.json"
@@ -537,11 +547,39 @@ def main():
             yaml.dump(antibiotic_config, f, default_flow_style=False, sort_keys=False)
 
         print(f"✓ Unbiased Threshold saved to config: {antibiotic_config_path.name}")
-        
+
     except Exception as e:
         print(f"ERROR: Failed to save model or config: {e}")
         sys.exit(1)
-    
+
+    # ------------------------------------------------------------------------
+    # MLOps: write models/{organism}/{antibiotic}/manifest.json (model card).
+    # "Best model" selection can use these metrics instead of guessing from
+    # timestamps / fragile _final_v2 naming (SCALE_MLOPS_PLAN.md §7.2).
+    # Best-effort — never break a successful training run.
+    # ------------------------------------------------------------------------
+    try:
+        organism = config.get('project', {}).get('organism', 'unknown')
+        run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
+        manifest = {
+            "run_id": run_id,
+            "organism": organism,
+            "antibiotic": TARGET_ANTIBIOTIC,
+            "model_file": model_path.name,
+            "metrics": train_metrics,
+            "params": best_params,
+            "threshold": float(optimal_threshold),
+            "threshold_type": "Dynamic_Instance_Weighting (0.5)",
+            "data_split_hash": rm.hash_files([str(f) for f in train_files]),
+            "git_commit": rm.git_commit_hash(),
+            "git_dirty": rm.git_is_dirty(),
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        if rm.write_json(MODELS_DIR / "manifest.json", manifest):
+            print(f"✓ Model manifest written: {(MODELS_DIR / 'manifest.json')}")
+    except Exception as e:
+        print(f"⚠ Could not write model manifest: {e}")
+
     print("\n" + "=" * 80)
     print("TRAINING COMPLETE")
     print("=" * 80)

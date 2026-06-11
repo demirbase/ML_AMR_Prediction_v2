@@ -61,6 +61,9 @@ from sklearn.calibration import calibration_curve
 
 # Shared label-slicing helper (single source of truth) — see scripts/utils.py
 from utils import get_y_chunk
+# MLOps run provenance (SCALE_MLOPS_PLAN.md §7) — additive, best-effort.
+from lib import run_metadata as rm
+from lib.config import resolve_path
 
 
 # ============================================================================
@@ -830,6 +833,34 @@ def main():
         'PR_AUC': pr_auc_pt, 'PR_AUC_CI_low': pr_lo, 'PR_AUC_CI_high': pr_hi,
         'n_bootstraps': 1000
     }]).to_csv(OUTPUT_DIR / f'08_bootstrap_ci_{TARGET_ANTIBIOTIC}.csv', index=False)
+
+    # ------------------------------------------------------------------------
+    # MLOps: write metrics.json (run provenance). Best-effort — never break eval.
+    # ------------------------------------------------------------------------
+    try:
+        organism = config.get('project', {}).get('organism', 'unknown')
+        run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
+        metrics_payload = {
+            "run_id": run_id,
+            "organism": organism,
+            "antibiotic": TARGET_ANTIBIOTIC,
+            "git_commit": rm.git_commit_hash(),
+            "operating_threshold": float(best_thresh),
+            "metrics": {
+                "accuracy": float(acc),
+                "balanced_accuracy": float(balanced_acc),
+                "roc_auc": float(roc_auc), "roc_auc_ci": [roc_lo, roc_hi],
+                "pr_auc": float(pr_auc), "pr_auc_ci": [pr_lo, pr_hi],
+                "mcc": float(mcc), "cohen_kappa": float(kappa),
+            },
+        }
+        run_dir = resolve_path('run_dir', organism=organism,
+                               antibiotic=TARGET_ANTIBIOTIC, run_id=run_id, config=config)
+        rm.write_json(run_dir / "metrics.json", metrics_payload)
+        # also drop a copy next to the evaluation outputs for convenience
+        rm.write_json(OUTPUT_DIR / f"09_metrics_{TARGET_ANTIBIOTIC}.json", metrics_payload)
+    except Exception as e:
+        print(f"  ⚠ Could not write metrics.json: {e}")
     
     print("\nDetailed Classification Report:")
     print("-" * 80)

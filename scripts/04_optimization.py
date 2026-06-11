@@ -57,6 +57,9 @@ import shutil
 
 # Shared label-slicing helper (single source of truth) — see scripts/utils.py
 from utils import get_y_chunk
+# MLOps run provenance (SCALE_MLOPS_PLAN.md §7.1) — additive, best-effort.
+from lib import run_metadata as rm
+from lib.config import resolve_path
 
 
 # ============================================================================
@@ -799,6 +802,32 @@ def main():
             except Exception as e:
                 print(f"WARNING: Failed to save study object: {e}")
             
+            # ----------------------------------------------------------------
+            # MLOps: write run_metadata.json (git hash, versions, seed, params,
+            # data fingerprint). Best-effort — never break optimization.
+            # ----------------------------------------------------------------
+            try:
+                organism = config.get('project', {}).get('organism', 'unknown')
+                run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
+                run_dir = resolve_path('run_dir', organism=organism,
+                                       antibiotic=TARGET_ANTIBIOTIC, run_id=run_id, config=config)
+                meta = rm.build_run_metadata(
+                    organism=organism,
+                    antibiotic=TARGET_ANTIBIOTIC,
+                    run_id=run_id,
+                    seed=RANDOM_SEED,
+                    params=study.best_params,
+                    data_files=[str(f) for f in optuna_files],
+                    config=config,
+                    extra={"stage": "04_optimization",
+                           "best_score": float(study.best_value),
+                           "n_trials": len(study.trials)},
+                )
+                if rm.write_json(run_dir / "run_metadata.json", meta):
+                    print(f"  ✓ Run metadata written: runs/.../{run_id}/run_metadata.json")
+            except Exception as e:
+                print(f"  ⚠ Could not write run metadata: {e}")
+
             # Display next steps
             print("\n" + "=" * 80)
             print("NEXT STEPS")

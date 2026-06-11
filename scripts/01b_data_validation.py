@@ -45,8 +45,10 @@ plt.rcParams['font.family'] = 'sans-serif'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 
-# Shared antibiotic classification (single source of truth — see scripts/constants.py)
-from constants import ANTIBIOTIC_CLASSES
+# Shared antibiotic classification — single source of truth in
+# config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
+from lib.registry import load_antibiotic_classes
+ANTIBIOTIC_CLASSES = load_antibiotic_classes()
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
