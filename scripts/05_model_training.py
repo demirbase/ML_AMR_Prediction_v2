@@ -47,6 +47,7 @@ import shutil
 from utils import get_y_chunk
 # MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
 from lib import run_metadata as rm
+from lib.config import resolve_path
 
 
 # ============================================================================
@@ -81,10 +82,10 @@ BASE_PARAMS = {
     'verbosity': config['xgboost_params']['verbosity']
 }
 
-# Cross-platform paths - loaded from global config
-# Antibiotic-specific paths will be constructed using target_antibiotic
-MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+# Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Create output directory
 MODELS_DIR.mkdir(parents=True, exist_ok=True)

@@ -48,14 +48,17 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 # Shared antibiotic classification — single source of truth in
 # config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
 from lib.registry import load_antibiotic_classes
+from lib.config import resolve_path
 ANTIBIOTIC_CLASSES = load_antibiotic_classes()
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     TARGET_ANTIBIOTIC = config.get('project', {}).get('target_antibiotic', 'unknown')
-    MATRIX_FILE = PROJECT_ROOT / config['paths']['metadata_file']
-    OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_01_data_exploration'].format(antibiotic=TARGET_ANTIBIOTIC)
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    MATRIX_FILE = resolve_path('metadata_file', organism=ORGANISM, config=config)
+    OUTPUT_DIR = resolve_path('dir_01_data_exploration', organism=ORGANISM,
+                              antibiotic=TARGET_ANTIBIOTIC, config=config)
 except Exception as e:
     print(f"ERROR loading config: {e}")
     sys.exit(1)

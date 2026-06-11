@@ -30,6 +30,7 @@ from pathlib import Path
 # Shared antibiotic classification — single source of truth in
 # config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
 from lib.registry import load_antibiotic_classes
+from lib.config import resolve_path
 ANTIBIOTIC_CLASSES = load_antibiotic_classes()
 
 # ============================================================================
@@ -47,9 +48,12 @@ except Exception:
     config = None
 
 if config:
-    MATRIX_FILE = PROJECT_ROOT / config['paths']['metadata_file']
-    GENOMES_DIR = PROJECT_ROOT / config['paths']['raw_genomes_dir']
-    REPORT_PATH = PROJECT_ROOT / config['paths']['dir_global_exploration'] / "validation_report.txt"
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2). Reads the
+    # {organism} templates from config 'paths_organism:' (falls back to 'paths:').
+    MATRIX_FILE = resolve_path('metadata_file', organism=ORGANISM, config=config)
+    GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
+    REPORT_PATH = resolve_path('dir_global_exploration', organism=ORGANISM, config=config) / "validation_report.txt"
 else:
     BASE_DIR = PROJECT_ROOT / "data"
     MATRIX_FILE = BASE_DIR / "metadata" / "genome_amr_matrix.csv"

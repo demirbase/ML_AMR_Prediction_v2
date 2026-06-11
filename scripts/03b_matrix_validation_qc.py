@@ -49,14 +49,16 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+    from lib.config import resolve_path
     TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 
-    MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+    MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
     # Derive output directory from the centralised config key (02_matrix_qc)
-    OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_02_matrix_qc'].format(
-        antibiotic=TARGET_ANTIBIOTIC
-    )
+    OUTPUT_DIR = resolve_path('dir_02_matrix_qc', organism=ORGANISM,
+                              antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 except Exception as e:
     print(f"ERROR loading config: {e}")

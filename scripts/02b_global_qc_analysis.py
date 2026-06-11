@@ -47,19 +47,23 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+    from lib.config import resolve_path
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+
     K_LENGTH = config['preprocessing']['k_length']
     KMC_MEMORY_GB = config['preprocessing']['kmc_mem']
     THREADS = config['preprocessing']['threads']
-    
+
     BASE_DIR = PROJECT_ROOT / "data"
-    KMC_OUTPUTS_DIR = PROJECT_ROOT / config['paths']['kmc_outputs_dir']
-    RAW_GENOMES_DIR = PROJECT_ROOT / config['paths']['raw_genomes_dir']
-    OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_global_exploration']
+    KMC_OUTPUTS_DIR = resolve_path('kmc_outputs_dir', organism=ORGANISM, config=config)
+    RAW_GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
+    OUTPUT_DIR = resolve_path('dir_global_exploration', organism=ORGANISM, config=config)
     TEMP_DIR = KMC_OUTPUTS_DIR / "tmp"
-    
-    # KMC tools path
-    KMC_TOOLS_BIN = PROJECT_ROOT / config['paths']['kmc_tools_bin']
-    KMC_BIN = PROJECT_ROOT / config['paths']['kmc_bin']
+
+    # KMC tools path (global)
+    KMC_TOOLS_BIN = resolve_path('kmc_tools_bin', organism=ORGANISM, config=config)
+    KMC_BIN = resolve_path('kmc_bin', organism=ORGANISM, config=config)
 except Exception as e:
     print(f"ERROR loading config: {e}")
     sys.exit(1)

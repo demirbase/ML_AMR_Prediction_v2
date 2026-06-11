@@ -50,17 +50,18 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 
 # Extract configuration values
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 TOP_N = config['analysis']['top_n_features']
 
 # Model filename to analyze
 MODEL_FILE = f"xgboost_{TARGET_ANTIBIOTIC}_final_v2.json"
 
-# Antibiotic-specific paths — derived from centralised config keys
-MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_05_explainability'].format(
-    antibiotic=TARGET_ANTIBIOTIC
-)
+# Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
+from lib.config import resolve_path
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+OUTPUT_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
+                          antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Create output directory
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

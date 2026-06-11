@@ -236,15 +236,12 @@ def main():
     configure_entrez(config)
 
     # ------------------------------------------------------------------
-    # Resolve paths from config
+    # Resolve paths (organism-aware — SCALE_MLOPS_PLAN §4.2)
     # ------------------------------------------------------------------
-    explain_dir_template = config['paths']['dir_05_explainability']
-    if "{antibiotic}" in explain_dir_template:
-        explain_dir_path = explain_dir_template.format(antibiotic=antibiotic)
-    else:
-        explain_dir_path = explain_dir_template
-
-    explain_dir = PROJECT_ROOT / explain_dir_path
+    from lib.config import resolve_path
+    organism = config.get('project', {}).get('organism', 'ecoli')
+    explain_dir = resolve_path('dir_05_explainability', organism=organism,
+                               antibiotic=antibiotic, config=config)
     if not explain_dir.exists():
         print(f"Error: Directory {explain_dir} does not exist.")
         sys.exit(1)

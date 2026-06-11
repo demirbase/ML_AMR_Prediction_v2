@@ -108,12 +108,13 @@ BASE_PARAMS = {
     'max_bin': 2  # CRITICAL RAM FIX: 0/1 binary data does not need 256 bins!
 }
 
-# Cross-platform paths using config
-MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+# Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
-# Output directories (antibiotic-specific)
-MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-LOGS_DIR = PROJECT_ROOT / config['paths']['logs_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+# Output directories (organism + antibiotic-specific)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+LOGS_DIR = resolve_path('logs_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Create output directories
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -570,9 +571,8 @@ def generate_optuna_plots(study, target_antibiotic):
     print("\nGenerating Optuna visualization plots...")
     
     # Derive output directory from centralised config (03_model_optimization)
-    output_dir = PROJECT_ROOT / config['paths']['dir_03_model_optimization'].format(
-        antibiotic=target_antibiotic
-    )
+    output_dir = resolve_path('dir_03_model_optimization', organism=ORGANISM,
+                              antibiotic=target_antibiotic, config=config)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     try:

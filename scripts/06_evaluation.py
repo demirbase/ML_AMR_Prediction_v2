@@ -84,16 +84,16 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 
 # Extract configuration values
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 CHUNK_SIZE = config['preprocessing']['chunk_size']
 N_JOBS = config['xgboost_params'].get('n_jobs', -1)
 
-# Cross-platform paths (antibiotic-specific) - loaded from global config
-MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+# Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 # Output directory — derived from the centralised config (04_evaluation subdir)
-OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_04_evaluation'].format(
-    antibiotic=TARGET_ANTIBIOTIC
-)
+OUTPUT_DIR = resolve_path('dir_04_evaluation', organism=ORGANISM,
+                          antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Create output directory
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

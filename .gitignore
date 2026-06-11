@@ -35,8 +35,10 @@ technical_review_report.md
 # FEATURE MATRICES & LABELS
 # ============================================================================
 *.npz
-# Large k-mer feature matrix files (exceed GitHub's 100MB limit)
-data/processed/*/matrix/features.txt
+# Large k-mer feature matrix files (exceed GitHub's 100MB limit).
+# Matches both the legacy layout (data/processed/{ab}/matrix/) and the new
+# organism layout (data/processed/{organism}/{ab}/matrix/).
+**/matrix/features.txt
 
 # Legacy / antibiotic-specific data directories (pre-Cookiecutter layout).
 # These hold generated per-antibiotic artefacts and must never be committed.

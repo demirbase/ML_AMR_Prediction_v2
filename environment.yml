@@ -1,0 +1,53 @@
+# ============================================================================
+# Conda environment for the AMR Prediction pipeline (SCALE_MLOPS_PLAN.md §7.5)
+# ============================================================================
+# Create / update with:
+#     conda env create -f environment.yml
+#     conda env update -f environment.yml --prune
+#
+# This file captures BOTH the Python stack and the external bioinformatics
+# tools (KMC, BLAST+, Nextflow) that pip cannot install, so the whole pipeline
+# is reproducible from a single command.
+#
+# For an EXACT lock from your working machine, run:
+#     conda env export --no-builds > environment.lock.yml
+#     pip freeze > requirements.lock.txt
+# and commit those lock files alongside this one.
+# ============================================================================
+name: amr-prediction
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # ── Python ────────────────────────────────────────────────────────────────
+  - python>=3.10,<3.13
+
+  # ── Core data science ─────────────────────────────────────────────────────
+  - pandas>=1.3
+  - numpy>=1.21
+  - scipy>=1.7
+
+  # ── Machine learning ──────────────────────────────────────────────────────
+  - scikit-learn>=1.0
+  - xgboost>=1.5
+  - optuna>=2.10
+  - joblib>=1.0
+
+  # ── Visualisation ─────────────────────────────────────────────────────────
+  - matplotlib>=3.4
+  - seaborn>=0.11
+
+  # ── Bioinformatics (Python) ───────────────────────────────────────────────
+  - biopython>=1.79
+
+  # ── Utilities ─────────────────────────────────────────────────────────────
+  - pyyaml>=5.4
+  - tqdm>=4.62
+
+  # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
+  - kmc>=3.2
+  - blast>=2.12
+  - nextflow>=22.10
+
+  # ── Dev / tests ───────────────────────────────────────────────────────────
+  - pytest>=7.0

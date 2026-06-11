@@ -79,10 +79,20 @@ def test_resolve_path_run_id():
     assert p.name == "RID123"
 
 
-def test_resolve_path_legacy_fallback():
-    # legacy single-organism key still resolves via the `paths:` block
-    p = resolve_path("raw_genomes_dir")
-    assert p.name == "raw_genomes"
+def test_resolve_path_global_key_no_placeholder():
+    # A global key with no placeholder (kmc_bin) resolves directly, with or
+    # without organism/antibiotic supplied.
+    p = resolve_path("kmc_bin")
+    assert p.name == "kmc"
+
+
+def test_resolve_path_unknown_key():
+    raised = False
+    try:
+        resolve_path("definitely_not_a_real_key")
+    except KeyError:
+        raised = True
+    assert raised, "resolve_path should raise KeyError for an unknown key"
 
 
 def test_get_target_defaults_from_config():

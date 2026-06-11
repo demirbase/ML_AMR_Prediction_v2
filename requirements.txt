@@ -24,6 +24,14 @@ joblib>=1.0.0               # Model and study object serialization
 tqdm>=4.62.0                # Progress bars
 pyyaml>=5.4.0               # YAML configuration file parsing
 
+# Testing
+# ----------------------------------------------------------------------------
+pytest>=7.0.0               # Unit tests (tests/)
+
+# NOTE: This file lists minimum versions. For a fully reproducible environment
+# (incl. external tools KMC/BLAST/Nextflow) use environment.yml. For an EXACT
+# lock from your machine: `pip freeze > requirements.lock.txt`.
+
 # Advanced Analysis
 # ----------------------------------------------------------------------------
 matplotlib>=3.4.0         # Plotting (for visualizations)

@@ -69,7 +69,11 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 
 # Extract project-level identifiers
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+ORGANISM          = config.get('project', {}).get('organism', 'ecoli')
 TOP_N             = config['analysis']['top_n_features']
+
+# Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+from lib.config import resolve_path
 
 # Resolve BLAST parameters from config
 blast_cfg   = config.get('blast', {})
@@ -79,10 +83,9 @@ EVALUE      = blast_cfg.get('evalue',    10)
 WORD_SIZE   = blast_cfg.get('word_size', 11)
 THREADS     = blast_cfg.get('threads',   8)
 
-# Resolve I/O paths using the centralised config keys
-EXPLAINABILITY_DIR = PROJECT_ROOT / config['paths']['dir_05_explainability'].format(
-    antibiotic=TARGET_ANTIBIOTIC
-)
+# Resolve I/O paths (organism-aware)
+EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
+                                  antibiotic=TARGET_ANTIBIOTIC, config=config)
 # Filename must track top_n_features from config — 07 writes 02_top_{TOP_N}_features.
 # Hardcoding 50 silently broke this step whenever top_n_features != 50.
 FASTA_INPUT = EXPLAINABILITY_DIR / f"02_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.fasta"

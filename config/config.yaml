@@ -83,20 +83,28 @@ paths:
 # keep working on the existing single-organism layout. Once you run the
 # migration script and cut a script over to resolve_path(), it reads from here.
 paths_organism:
-  # Global / shared (organism-independent)
-  blast_db_dir:     "data/external/blast_db/card_nt"
+  # ── Global / shared (organism-independent — NOT moved by the migration) ────
+  data_dir:               "data"
+  blast_db_dir:           "data/external/blast_db/card_nt"
+  dir_global_exploration: "results/global_exploration"
+  kmc_bin:                "bin/bin/kmc"
+  kmc_tools_bin:          "bin/bin/kmc_tools"
 
-  # Organism-scoped
-  genomes_dir:      "data/raw/{organism}/genomes"
+  # ── Organism-scoped ────────────────────────────────────────────────────────
+  raw_genomes_dir:  "data/raw/{organism}/genomes"
   metadata_file:    "data/external/{organism}/metadata/amr_phenotypes.csv"
   kmc_outputs_dir:  "data/interim/{organism}/kmc_outputs"
-  global_exploration_dir: "results/{organism}/global_exploration"
 
-  # Organism + antibiotic-scoped
+  # ── Organism + antibiotic-scoped ───────────────────────────────────────────
   matrix_dir:           "data/processed/{organism}/{antibiotic}/matrix"
   models_dir:           "models/{organism}/{antibiotic}"
   logs_dir:             "logs/{organism}/{antibiotic}"
   analysis_results_dir: "results/{organism}/{antibiotic}"
+  dir_01_data_exploration:   "results/{organism}/{antibiotic}/01_data_exploration"
+  dir_02_matrix_qc:          "results/{organism}/{antibiotic}/02_matrix_qc"
+  dir_03_model_optimization: "results/{organism}/{antibiotic}/03_model_optimization"
+  dir_04_evaluation:         "results/{organism}/{antibiotic}/04_evaluation"
+  dir_05_explainability:     "results/{organism}/{antibiotic}/05_explainability"
   experiment_config:    "config/experiments/{organism}/config_{antibiotic}.yaml"
 
   # MLOps run metadata (SCALE_MLOPS_PLAN.md §7)

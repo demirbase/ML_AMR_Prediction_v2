@@ -57,6 +57,10 @@ if not CONFIG_PATH.exists():
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
+# Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+from lib.config import resolve_path
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+
 # Extract configuration values
 K_LENGTH = config['preprocessing']['k_length']
 MEMORY_GB = config['preprocessing']['kmc_mem']
@@ -71,11 +75,11 @@ MIN_COUNT = config['preprocessing'].get('min_count', 1)
 # ============================================================================
 # CROSS-PLATFORM COMPATIBLE PATHS (ANTIBIOTIC-SPECIFIC)
 # ============================================================================
-RAW_GENOMES_DIR = PROJECT_ROOT / config['paths']['raw_genomes_dir']
-AMR_MATRIX_PATH = PROJECT_ROOT / config['paths']['metadata_file']
+RAW_GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
+AMR_MATRIX_PATH = resolve_path('metadata_file', organism=ORGANISM, config=config)
 
-# Global output directories
-KMC_OUTPUTS_DIR = PROJECT_ROOT / config['paths']['kmc_outputs_dir']
+# Organism-scoped KMC output directory
+KMC_OUTPUTS_DIR = resolve_path('kmc_outputs_dir', organism=ORGANISM, config=config)
 TEMP_DIR = KMC_OUTPUTS_DIR / "tmp"
 
 # KMC binary location
