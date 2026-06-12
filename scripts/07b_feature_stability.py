@@ -275,8 +275,13 @@ def main():
             'mean_gain': float(np.mean(gain_accum.get(idx, [0.0]))),
             'stable': (c / n_seeds) >= 0.6,
         })
-    stab = pd.DataFrame(stab_rows).sort_values(
-        ['selection_frequency', 'mean_gain'], ascending=False)
+    # Fix the columns explicitly so an empty stab_rows (degenerate models with
+    # no splits -> no selected features) still yields a valid, header-only CSV
+    # instead of crashing on sort_values of a column-less frame.
+    stab = pd.DataFrame(stab_rows, columns=['feature_index', 'kmer',
+                                            'selection_frequency', 'mean_gain', 'stable'])
+    if not stab.empty:
+        stab = stab.sort_values(['selection_frequency', 'mean_gain'], ascending=False)
     stab_path = EXPLAIN_DIR / f"06_feature_stability_{TARGET_ANTIBIOTIC}.csv"
     stab.to_csv(stab_path, index=False)
 
