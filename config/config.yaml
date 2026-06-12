@@ -86,9 +86,12 @@ paths_organism:
   # ── Global / shared (organism-independent — NOT moved by the migration) ────
   data_dir:               "data"
   blast_db_dir:           "data/external/blast_db/card_nt"
-  dir_global_exploration: "results/global_exploration"
   kmc_bin:                "bin/bin/kmc"
   kmc_tools_bin:          "bin/bin/kmc_tools"
+
+  # Global QC / validation outputs are now ORGANISM-SCOPED so two organisms do
+  # not overwrite each other's validation_report.txt / global_qc_outliers.csv.
+  dir_global_exploration: "results/{organism}/global_exploration"
 
   # ── Organism-scoped ────────────────────────────────────────────────────────
   raw_genomes_dir:  "data/raw/{organism}/genomes"

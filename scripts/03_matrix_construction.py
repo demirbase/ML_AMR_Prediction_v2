@@ -169,7 +169,7 @@ def create_feature_matrix():
         print(f"  ✓ Genomes with {TARGET_ANTIBIOTIC} labels: {len(metadata_filtered)}")
         
         # --- LOAD QC OUTLIERS ---
-        outlier_file = PROJECT_ROOT / config['paths']['dir_global_exploration'] / "global_qc_outliers.csv"
+        outlier_file = resolve_path('dir_global_exploration', organism=ORGANISM, config=config) / "global_qc_outliers.csv"
         outlier_ids = set()
         if outlier_file.exists():
             outliers_df = pd.read_csv(outlier_file)

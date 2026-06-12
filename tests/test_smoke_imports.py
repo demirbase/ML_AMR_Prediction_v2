@@ -13,6 +13,7 @@ same suite runs fully in your real environment.
 import pytest
 
 PIPELINE_SCRIPTS = [
+    "00_prepare_metadata.py",
     "01_data_validation.py",
     "01b_data_validation.py",
     "02_kmer_extraction.py",
@@ -23,6 +24,7 @@ PIPELINE_SCRIPTS = [
     "05_model_training.py",
     "06_evaluation.py",
     "07_explainability.py",
+    "07b_feature_stability.py",
     "08_blast_annotation.py",
     "09_biological_summary.py",
     "migrate_to_organism_layout.py",
