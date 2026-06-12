@@ -89,6 +89,46 @@ def antibiotic_to_class(ab_id):
     return _ab_to_class_index().get(str(ab_id).lower())
 
 
+@lru_cache(maxsize=1)
+def _alias_index():
+    """
+    Build {lowercased name -> canonical antibiotic name}.
+
+    Includes every class member mapped to itself, plus every alias from the
+    `aliases:` section mapped to its canonical. Used by normalize_antibiotic()
+    to fold raw-source spelling variants / typos onto one canonical name.
+    """
+    doc = _antibiotics_doc()
+    idx = {}
+    # canonical members map to themselves
+    for block in doc.get("classes", {}).values():
+        for m in block.get("members", []):
+            idx[str(m).strip().lower()] = m
+    # explicit aliases (override / extend)
+    for canonical, aliases in (doc.get("aliases", {}) or {}).items():
+        idx[str(canonical).strip().lower()] = canonical
+        for a in (aliases or []):
+            idx[str(a).strip().lower()] = canonical
+    return idx
+
+
+def normalize_antibiotic(name):
+    """
+    Normalise a raw antibiotic name to its canonical registry spelling.
+
+    Case-insensitive; trims surrounding whitespace. A name that matches a known
+    member or alias returns the canonical spelling; an unknown name is returned
+    trimmed but otherwise unchanged (so new drugs are never silently dropped).
+    Returns None for a None/blank input.
+    """
+    if name is None:
+        return None
+    key = str(name).strip()
+    if not key:
+        return None
+    return _alias_index().get(key.lower(), key)
+
+
 def list_targets(enabled_only=True):
     """
     Return [(organism_id, antibiotic_id), ...] across the registry.

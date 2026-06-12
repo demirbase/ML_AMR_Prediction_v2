@@ -13,6 +13,7 @@ same suite runs fully in your real environment.
 import pytest
 
 PIPELINE_SCRIPTS = [
+    "00a_download_bvbrc.py",
     "00_prepare_metadata.py",
     "01_data_validation.py",
     "01b_data_validation.py",

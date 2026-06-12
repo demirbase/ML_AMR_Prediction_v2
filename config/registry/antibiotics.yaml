@@ -43,6 +43,8 @@ classes:
       - cefpodoxime_clavulanic_acid
       - "ceftolozane/tazobactam"
       - "cefotaxime/clavulanic acid"
+      - cefpirome
+      - "cefepime/taniborbactam"
 
   beta_lactams_carbapenems_others:
     display_name: "Beta-Lactams: Carbapenems & Others"
@@ -54,6 +56,7 @@ classes:
       - aztreonam
       - beta-lactam
       - sulbactam
+      - "meropenem/vaborbactam"
 
   aminoglycosides:
     display_name: "Aminoglycosides"
@@ -112,3 +115,39 @@ classes:
       - polymyxin B
       - teicoplanin
       - vancomycin
+
+# ============================================================================
+# ANTIBIOTIC NAME ALIASES (raw-source spelling variants / typos -> canonical)
+# ============================================================================
+# Single source for name normalisation, used by lib.registry.normalize_antibiotic()
+# when cleaning raw AMR downloads (step 00). The canonical (key) MUST also appear
+# as a `members` entry above so class grouping stays consistent. Raw names not
+# listed here pass through unchanged (case-insensitively matched to a member).
+#
+# NOTE: co-trimoxazole == trimethoprim/sulfamethoxazole (same drug) — merged into
+# one canonical to avoid an ambiguous alias mapping.
+aliases:
+  "amoxicillin/clavulanic acid": ["amoxicillin-clavulanic acid", "amoxicillin_clavulanic_acid", "amoxicillin_clavulanat"]
+  "ampicillin/sulbactam": ["ampicillin_sulbactam", "amipicillin_sulbactam"]
+  cephalothin: ["cefalotin", "cefalothin"]
+  cefpirome: ["cefpirom"]
+  ceftaroline: ["ceftarolin"]
+  "ceftazidime/avibactam": ["ceftazidime-avibactam", "ceftazidime_avibactam"]
+  "ceftolozane/tazobactam": ["ceftolozane-tazobactam"]
+  fosfomycin: ["phosphomycin"]
+  gentamicin: ["geamycin"]
+  "piperacillin/tazobactam": ["piperacillin-tazobactam", "tazobactam_piperacillin"]
+  "polymyxin B": ["polymyxin b", "polymyxin_b"]
+  rifampin: ["rifampicin"]
+  tetracycline: ["tetracyklin"]
+  tigecycline: ["tigecyklin"]
+  trimethoprim: ["trimotheprim"]
+  "trimethoprim/sulfamethoxazole":
+    - "co-trimoxazole"
+    - "co_trimoxazole"
+    - "trimethoprim-sulfamethoxazole"
+    - "trimethoprim_sulfamethoxazole"
+    - "sulfamethoxazole/trimethoprim"
+  "ticarcillin/clavulanic acid": ["ticarcillin_clavulanate"]
+  "meropenem/vaborbactam": ["meropenem-vaborbactam"]
+  "cefepime/taniborbactam": ["cefepime_taniborbactam"]
