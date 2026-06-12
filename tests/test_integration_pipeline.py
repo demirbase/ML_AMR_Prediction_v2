@@ -167,6 +167,11 @@ def test_pipeline_end_to_end(synthetic_dataset):
         top_n = cfg["analysis"]["top_n_features"]
         assert (explain_dir / f"01_top_{top_n}_features_{antibiotic}.csv").exists(), "07 produced no top-features CSV"
 
+        # --- 07b: 5-seed repeated holdout (AUC mean/std, stability, Jaccard) --
+        _run_step("07b_feature_stability.py")
+        assert (eval_dir / f"10_repeated_holdout_summary_{antibiotic}.csv").exists(), "07b produced no holdout summary"
+        assert (explain_dir / f"06_feature_stability_{antibiotic}.csv").exists(), "07b produced no stability CSV"
+
     finally:
         CONFIG.write_text(config_backup)
         _cleanup(organism, antibiotic)

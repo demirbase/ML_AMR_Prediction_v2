@@ -1,64 +1,300 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Step 07b — Feature stability via 5-seed repeated holdout.
+Step 07b — Feature stability via 5-seed repeated holdout (out-of-core).
 
-PURPOSE (to be implemented):
-    Quantify how reproducible the top k-mer features are across resampling, and
-    provide an out-of-core-friendly reliability estimate for the reported
-    ROC-AUC. This is the methodological backbone of the Knowledge Base claim
-    (ROADMAP §1.5 / §4; presentation slides "Stability").
+Quantifies how reproducible the top k-mer features are across resampling and
+gives a variance estimate for ROC-AUC (ROADMAP §1.5 / §4; presentation slides).
 
-DESIGN (agreed — content to be written later):
-    SEEDS = [42, 123, 777, 1024, 2025]                      # ROADMAP §4 / sunum.js
+DESIGN (agreed):
+    SEEDS = [42, 123, 777, 1024, 2025]
     For each seed:
-        - stratified 80/20 split at the GENOME (sample) level (StratifiedShuffleSplit)
-        - train XGBoost with the FIXED hyperparameters from
-          config/experiments/{organism}/config_{antibiotic}.yaml
-          (HPO is done ONCE in step 04 and held fixed across seeds — it is NOT
-           re-tuned per seed and never sees the seed's test split: this keeps the
-           repeated-holdout estimate honest / leakage-free)
-        - evaluate ROC-AUC on that seed's held-out 20%
-        - extract the top-N (config: analysis.top_n_features) Gain k-mers
-
-    Aggregate and report:
+        - stratified 80/20 split at the GENOME (sample) level
+        - train XGBoost with the FIXED hyperparameters from step 04
+          (config/experiments/{organism}/config_{antibiotic}.yaml) — HPO is done
+          ONCE and held fixed across seeds; it never sees a seed's test split.
+        - evaluate ROC-AUC on the held-out 20%
+        - extract the top-N (analysis.top_n_features) Gain k-mers
+    Aggregate:
         - ROC-AUC mean ± std across the 5 seeds
-        - per-k-mer selection_frequency = (#seeds in top-N) / len(SEEDS);
-          "stable" k-mers = selection_frequency >= 0.6  (H1 acceptance criterion)
+        - per-k-mer selection_frequency = (#seeds in top-N) / len(SEEDS)
+          ("stable" >= 0.6) and mean Gain
         - mean pairwise Jaccard similarity of the 5 top-N k-mer sets
 
-    Outputs (organism/antibiotic + seed scoped):
-        models/{organism}/{antibiotic}/seed{S}/xgboost_{antibiotic}_seed{S}.json
-        results/{organism}/{antibiotic}/04_evaluation/
-            10_repeated_holdout_summary_{antibiotic}.csv   # per-seed AUC + mean/std + mean Jaccard
-        results/{organism}/{antibiotic}/05_explainability/
-            06_feature_stability_{antibiotic}.csv          # k-mer, selection_frequency, mean_gain
+MEMORY MODEL: option B — fully out-of-core. Only ONE chunk is held in RAM at a
+time; the global feature matrix is never materialised. A sample-level boolean
+mask selects the train/test rows that fall inside each chunk's offset range, and
+training reuses the proven 05-style incremental 1-tree-per-chunk-slice regime.
 
-OPEN IMPLEMENTATION DECISION (to confirm before writing content):
-    Memory model for the sample-level split. The current matrix is chunked
-    (.npz parts) and the existing split (step 04) is at the chunk level. A fresh
-    80/20 split at the sample level requires either:
-      (A) vstack all chunks once into RAM, then slice rows per seed
-          (simplest; same approach 04/06 already use on subsets; fine at the
-           E. coli scale of ~5k genomes), or
-      (B) keep it out-of-core by mapping global sample indices back to chunk
-          offsets and streaming (lower peak RAM, more code).
-    Default recommendation: (A).
-
-NOTE: This is a SKELETON. Implementation pending confirmation of the memory
-model above.
+Outputs:
+    models/{organism}/{antibiotic}/seed{S}/xgboost_{antibiotic}_seed{S}.json
+    results/{organism}/{antibiotic}/04_evaluation/10_repeated_holdout_summary_{antibiotic}.csv
+    results/{organism}/{antibiotic}/05_explainability/06_feature_stability_{antibiotic}.csv
 """
 
+import gc
+import random
 import sys
+from collections import Counter
+from itertools import combinations
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+import yaml
+from scipy.sparse import load_npz
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedShuffleSplit
+
+from lib.config import load_config, resolve_path
+
+SEEDS = [42, 123, 777, 1024, 2025]
+TEST_SIZE = 0.20
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+config = load_config()
+TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+TOP_N = config['analysis']['top_n_features']
+
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+EVAL_DIR = resolve_path('dir_04_evaluation', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+EXPLAIN_DIR = resolve_path('dir_05_explainability', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 
-def main() -> None:
-    """TODO: implement 5-seed repeated holdout + stability + Jaccard."""
-    print("07b_feature_stability.py is a placeholder — implementation pending.")
-    print("Design: 5-seed repeated holdout (SEEDS=[42,123,777,1024,2025]),")
-    print("ROC-AUC mean±std, selection_frequency>=0.6, mean pairwise Jaccard.")
-    sys.exit(0)
+def load_fixed_params():
+    """Load the fixed hyperparameters tuned once in step 04 (no per-seed retune)."""
+    cfg_path = resolve_path('experiment_config', organism=ORGANISM,
+                            antibiotic=TARGET_ANTIBIOTIC, config=config)
+    if not cfg_path.exists():
+        print(f"ERROR: tuned config not found: {cfg_path}\n  Run 04_optimization.py first.")
+        sys.exit(1)
+    with open(cfg_path, 'r', encoding='utf-8') as f:
+        ab_cfg = yaml.safe_load(f)
+
+    base = {
+        'objective': config['xgboost_params']['objective'],
+        'eval_metric': config['xgboost_params'].get('eval_metric', 'auc'),
+        'tree_method': config['xgboost_params']['tree_method'],
+        'device': config['xgboost_params']['device'],
+        'verbosity': 0,
+        'max_bin': 2,
+    }
+    base.update(ab_cfg.get('xgboost_params', {}))
+    best = dict(ab_cfg.get('best_params', {}))
+    total_trees = max(1, int(best.pop('n_estimators', 100)))
+    base.update(best)
+    base.pop('scale_pos_weight', None)
+    base.setdefault('base_score', 0.5)   # avoid pure-chunk base_score error (see 05)
+    return base, total_trees
+
+
+def chunk_offsets(chunk_files):
+    """Return [(file, start, end), ...] reading ONLY each chunk's shape (no densify)."""
+    offsets, cur = [], 0
+    for f in chunk_files:
+        with np.load(f) as d:               # CSR npz stores 'shape' without loading data
+            rows = int(d['shape'][0])
+        offsets.append((f, cur, cur + rows))
+        cur += rows
+    return offsets, cur
+
+
+def train_one_seed(params, total_trees, offsets, y_all, train_mask, n_jobs):
+    """05-style incremental training over the train-rows of each chunk (out-of-core)."""
+    n_chunks = len(offsets)
+    epochs = max(1, int(np.ceil(total_trees / n_chunks)))
+    model, trees_built = None, 0
+    rng = random.Random(12345)
+    for epoch in range(epochs):
+        if trees_built >= total_trees:
+            break
+        order = offsets.copy()
+        rng.shuffle(order)
+        for f, start, end in order:
+            if trees_built >= total_trees:
+                break
+            local = train_mask[start:end]
+            if not local.any():
+                continue
+            X = load_npz(f)[local]
+            y = y_all[start:end][local]
+            pos, neg = int(np.sum(y)), int(len(y) - np.sum(y))
+            if pos > 0 and neg > 0:
+                w = np.where(y == 1, neg / pos, 1.0)
+            else:
+                w = np.ones(len(y))
+            dtrain = xgb.DMatrix(X, label=y, weight=w, nthread=n_jobs)
+            model = xgb.train(params, dtrain, num_boost_round=1, xgb_model=model)
+            trees_built += 1
+            del X, y, w, dtrain
+            gc.collect()
+    return model
+
+
+def eval_one_seed(model, offsets, y_all, test_mask, n_jobs):
+    """Stream the test-rows of each chunk and return ROC-AUC."""
+    y_true, y_prob = [], []
+    for f, start, end in offsets:
+        local = test_mask[start:end]
+        if not local.any():
+            continue
+        X = load_npz(f)[local]
+        y_prob.extend(model.predict(xgb.DMatrix(X, nthread=n_jobs)))
+        y_true.extend(y_all[start:end][local])
+        del X
+        gc.collect()
+    y_true, y_prob = np.array(y_true), np.array(y_prob)
+    if len(np.unique(y_true)) < 2:
+        return np.nan, y_true, y_prob
+    return roc_auc_score(y_true, y_prob), y_true, y_prob
+
+
+def top_feature_indices(model):
+    """Return (set of top-N feature indices, {index: gain}) from the model."""
+    imp = model.get_score(importance_type='gain')
+    if not imp:
+        return set(), {}
+    top = sorted(imp.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
+    idx_gain = {int(name[1:]): float(g) for name, g in top}
+    return set(idx_gain), idx_gain
+
+
+def map_indices_to_kmers(indices):
+    """Map feature indices -> k-mer sequences via features.txt (single pass)."""
+    features_file = MATRIX_DIR / "features.txt"
+    mapping = {}
+    if not indices or not features_file.exists():
+        return mapping
+    needed = set(indices)
+    with open(features_file, 'r', encoding='utf-8') as f:
+        for line_idx, line in enumerate(f):
+            if line_idx in needed:
+                mapping[line_idx] = line.split()[0]
+                if len(mapping) == len(needed):
+                    break
+    return mapping
+
+
+def mean_pairwise_jaccard(sets):
+    """Mean Jaccard over all pairs; empty union -> 0.0 for that pair."""
+    vals = []
+    for a, b in combinations(sets, 2):
+        union = a | b
+        vals.append(len(a & b) / len(union) if union else 0.0)
+    return float(np.mean(vals)) if vals else float('nan')
+
+
+def main():
+    print("=" * 80)
+    print(f"FEATURE STABILITY — 5-SEED REPEATED HOLDOUT: {TARGET_ANTIBIOTIC.upper()} ({ORGANISM})")
+    print("=" * 80)
+
+    params, total_trees = load_fixed_params()
+    n_jobs = config['xgboost_params'].get('n_jobs', -1)
+
+    y_path = MATRIX_DIR / f"y_{TARGET_ANTIBIOTIC}.csv"
+    if not y_path.exists():
+        print(f"ERROR: label file not found: {y_path}")
+        sys.exit(1)
+    y_all = pd.read_csv(y_path, encoding='utf-8')['label'].values.astype(int)
+
+    chunk_files = sorted(MATRIX_DIR.glob(f"X_{TARGET_ANTIBIOTIC}_part_*.npz"),
+                         key=lambda x: int(x.stem.split('_')[-1]))
+    if not chunk_files:
+        print(f"ERROR: no matrix chunks in {MATRIX_DIR}")
+        sys.exit(1)
+
+    offsets, n_total = chunk_offsets(chunk_files)
+    if n_total != len(y_all):
+        print(f"WARNING: matrix rows ({n_total}) != labels ({len(y_all)}); using min.")
+    print(f"  Samples: {n_total} | chunks: {len(offsets)} | trees/seed: {total_trees} | top-N: {TOP_N}")
+
+    seed_rows, seed_sets, gain_accum = [], [], {}
+    for seed in SEEDS:
+        print(f"\n--- SEED {seed} ---")
+        try:
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=seed)
+            train_idx, test_idx = next(sss.split(np.zeros(n_total), y_all))
+            train_mask = np.zeros(n_total, dtype=bool); train_mask[train_idx] = True
+            test_mask = np.zeros(n_total, dtype=bool); test_mask[test_idx] = True
+
+            model = train_one_seed(params, total_trees, offsets, y_all, train_mask, n_jobs)
+            if model is None:
+                print("  ⚠ no model trained (empty train set?); skipping seed.")
+                continue
+            auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask, n_jobs)
+            idx_set, idx_gain = top_feature_indices(model)
+
+            seed_rows.append({'seed': seed, 'roc_auc': auc, 'n_top_features': len(idx_set)})
+            seed_sets.append(idx_set)
+            for idx, g in idx_gain.items():
+                gain_accum.setdefault(idx, []).append(g)
+
+            seed_dir = MODELS_DIR / f"seed{seed}"
+            seed_dir.mkdir(parents=True, exist_ok=True)
+            model.save_model(str(seed_dir / f"xgboost_{TARGET_ANTIBIOTIC}_seed{seed}.json"))
+            print(f"  ROC-AUC: {auc:.4f} | top features: {len(idx_set)}")
+        except Exception as e:
+            print(f"  ✗ seed {seed} failed: {e}")
+
+    if not seed_rows:
+        print("\nERROR: no seed completed; nothing to aggregate.")
+        sys.exit(1)
+
+    # ---- aggregate ----------------------------------------------------------
+    aucs = np.array([r['roc_auc'] for r in seed_rows], dtype=float)
+    auc_mean, auc_std = float(np.nanmean(aucs)), float(np.nanstd(aucs))
+    jaccard = mean_pairwise_jaccard(seed_sets) if len(seed_sets) > 1 else float('nan')
+
+    EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    EXPLAIN_DIR.mkdir(parents=True, exist_ok=True)
+
+    summary = pd.DataFrame(seed_rows)
+    summary = pd.concat([summary, pd.DataFrame([
+        {'seed': 'MEAN', 'roc_auc': auc_mean, 'n_top_features': np.nan},
+        {'seed': 'STD', 'roc_auc': auc_std, 'n_top_features': np.nan},
+        {'seed': 'MEAN_JACCARD', 'roc_auc': jaccard, 'n_top_features': np.nan},
+    ])], ignore_index=True)
+    summary_path = EVAL_DIR / f"10_repeated_holdout_summary_{TARGET_ANTIBIOTIC}.csv"
+    summary.to_csv(summary_path, index=False)
+
+    n_seeds = len(seed_sets)
+    counts = Counter()
+    for s in seed_sets:
+        counts.update(s)
+    kmer_map = map_indices_to_kmers(set(counts))
+    stab_rows = []
+    for idx, c in counts.items():
+        stab_rows.append({
+            'feature_index': idx,
+            'kmer': kmer_map.get(idx, 'UNKNOWN'),
+            'selection_frequency': c / n_seeds,
+            'mean_gain': float(np.mean(gain_accum.get(idx, [0.0]))),
+            'stable': (c / n_seeds) >= 0.6,
+        })
+    stab = pd.DataFrame(stab_rows).sort_values(
+        ['selection_frequency', 'mean_gain'], ascending=False)
+    stab_path = EXPLAIN_DIR / f"06_feature_stability_{TARGET_ANTIBIOTIC}.csv"
+    stab.to_csv(stab_path, index=False)
+
+    print("\n" + "=" * 80)
+    print("REPEATED-HOLDOUT SUMMARY")
+    print("=" * 80)
+    print(f"  ROC-AUC: {auc_mean:.4f} ± {auc_std:.4f}  (seeds: {[f'{a:.3f}' for a in aucs]})")
+    print(f"  Mean pairwise Jaccard (top-{TOP_N} sets): {jaccard:.4f}")
+    print(f"  Stable k-mers (freq ≥ 0.6): {int(stab['stable'].sum()) if len(stab) else 0}")
+    print(f"  Saved: {summary_path.name}, {stab_path.name}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+    try:
+        main()
+    except Exception as e:
+        print(f"\nFATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)
