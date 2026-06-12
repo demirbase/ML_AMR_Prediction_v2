@@ -31,7 +31,6 @@ import scipy.sparse as sp
 from tqdm import tqdm
 import warnings
 import gc
-from sklearn.decomposition import TruncatedSVD
 
 warnings.filterwarnings('ignore')
 
@@ -380,95 +379,6 @@ def plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR):
         sys.exit(1)
 
 
-def plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data):
-    print("\nGenerating Global SVD Separability Proof (Truncated SVD, all k-mers)...")
-    output_path_2d = OUTPUT_DIR / f"05_svd_2d_separability_{TARGET_ANTIBIOTIC}.png"
-    output_path_3d = OUTPUT_DIR / f"05_svd_3d_separability_{TARGET_ANTIBIOTIC}.png"
-
-    if output_path_2d.exists() and output_path_3d.exists():
-        print(" -> Skipping SVD: 2D and 3D plots already exist.")
-        return
-
-    chunk_files = sorted(list(MATRIX_DIR.glob(f"X_{TARGET_ANTIBIOTIC}_part_*.npz")),
-                         key=lambda x: int(x.stem.split('_part_')[1]))
-    if not chunk_files: return
-
-    try:
-        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3d projection)
-
-        # ------------------------------------------------------------------
-        # SCALABILITY FIX (was B08/P-12):
-        # The previous implementation materialised the full N x N Gram matrix
-        # (XX^T) as a dense float32 array, which is O(N^2) RAM — ~10 GB at
-        # N=50,000 — and could OOM the machine. We instead run sklearn's
-        # TruncatedSVD directly on the stacked SPARSE matrix. TruncatedSVD uses
-        # randomized SVD and never densifies the feature space, so peak memory
-        # scales with the (sparse) data, not N^2.
-        # ------------------------------------------------------------------
-        print("  [Pass 1/2] Stacking sparse chunks (kept sparse, no densification)...")
-        X_stacked = sp.vstack([sp.load_npz(f) for f in tqdm(chunk_files, desc="Loading chunks")])
-        X_stacked = X_stacked.astype(np.float32).tocsr()
-
-        n_components = 3
-        if min(X_stacked.shape) <= n_components:
-            print(f"  ⚠ Matrix too small for {n_components} components; skipping SVD.")
-            return
-
-        print(f"  [Pass 2/2] Computing TruncatedSVD ({n_components} components)...")
-        svd = TruncatedSVD(n_components=n_components, random_state=42)
-        X_proj = svd.fit_transform(X_stacked)
-        var_ratio = svd.explained_variance_ratio_
-
-        del X_stacked
-        gc.collect()
-
-        N = X_proj.shape[0]
-        y_global = y_data['label'].iloc[:N].values
-
-        print("  Generating Plots...")
-        # 2D Plot
-        plt.figure(figsize=(10, 8))
-        scatter = sns.scatterplot(
-            x=X_proj[:, 0], y=X_proj[:, 1], hue=y_global, 
-            palette=['#1f78b4', '#d95f02'], alpha=0.7, s=80, edgecolor='k'
-        )
-        plt.title('Exact Global SVD Separability (100% Data, All K-mers)', fontsize=16, pad=20)
-        plt.xlabel(f'Principal Component 1 ({var_ratio[0]*100:.2f}%)')
-        plt.ylabel(f'Principal Component 2 ({var_ratio[1]*100:.2f}%)')
-        handles, labels = scatter.get_legend_handles_labels()
-        plt.legend(handles, ['Susceptible (0)', 'Resistant (1)'], title="Phenotype")
-        sns.despine()
-        plt.tight_layout()
-        plt.savefig(output_path_2d, dpi=300)
-        plt.close()
-        print(f" -> Saved 2D plot: {output_path_2d.name}")
-        
-        # 3D Plot
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        mask_0, mask_1 = (y_global == 0), (y_global == 1)
-        ax.scatter(X_proj[mask_0, 0], X_proj[mask_0, 1], X_proj[mask_0, 2], 
-                   c='#1f78b4', alpha=0.7, s=50, edgecolor='k', label='Susceptible (0)')
-        ax.scatter(X_proj[mask_1, 0], X_proj[mask_1, 1], X_proj[mask_1, 2], 
-                   c='#d95f02', alpha=0.7, s=50, edgecolor='k', label='Resistant (1)')
-        ax.set_title('Exact Global SVD 3D Separability (100% Data)', fontsize=16)
-        ax.set_xlabel(f'PC 1 ({var_ratio[0]*100:.2f}%)')
-        ax.set_ylabel(f'PC 2 ({var_ratio[1]*100:.2f}%)')
-        ax.set_zlabel(f'PC 3 ({var_ratio[2]*100:.2f}%)')
-        ax.legend(title="Phenotype", loc='best')
-        plt.tight_layout()
-        plt.savefig(output_path_3d, dpi=300)
-        plt.close()
-        print(f" -> Saved 3D plot: {output_path_3d.name}")
-        
-    except Exception as e:
-        print(f"  ⚠ Failed to generate Truncated SVD: {e}")
-    finally:
-        # Locals (X_stacked, X_proj, svd) are released when the function
-        # returns; an explicit collection here reclaims the large arrays
-        # promptly on memory-constrained machines.
-        gc.collect()
-
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
@@ -484,7 +394,6 @@ if __name__ == "__main__":
     plot_matrix_sparsity(chunk_data)
     plot_chunk_memory_footprint(chunk_data)
     plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR)
-    plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data)
 
     print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")

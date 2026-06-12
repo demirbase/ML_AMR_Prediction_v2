@@ -5,16 +5,15 @@ Exploratory Data Analysis (EDA) & Visualization Module for AMR Data
 
 This script generates publication-quality visualizations for the raw genomic 
 metadata (genome_amr_matrix.csv) validated in 01_data_validation.py. 
-It provides visual confirmation of data integrity, class distributions, 
-missing data patterns, and co-occurrence of resistance profiles before 
-proceeding to computationally expensive k-mer extraction and model training.
+It provides visual confirmation of data integrity, class distributions and
+missing data patterns before proceeding to computationally expensive k-mer
+extraction and model training.
 
 Visualizations generated:
 1. Antibiotic Resistance Distribution (Horizontal Bar Plot)
 2. Missing Data Heatmap (Sparsity of phenotypes)
 3. Antibiotic Class Representation (Pie Chart)
 4. Target Antibiotic Deep Dive (Class Imbalance visual)
-5. Co-occurrence / Cross-Resistance Heatmap (Correlation of resistance profiles)
 """
 
 # ============================================================================
@@ -302,82 +301,6 @@ def plot_target_antibiotic_deepdive(df_clean, target):
     free_memory()
     print(f" -> Saved: {output_path.name}")
 
-def plot_co_occurrence_heatmap(df_clean):
-    """
-    Biological Rationale: Plasmids often carry multiple resistance genes (co-selection). 
-    To prevent the ML model from hallucinating confounding k-mers, we need to see which 
-    antibiotics are highly correlated in our dataset.
-    
-    Generates a Clustered Heatmap showing Pearson correlation (Phi coefficient for 
-    binary presence/absence data).
-    """
-    print("Generating Co-occurrence / Cross-Resistance Clustered Heatmap...")
-    
-    # 1. Filter out antibiotics with fewer than 50 valid observations to reduce noise
-    valid_counts = df_clean.notna().sum()
-    well_represented = valid_counts[valid_counts >= 50].index
-    
-    df_corr = df_clean[well_represented]
-    
-    if len(df_corr.columns) < 2:
-        print(" -> Warning: Not enough well-represented antibiotics to compute correlations.")
-        return
-        
-    # 2. Compute Pearson Correlation Matrix
-    # Using 'pearson' calculates the Phi coefficient identically in purely binary data.
-    corr_matrix = df_corr.corr(method='pearson')
-    
-    # Drop rows/columns containing all NaNs in case of zero variance antibiotics
-    corr_matrix.dropna(how='all', axis=0, inplace=True)
-    corr_matrix.dropna(how='all', axis=1, inplace=True)
-    
-    if corr_matrix.empty:
-        print(" -> Warning: Correlation matrix is empty after removing nulls.")
-        return
-
-    # Fill diagonal with 1.0 explicitly and drop columns remaining with all nan to avoid clustering error
-    corr_matrix.fillna(0, inplace=True) 
-
-    # 3. Generate Clustered Heatmap
-    try:
-        cg = sns.clustermap(
-            corr_matrix, 
-            cmap="vlag", 
-            center=0,
-            vmin=-1, vmax=1,
-            figsize=(14, 12),
-            method='ward',
-            metric='euclidean',
-            cbar_kws={'label': 'Pearson Correlation (Phi)'},
-            xticklabels=True,
-            yticklabels=True
-        )
-        
-        # Adjust Title
-        cg.fig.suptitle('Antibiotic Resistance Co-occurrence (Phi Coefficient)', fontsize=16, y=1.02)
-        
-        plt.setp(cg.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=9)
-        plt.setp(cg.ax_heatmap.get_yticklabels(), rotation=0, fontsize=9)
-        
-        output_path = OUTPUT_DIR / "05_co_occurrence_clustermap.png"
-        cg.savefig(output_path)
-        
-        # Save underlying data to CSV
-        csv_path = OUTPUT_DIR / "05_co_occurrence_clustermap.csv"
-        corr_matrix.to_csv(csv_path, index=True)
-        
-        plt.close(cg.fig)
-        
-        del df_corr, corr_matrix, cg 
-        free_memory()
-        print(f" -> Saved: {output_path.name}")
-        
-    except Exception as e:
-        print(f" -> Warning: Clustermap generation failed: {e}")
-        # Cleanup partial fig
-        plt.close('all')
-        free_memory()
-
 
 # ============================================================================
 # ENTRY POINT
@@ -394,7 +317,6 @@ if __name__ == "__main__":
     plot_missing_data_heatmap(clean_df)
     plot_antibiotic_classes(clean_df)
     plot_target_antibiotic_deepdive(clean_df, TARGET_ANTIBIOTIC)
-    plot_co_occurrence_heatmap(clean_df)
 
     print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
