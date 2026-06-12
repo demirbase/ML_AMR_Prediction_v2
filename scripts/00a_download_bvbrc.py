@@ -38,8 +38,9 @@ import datetime
 import io
 import json
 import logging
+import shutil
+import subprocess
 import sys
-import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -110,6 +111,50 @@ def fetch_amr_table(taxid):
     return pd.concat(frames, ignore_index=True)
 
 
+# ---- CLI backend (BV-BRC p3-* tools; handles large result sets) -----------
+def cli_available():
+    return bool(shutil.which("p3-get-genome-drugs") and shutil.which("p3-genome-fasta"))
+
+
+def fetch_amr_table_cli(taxid):
+    """Fetch genome_amr via the BV-BRC CLI (no deep-pagination limit)."""
+    cmd1 = ["p3-all-genomes", "--eq", f"taxon_id,{taxid}", "--eq", "public,true",
+            "--attr", "genome_id"]
+    cmd2 = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
+            "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
+            "--attr", "resistant_phenotype", "--attr", "testing_standard",
+            "--attr", "testing_standard_year", "--attr", "evidence"]
+    log.info("CLI fetch: p3-all-genomes | p3-get-genome-drugs")
+    p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
+    p2 = subprocess.run(cmd2, stdin=p1.stdout, capture_output=True, text=True)
+    p1.stdout.close(); p1.wait()
+    if p2.returncode != 0:
+        log.error(f"CLI fetch failed: {(p2.stderr or '')[:500]}")
+        return pd.DataFrame()
+    if not p2.stdout.strip():
+        return pd.DataFrame()
+    return pd.read_csv(io.StringIO(p2.stdout), sep="\t")  # p3 tools emit TSV
+
+
+def download_one_cli(gid, dest_dir, retries=3):
+    """Download {gid}.fna via `p3-genome-fasta`. Returns (gid, status, size, error)."""
+    out = dest_dir / f"{gid}.fna"
+    if out.exists() and out.stat().st_size > 0:
+        return gid, "skipped", out.stat().st_size, ""
+    last = ""
+    for _ in range(retries):
+        try:
+            r = subprocess.run(["p3-genome-fasta", str(gid)],
+                               capture_output=True, text=True, timeout=180)
+            if r.returncode == 0 and r.stdout.lstrip().startswith(">"):
+                out.write_text(r.stdout, encoding="utf-8")
+                return gid, "downloaded", len(r.stdout), ""
+            last = (r.stderr or "empty/non-FASTA").strip()[:200]
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+    return gid, "failed", 0, last
+
+
 # ---------------------------------------------------------------------------
 def download_one(gid, dest_dir, retries=3, timeout=120):
     """Download {gid}.fna. Returns (gid, status, size, error)."""
@@ -133,11 +178,11 @@ def download_one(gid, dest_dir, retries=3, timeout=120):
     return gid, "failed", 0, last
 
 
-def download_all(genome_ids, dest_dir, workers, report_path):
+def download_all(genome_ids, dest_dir, workers, report_path, download_fn=download_one):
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(download_one, gid, dest_dir): gid for gid in genome_ids}
+        futs = {ex.submit(download_fn, gid, dest_dir): gid for gid in genome_ids}
         done = 0
         for fut in as_completed(futs):
             gid, status, size, err = fut.result()
@@ -161,7 +206,7 @@ def _write_report(results, report_path):
         w.writerows(results)
 
 
-def retry_failed(report_path, dest_dir, workers):
+def retry_failed(report_path, dest_dir, workers, download_fn=download_one):
     if not report_path.exists():
         log.error(f"No download report at {report_path}; nothing to retry.")
         return
@@ -171,7 +216,7 @@ def retry_failed(report_path, dest_dir, workers):
         log.info("No failed downloads to retry.")
         return
     log.info(f"Retrying {len(failed)} failed downloads...")
-    new = download_all(failed, dest_dir, workers, dest_dir.parent / "_retry_tmp.csv")
+    new = download_all(failed, dest_dir, workers, dest_dir.parent / "_retry_tmp.csv", download_fn)
     # merge: replace prior rows for retried ids
     new_df = pd.DataFrame(new)
     merged = pd.concat([prev[~prev["genome_id"].isin(failed)], new_df], ignore_index=True)
@@ -188,6 +233,8 @@ def main():
     p.add_argument("--workers", type=int, default=12, help="parallel download threads")
     p.add_argument("--skip-download", action="store_true", help="fetch+clean only; no FASTA download")
     p.add_argument("--retry-failed", action="store_true", help="re-attempt only previously failed downloads")
+    p.add_argument("--backend", choices=["auto", "cli", "api"], default="auto",
+                   help="data transport: BV-BRC CLI (p3-*), HTTP API, or auto-detect (default)")
     args = p.parse_args()
 
     config = load_config()
@@ -197,6 +244,15 @@ def main():
     except KeyError as e:
         print(e); sys.exit(1)
     taxid = org.get("taxid")
+
+    # Choose transport. CLI is preferred (no deep-pagination limit; official
+    # p3-genome-fasta for assemblies); falls back to the HTTP API if the p3 tools
+    # are not on PATH.
+    use_cli = args.backend == "cli" or (args.backend == "auto" and cli_available())
+    if args.backend == "cli" and not cli_available():
+        print("ERROR: --backend cli requested but p3-* tools not found on PATH.")
+        sys.exit(1)
+    download_fn = download_one_cli if use_cli else download_one
 
     genomes_dir = resolve_path("raw_genomes_dir", organism=organism, config=config)
     meta_dir = resolve_path("metadata_file", organism=organism, config=config).parent
@@ -209,11 +265,12 @@ def main():
     dl_report = logs_dir / "download_report.csv"
 
     log.info("=" * 70)
-    log.info(f"BV-BRC download — organism={organism} taxid={taxid}")
+    log.info(f"BV-BRC download — organism={organism} taxid={taxid} "
+             f"backend={'cli' if use_cli else 'api'}")
     log.info("=" * 70)
 
     if args.retry_failed:
-        retry_failed(dl_report, genomes_dir, args.workers)
+        retry_failed(dl_report, genomes_dir, args.workers, download_fn)
         log.info("Retry complete. Re-run 00_prepare_metadata.py to refresh the matrix.")
         return
 
@@ -221,8 +278,16 @@ def main():
     if args.raw_csv:
         log.info(f"Loading raw table from {args.raw_csv}")
         raw = pd.read_csv(args.raw_csv, sep=None, engine="python", dtype=str)
+    elif use_cli:
+        log.info("Fetching genome_amr via BV-BRC CLI...")
+        raw = fetch_amr_table_cli(taxid)
+        if raw.empty:
+            log.error("CLI fetch returned nothing. Check p3-login/connectivity or use --backend api / --raw-csv.")
+            sys.exit(1)
+        standardise_columns(raw).to_csv(raw_csv, index=False)
+        log.info(f"Raw table saved: {raw_csv} ({len(raw)} rows)")
     else:
-        log.info("Fetching genome_amr from BV-BRC API...")
+        log.info("Fetching genome_amr from BV-BRC HTTP API...")
         raw = fetch_amr_table(taxid)
         if raw.empty:
             log.error("No rows fetched. Provide --raw-csv from the website DOWNLOAD instead.")
@@ -246,7 +311,8 @@ def main():
     # provenance manifest
     manifest = {
         "organism": organism, "taxon_id": taxid,
-        "source": "BV-BRC genome_amr Data API",
+        "source": "BV-BRC genome_amr",
+        "backend": "raw-csv" if args.raw_csv else ("cli" if use_cli else "api"),
         "filter": 'eq(public,true) & eq(evidence,"Laboratory Method")',
         "cleaning": "EUCAST/CLSI only; Resistant/Susceptible only; name-normalised; "
                     "majority->newest-year conflict resolution",
@@ -261,7 +327,7 @@ def main():
         log.info("--skip-download set; not fetching FASTA.")
     else:
         log.info(f"Downloading {len(genome_ids)} assemblies -> {genomes_dir}")
-        download_all(genome_ids, genomes_dir, args.workers, dl_report)
+        download_all(genome_ids, genomes_dir, args.workers, dl_report, download_fn)
 
     log.info("Done. Next: python scripts/00_prepare_metadata.py "
              "(builds amr_phenotypes.csv from the present .fna files).")

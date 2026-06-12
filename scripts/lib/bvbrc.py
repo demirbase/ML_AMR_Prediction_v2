@@ -49,10 +49,18 @@ _COLUMN_ALIASES = {
 
 
 def standardise_columns(df):
-    """Return a copy with column names mapped to the canonical snake_case set."""
+    """
+    Return a copy with column names mapped to the canonical snake_case set.
+
+    Handles both the HTTP API / web-export headers and the BV-BRC CLI headers,
+    which prefix fields with their table name (e.g. ``genome_drug.antibiotic``,
+    ``genome.genome_id``) — the prefix before the last '.' is stripped first.
+    """
     rename = {}
     for col in df.columns:
         key = str(col).strip().lower()
+        if "." in key:                       # CLI prefix, e.g. genome_drug.antibiotic
+            key = key.rsplit(".", 1)[-1]
         if key in _COLUMN_ALIASES:
             rename[col] = _COLUMN_ALIASES[key]
     return df.rename(columns=rename)
@@ -106,6 +114,13 @@ def clean_amr_table(df, normalize_fn=None):
 
     df = df.drop_duplicates()
     report["rows_dedup"] = len(df)
+
+    # 0) evidence filter — keep laboratory-measured phenotypes only (drop
+    #    computational predictions). No-op if the column is absent.
+    if "evidence" in df.columns:
+        ev = df["evidence"].astype(str).str.lower()
+        df = df[ev.str.contains("laborator")]
+        report["rows_after_evidence"] = len(df)
 
     # 1) testing standard filter (EUCAST / CLSI only)
     if "testing_standard" in df.columns:

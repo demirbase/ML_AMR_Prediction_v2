@@ -102,6 +102,22 @@ def test_clean_conflict_tie_no_year_dropped():
 
 
 @pytest.mark.unit
+def test_clean_cli_prefixed_headers_and_evidence_filter():
+    # Simulates BV-BRC CLI output: table-prefixed headers + an evidence column.
+    df = pd.DataFrame({
+        "genome.genome_id": ["562.1", "562.1", "562.2"],
+        "genome_drug.antibiotic": ["ampicillin", "gentamicin", "rifampicin"],
+        "genome_drug.resistant_phenotype": ["Resistant", "Susceptible", "Resistant"],
+        "genome_drug.testing_standard": ["EUCAST", "CLSI", "EUCAST"],
+        "genome_drug.testing_standard_year": [2020, 2019, 2021],
+        "genome_drug.evidence": ["Laboratory Method", "Laboratory Method", "Computational Method"],
+    })
+    cleaned, rep = clean_amr_table(df)
+    assert rep["rows_after_evidence"] == 2           # computational row dropped
+    assert set(cleaned["antibiotic"]) == {"ampicillin", "gentamicin"}
+
+
+@pytest.mark.unit
 def test_pivot_binary_shape_and_nan():
     cleaned = pd.DataFrame({
         "genome_id": ["562.1", "562.1", "562.2"],
