@@ -145,20 +145,27 @@ def fetch_amr_table_cli(taxid, limit_genomes=0):
         log.error(f"p3-all-genomes failed: {(r1.stderr or '')[:300]}")
         return pd.DataFrame()
     lines = r1.stdout.splitlines()
-    header, ids = lines[0], lines[1:]
+    ids = lines[1:]                       # drop p3-all-genomes header (genome.genome_id)
     log.info(f"  found {len(ids)} genomes")
-    if limit_genomes and limit_genomes < len(ids):
-        ids = ids[:limit_genomes]
-        log.info(f"  [dry-run] querying drug records for first {len(ids)} genomes only")
+    # Most genomes have NO AMR data, so taking the first N would usually return
+    # nothing on a dry run. Scan a pool of at least 300 genomes (capped at the
+    # total) so AMR-bearing genomes are actually hit; the DOWNLOAD is still
+    # limited to --max-genomes later.
+    if limit_genomes:
+        scan_n = min(len(ids), max(limit_genomes, 300))
+        ids = ids[:scan_n]
+        log.info(f"  [dry-run] scanning {len(ids)} genomes for AMR records "
+                 f"(download capped at {limit_genomes})")
 
-    # Stage 2: drug records for those genomes (genome_ids fed via stdin)
+    # Stage 2: drug records for those genomes (genome_ids fed via stdin).
+    # Header forced to 'genome_id' so p3-get-genome-drugs keys on it.
     log.info(f"CLI stage 2/2: p3-get-genome-drugs for {len(ids)} genomes "
              f"(this is the slow step)...")
     cmd2 = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
             "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
             "--attr", "resistant_phenotype", "--attr", "testing_standard",
             "--attr", "testing_standard_year", "--attr", "evidence"]
-    stdin_text = "\n".join([header] + ids) + "\n"
+    stdin_text = "\n".join(["genome_id"] + ids) + "\n"
     r2 = subprocess.run(cmd2, input=stdin_text, capture_output=True, text=True)
     if r2.returncode != 0:
         log.error(f"p3-get-genome-drugs failed: {(r2.stderr or '')[:500]}")
@@ -316,7 +323,9 @@ def main():
         log.info("Fetching genome_amr via BV-BRC CLI...")
         raw = fetch_amr_table_cli(taxid, limit_genomes=args.max_genomes)
         if raw.empty:
-            log.error("CLI fetch returned nothing. Check p3-login/connectivity or use --backend api / --raw-csv.")
+            log.error("CLI fetch returned no AMR rows for the scanned genomes. "
+                      "On a dry run try a larger --max-genomes (e.g. 50), or run the "
+                      "full fetch (no --max-genomes), or use --backend api / --raw-csv.")
             sys.exit(1)
         standardise_columns(raw).to_csv(raw_csv, index=False)
         log.info(f"Raw table saved: {raw_csv} ({len(raw)} rows)")
