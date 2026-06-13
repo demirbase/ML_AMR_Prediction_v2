@@ -105,7 +105,11 @@ BASE_PARAMS = {
     'device': config['xgboost_params'].get('device', 'cpu'),
     'random_state': RANDOM_SEED,
     'verbosity': config['xgboost_params'].get('verbosity', 0),
-    'max_bin': 2  # CRITICAL RAM FIX: 0/1 binary data does not need 256 bins!
+    'max_bin': 2,  # CRITICAL RAM FIX: 0/1 binary data does not need 256 bins!
+    # Pin base_score=0.5 (matches training stage 05): without it XGBoost derives
+    # the intercept from the label mean, which is 0 or 1 for a pure-class chunk
+    # and raises "base_score must be in (0,1)". Surfaces on small chunks.
+    'base_score': 0.5,
 }
 
 # Organism-aware paths (SCALE_MLOPS_PLAN §4.2)

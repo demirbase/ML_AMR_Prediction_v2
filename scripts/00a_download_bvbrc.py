@@ -50,13 +50,23 @@ import io
 import json
 import logging
 import shutil
+import ssl
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
+
+# Trusted CA bundle for HTTPS. conda's Python often can't find the system root
+# store -> SSL: CERTIFICATE_VERIFY_FAILED; certifi ships a known-good bundle.
+try:
+    import certifi
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except Exception:  # pragma: no cover - certifi always present per requirements
+    _SSL_CTX = ssl.create_default_context()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -68,6 +78,7 @@ from lib.config import load_config, resolve_path           # noqa: E402
 API_URL = "https://www.bv-brc.org/api/genome_amr/"
 FTP_FASTA = "https://ftp.bv-brc.org/genomes/{gid}/{gid}.fna"
 API_BATCH = 25000
+CLI_DRUGS_BATCH = 2000        # genomes per p3-get-genome-drugs call (progress + early-stop)
 SELECT_FIELDS = ["genome_id", "genome_name", "antibiotic", "resistant_phenotype",
                  "testing_standard", "testing_standard_year"]
 
@@ -85,10 +96,17 @@ def setup_logging(log_path):
     log.addHandler(fh); log.addHandler(sh)
 
 
+def _api_url(rql):
+    """Build a genome_amr API URL, URL-encoding the RQL while preserving its
+    syntax characters. Encodes spaces -> %20 and quotes -> %22 (raw quotes/spaces
+    make the BV-BRC API return HTTP 400)."""
+    return API_URL + "?" + urllib.parse.quote(rql, safe="(),&=+*/")
+
+
 def _http_get(url, timeout=120):
     req = urllib.request.Request(url, headers={"Accept": "text/csv",
                                                "User-Agent": "amr-pipeline/00a"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
         return r.read().decode("utf-8", errors="replace")
 
 
@@ -102,7 +120,7 @@ def fetch_amr_table(taxid):
     frames, start = [], 0
     while True:
         rql = f"{base_rql}&limit({API_BATCH},{start})"
-        url = API_URL + "?" + rql.replace(" ", "%20")
+        url = _api_url(rql)
         log.info(f"API fetch: rows {start}..{start + API_BATCH}")
         try:
             text = _http_get(url)
@@ -127,15 +145,51 @@ def cli_available():
     return bool(shutil.which("p3-get-genome-drugs") and shutil.which("p3-genome-fasta"))
 
 
+def _fetch_amr_sample_api(taxid, n_genomes):
+    """
+    Quick AMR-bearing sample from the genome_amr HTTP API (used for dry runs).
+
+    Every returned row already has a Lab-Method AMR record, so a small limited
+    page is guaranteed non-empty — unlike scanning genome ids, most of which
+    carry no AMR data at all. ~3 rows/genome, so over-fetch to cover n_genomes.
+    """
+    rows_needed = max(n_genomes * 10, 1000)
+    rql = (
+        f"and(eq(taxon_id,{taxid}),eq(public,true),"
+        f'eq(evidence,"Laboratory Method"))'
+        f"&select({','.join(SELECT_FIELDS)})&sort(+genome_id)&limit({rows_needed})"
+    )
+    url = _api_url(rql)
+    try:
+        text = _http_get(url)
+    except Exception as e:
+        log.warning(f"  API sample request failed: {e}")
+        return pd.DataFrame()
+    return pd.read_csv(io.StringIO(text)) if text.strip() else pd.DataFrame()
+
+
 def fetch_amr_table_cli(taxid, limit_genomes=0):
     """
     Fetch genome_amr via the BV-BRC CLI in two stages.
 
     Stage 1 lists the taxon's public genome_ids (fast — ids only). Stage 2 looks
-    up the AMR drug records for those genomes. When ``limit_genomes`` > 0 only the
-    first N genomes are queried, so a dry run finishes in seconds instead of
-    pulling drug records for all ~85k E. coli genomes.
+    up the AMR drug records for those genomes.
+
+    Dry runs (``limit_genomes`` > 0) skip the CLI genome scan entirely: most
+    genomes have NO AMR data, so feeding the first N genome ids to
+    p3-get-genome-drugs usually returns nothing. Instead we pull a small
+    AMR-bearing sample straight from the genome_amr API — fast and guaranteed
+    non-empty (the later FASTA download is still capped at --max-genomes).
     """
+    if limit_genomes:
+        log.info(f"  [dry-run] sampling AMR records for ~{limit_genomes} genomes "
+                 f"from the genome_amr API (skips the slow CLI scan)...")
+        sample = _fetch_amr_sample_api(taxid, limit_genomes)
+        if not sample.empty:
+            log.info(f"  [dry-run] API sample returned {len(sample)} AMR rows")
+            return sample
+        log.warning("  API sample empty; falling back to the full CLI genome scan.")
+
     # Stage 1: genome id list
     log.info(f"CLI stage 1/2: listing public genome_ids for taxon {taxid}...")
     r1 = subprocess.run(
@@ -147,32 +201,44 @@ def fetch_amr_table_cli(taxid, limit_genomes=0):
     lines = r1.stdout.splitlines()
     ids = lines[1:]                       # drop p3-all-genomes header (genome.genome_id)
     log.info(f"  found {len(ids)} genomes")
-    # Most genomes have NO AMR data, so taking the first N would usually return
-    # nothing on a dry run. Scan a pool of at least 300 genomes (capped at the
-    # total) so AMR-bearing genomes are actually hit; the DOWNLOAD is still
-    # limited to --max-genomes later.
-    if limit_genomes:
-        scan_n = min(len(ids), max(limit_genomes, 300))
-        ids = ids[:scan_n]
-        log.info(f"  [dry-run] scanning {len(ids)} genomes for AMR records "
-                 f"(download capped at {limit_genomes})")
 
-    # Stage 2: drug records for those genomes (genome_ids fed via stdin).
-    # Header forced to 'genome_id' so p3-get-genome-drugs keys on it.
-    log.info(f"CLI stage 2/2: p3-get-genome-drugs for {len(ids)} genomes "
-             f"(this is the slow step)...")
-    cmd2 = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
-            "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
-            "--attr", "resistant_phenotype", "--attr", "testing_standard",
-            "--attr", "testing_standard_year", "--attr", "evidence"]
-    stdin_text = "\n".join(["genome_id"] + ids) + "\n"
-    r2 = subprocess.run(cmd2, input=stdin_text, capture_output=True, text=True)
-    if r2.returncode != 0:
-        log.error(f"p3-get-genome-drugs failed: {(r2.stderr or '')[:500]}")
+    # Stage 2: drug records, fetched in batches so progress is visible and a
+    # dry-run fallback can stop early once enough AMR-bearing genomes are found
+    # (one giant subprocess over 81k ids gives no feedback and can't short-circuit).
+    log.info(f"CLI stage 2/2: p3-get-genome-drugs over {len(ids)} genomes in "
+             f"batches of {CLI_DRUGS_BATCH} (most genomes have no AMR data)...")
+    frames, n_genomes_with_amr = [], 0
+    for start in range(0, len(ids), CLI_DRUGS_BATCH):
+        batch_ids = ids[start:start + CLI_DRUGS_BATCH]
+        df = _get_genome_drugs_cli(batch_ids)
+        if not df.empty:
+            frames.append(df)
+            if "genome_id" in df.columns:
+                n_genomes_with_amr += df["genome_id"].nunique()
+        log.info(f"  scanned {min(start + CLI_DRUGS_BATCH, len(ids))}/{len(ids)} "
+                 f"genomes — {n_genomes_with_amr} with AMR records so far")
+        if limit_genomes and n_genomes_with_amr >= limit_genomes:
+            log.info(f"  [dry-run] reached {n_genomes_with_amr} AMR-bearing genomes; stopping scan.")
+            break
+    if not frames:
         return pd.DataFrame()
-    if not r2.stdout.strip():
+    return pd.concat(frames, ignore_index=True)
+
+
+def _get_genome_drugs_cli(genome_ids):
+    """Run p3-get-genome-drugs for a batch of genome ids; return a frame (TSV)."""
+    cmd = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
+           "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
+           "--attr", "resistant_phenotype", "--attr", "testing_standard",
+           "--attr", "testing_standard_year", "--attr", "evidence"]
+    stdin_text = "\n".join(["genome_id"] + genome_ids) + "\n"
+    r = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True)
+    if r.returncode != 0:
+        log.warning(f"  p3-get-genome-drugs batch failed: {(r.stderr or '')[:300]}")
         return pd.DataFrame()
-    return pd.read_csv(io.StringIO(r2.stdout), sep="\t")  # p3 tools emit TSV
+    if not r.stdout.strip():
+        return pd.DataFrame()
+    return pd.read_csv(io.StringIO(r.stdout), sep="\t")  # p3 tools emit TSV
 
 
 def download_one_cli(gid, dest_dir, retries=3):
@@ -205,7 +271,7 @@ def download_one(gid, dest_dir, retries=3, timeout=120):
     for attempt in range(1, retries + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "amr-pipeline/00a"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
                 data = r.read()
             if not data or not data.lstrip().startswith(b">"):
                 last = "empty or non-FASTA response"
