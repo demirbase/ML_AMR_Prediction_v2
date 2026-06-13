@@ -30,6 +30,17 @@ NOTE: the BV-BRC Data API caps deep pagination. If the automatic fetch is
 truncated for a very large table, download the filtered table from the website
 ("DOWNLOAD" on the AMR Phenotypes tab, including the Testing Standard column) and
 pass it with --raw-csv.
+
+CLI BACKEND — IMPORTANT: sourcing the BV-BRC environment
+(`source /Applications/BV-BRC.app/user-env.sh`) puts the p3-* tools on PATH but
+ALSO replaces `python` with BV-BRC's bundled (old) interpreter. Run this script
+with your project's Python explicitly, e.g.:
+
+    source /Applications/BV-BRC.app/user-env.sh        # p3-* on PATH
+    /path/to/conda/envs/<env>/bin/python scripts/00a_download_bvbrc.py --backend cli ...
+
+The script runs under your Python (with pandas); the p3-* subprocess calls
+inherit the sourced PATH / Perl env and work normally.
 """
 
 import argparse
@@ -116,24 +127,45 @@ def cli_available():
     return bool(shutil.which("p3-get-genome-drugs") and shutil.which("p3-genome-fasta"))
 
 
-def fetch_amr_table_cli(taxid):
-    """Fetch genome_amr via the BV-BRC CLI (no deep-pagination limit)."""
-    cmd1 = ["p3-all-genomes", "--eq", f"taxon_id,{taxid}", "--eq", "public,true",
-            "--attr", "genome_id"]
+def fetch_amr_table_cli(taxid, limit_genomes=0):
+    """
+    Fetch genome_amr via the BV-BRC CLI in two stages.
+
+    Stage 1 lists the taxon's public genome_ids (fast — ids only). Stage 2 looks
+    up the AMR drug records for those genomes. When ``limit_genomes`` > 0 only the
+    first N genomes are queried, so a dry run finishes in seconds instead of
+    pulling drug records for all ~85k E. coli genomes.
+    """
+    # Stage 1: genome id list
+    log.info(f"CLI stage 1/2: listing public genome_ids for taxon {taxid}...")
+    r1 = subprocess.run(
+        ["p3-all-genomes", "--eq", f"taxon_id,{taxid}", "--eq", "public,true", "--attr", "genome_id"],
+        capture_output=True, text=True)
+    if r1.returncode != 0 or not r1.stdout.strip():
+        log.error(f"p3-all-genomes failed: {(r1.stderr or '')[:300]}")
+        return pd.DataFrame()
+    lines = r1.stdout.splitlines()
+    header, ids = lines[0], lines[1:]
+    log.info(f"  found {len(ids)} genomes")
+    if limit_genomes and limit_genomes < len(ids):
+        ids = ids[:limit_genomes]
+        log.info(f"  [dry-run] querying drug records for first {len(ids)} genomes only")
+
+    # Stage 2: drug records for those genomes (genome_ids fed via stdin)
+    log.info(f"CLI stage 2/2: p3-get-genome-drugs for {len(ids)} genomes "
+             f"(this is the slow step)...")
     cmd2 = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
             "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
             "--attr", "resistant_phenotype", "--attr", "testing_standard",
             "--attr", "testing_standard_year", "--attr", "evidence"]
-    log.info("CLI fetch: p3-all-genomes | p3-get-genome-drugs")
-    p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
-    p2 = subprocess.run(cmd2, stdin=p1.stdout, capture_output=True, text=True)
-    p1.stdout.close(); p1.wait()
-    if p2.returncode != 0:
-        log.error(f"CLI fetch failed: {(p2.stderr or '')[:500]}")
+    stdin_text = "\n".join([header] + ids) + "\n"
+    r2 = subprocess.run(cmd2, input=stdin_text, capture_output=True, text=True)
+    if r2.returncode != 0:
+        log.error(f"p3-get-genome-drugs failed: {(r2.stderr or '')[:500]}")
         return pd.DataFrame()
-    if not p2.stdout.strip():
+    if not r2.stdout.strip():
         return pd.DataFrame()
-    return pd.read_csv(io.StringIO(p2.stdout), sep="\t")  # p3 tools emit TSV
+    return pd.read_csv(io.StringIO(r2.stdout), sep="\t")  # p3 tools emit TSV
 
 
 def download_one_cli(gid, dest_dir, retries=3):
@@ -229,7 +261,9 @@ def main():
     p = argparse.ArgumentParser(description="Download + clean BV-BRC AMR data and assemblies.")
     p.add_argument("--organism", default=None, help="registry slug (default: config project.organism)")
     p.add_argument("--raw-csv", default=None, help="use an existing raw AMR CSV instead of the API")
-    p.add_argument("--max-genomes", type=int, default=0, help="cap genomes downloaded (0=all; for dry runs)")
+    p.add_argument("--max-genomes", type=int, default=0,
+                   help="cap candidate genomes (0=all). With the CLI backend this also "
+                        "limits the (slow) drug-record fetch, so dry runs finish fast.")
     p.add_argument("--workers", type=int, default=12, help="parallel download threads")
     p.add_argument("--skip-download", action="store_true", help="fetch+clean only; no FASTA download")
     p.add_argument("--retry-failed", action="store_true", help="re-attempt only previously failed downloads")
@@ -280,7 +314,7 @@ def main():
         raw = pd.read_csv(args.raw_csv, sep=None, engine="python", dtype=str)
     elif use_cli:
         log.info("Fetching genome_amr via BV-BRC CLI...")
-        raw = fetch_amr_table_cli(taxid)
+        raw = fetch_amr_table_cli(taxid, limit_genomes=args.max_genomes)
         if raw.empty:
             log.error("CLI fetch returned nothing. Check p3-login/connectivity or use --backend api / --raw-csv.")
             sys.exit(1)
