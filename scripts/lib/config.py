@@ -16,6 +16,8 @@ Public API:
 """
 
 import os
+import platform
+import shutil
 from pathlib import Path
 
 import yaml
@@ -112,3 +114,46 @@ def resolve_path(key, organism=None, antibiotic=None, run_id=None, config=None):
         )
 
     return PROJECT_ROOT / resolved
+
+
+def resolve_tool(config_key, command_name, config=None, env_var=None):
+    """
+    Locate an external tool executable in a cross-platform / HPC-friendly way.
+
+    Resolution order (first hit wins):
+        1. Environment override (``env_var``, default ``AMR_<COMMAND>_BIN``).
+        2. ``command_name`` on PATH (``shutil.which``) — the normal case on an
+           HPC / Linux box where KMC/BLAST come from conda or a loaded module.
+        3. The project-bundled path from config (``paths`` / ``paths_organism``
+           ``config_key``) — the macOS-only convenience binary under ``bin/bin/``.
+           The bundle ships a macOS (Mach-O) build, so it is trusted ONLY on
+           Darwin; on Linux/Windows ``os.access`` would happily return a binary
+           that cannot actually execute ("cannot execute binary file"), so we
+           skip it there and rely on PATH instead.
+
+    Returns the resolved executable as a ``str``, or ``None`` if not found.
+    """
+    cfg = config if config is not None else load_config()
+    env_var = env_var or f"AMR_{command_name.upper()}_BIN"
+
+    # 1) explicit environment override
+    override = os.environ.get(env_var)
+    if override and os.access(override, os.X_OK):
+        return override
+
+    # 2) PATH lookup (conda / system / module-loaded) — portable everywhere
+    on_path = shutil.which(command_name)
+    if on_path:
+        return on_path
+
+    # 3) project-bundled macOS binary (fallback, Darwin only)
+    if platform.system() == "Darwin":
+        paths_org = cfg.get("paths_organism", {}) or {}
+        paths_legacy = cfg.get("paths", {}) or {}
+        rel = paths_org.get(config_key, paths_legacy.get(config_key))
+        if rel:
+            bundled = PROJECT_ROOT / rel
+            if bundled.exists() and os.access(bundled, os.X_OK):
+                return str(bundled)
+
+    return None

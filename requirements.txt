@@ -35,6 +35,7 @@ biopython>=1.79          # NCBI Entrez / SeqIO (step 09)
 # --- Utilities --------------------------------------------------------------
 pyyaml>=5.4.0            # config + registry YAML
 tqdm>=4.62.0             # progress bars
+certifi>=2021.10.8       # CA bundle for BV-BRC HTTPS (step 00a) — avoids SSL cert errors
 
 # --- Testing ----------------------------------------------------------------
 pytest>=7.0.0            # tests/ (smoke / unit / integration)

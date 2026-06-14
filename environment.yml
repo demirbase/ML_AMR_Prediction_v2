@@ -43,6 +43,7 @@ dependencies:
   # ── Utilities ─────────────────────────────────────────────────────────────
   - pyyaml>=5.4
   - tqdm>=4.62
+  - certifi>=2021.10.8   # CA bundle for BV-BRC HTTPS (step 00a)
 
   # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
   - kmc>=3.2
