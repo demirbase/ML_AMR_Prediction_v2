@@ -256,10 +256,11 @@ def main() -> None:
             print(f"  ⚠ Not found: {out_path.name}  (check Nextflow logs)")
 
     print(f"\nAll outputs in: {EXPLAINABILITY_DIR}")
-    print("\nNext steps for biological interpretation:")
-    print("  1. Filter TSVs for pident > 90% and evalue < 1e-10")
-    print("  2. Cross-reference CARD hits with known resistance mechanisms")
-    print("  3. BLAST the NCBI TSV gene names against literature")
+    print("\nNext step:")
+    print("  Run 09_biological_summary.py — it grades every hit into")
+    print("  confirmed / candidate / weak tiers (thresholds in config.yaml →")
+    print("  analysis.confidence_tiers), joins 07b stability, and computes the")
+    print("  known-mechanism recovery rate, composite score and novel fraction.")
     print("=" * 80)
 
 

@@ -41,28 +41,40 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ----------------------------------------------------------------------------
 # BLAST confidence tiers for short (k-mer) alignments
 # ----------------------------------------------------------------------------
-# A 21-mer producing an E-value of 1.5 is NOT "confirmed" homology. We grade
-# every hit so the report cannot present weak matches as findings (was P-07).
-CONFIRMED_MAX_EVALUE = 1e-3
-CONFIRMED_MIN_IDENT  = 95.0
-CANDIDATE_MAX_EVALUE = 1.0
-CANDIDATE_MIN_IDENT  = 90.0
-# Hits weaker than the candidate tier are dropped from the report entirely.
-REPORT_MAX_EVALUE    = CANDIDATE_MAX_EVALUE
+# A 21-mer producing an E-value of 1.5 is NOT "confirmed" homology, so every hit
+# is graded (was P-07). Thresholds are read from config.yaml (analysis.
+# confidence_tiers) so they are citeable in Methods and easy to defend; a hard-
+# coded fallback keeps the script runnable if the keys are absent.
+DEFAULT_TIERS = {
+    "confirmed": {"max_evalue": 1e-3, "min_identity": 95.0},
+    "candidate": {"max_evalue": 2.0,  "min_identity": 90.0},
+    "weak":      {"max_evalue": 50.0, "min_identity": 80.0},
+}
+DEFAULT_REPORT_MAX_EVALUE = 50.0
 
 
-def classify_confidence(pident, evalue):
-    """Grade a BLAST hit into confirmed / candidate / weak by E-value + identity."""
+def load_tiers(config):
+    """Return (tiers dict, report_max_evalue, weak_min_identity, stability_threshold)."""
+    analysis = config.get("analysis", {}) or {}
+    tiers = analysis.get("confidence_tiers", DEFAULT_TIERS) or DEFAULT_TIERS
+    report_max = float(analysis.get("report_max_evalue", DEFAULT_REPORT_MAX_EVALUE))
+    weak_min_ident = float(tiers.get("weak", DEFAULT_TIERS["weak"])["min_identity"])
+    stability_threshold = float(analysis.get("stability_threshold", 0.6))
+    return tiers, report_max, weak_min_ident, stability_threshold
+
+
+def classify_confidence(pident, evalue, tiers):
+    """Grade a BLAST hit into confirmed / candidate / weak (best-first) or 'none'."""
     try:
         pident = float(pident)
         evalue = float(evalue)
     except (TypeError, ValueError):
-        return "weak"
-    if evalue <= CONFIRMED_MAX_EVALUE and pident >= CONFIRMED_MIN_IDENT:
-        return "confirmed"
-    if evalue <= CANDIDATE_MAX_EVALUE and pident >= CANDIDATE_MIN_IDENT:
-        return "candidate"
-    return "weak"
+        return "none"
+    for tier in ("confirmed", "candidate", "weak"):
+        t = tiers.get(tier)
+        if t and evalue <= float(t["max_evalue"]) and pident >= float(t["min_identity"]):
+            return tier
+    return "none"
 
 
 def configure_entrez(config):
@@ -223,6 +235,111 @@ def fetch_gene_name_at_coords(sseqid: str, sstart: int, send: int,
 
 
 # ============================================================================
+# KB-CANDIDATE TABLE + QUANTITATIVE VALIDATION (M7 / composite / H4)
+# ============================================================================
+import json
+import math
+
+
+def best_card_hit(df_card, q_id):
+    """Lowest-E-value CARD hit for a feature, or None. Returns a dict."""
+    if df_card.empty:
+        return None
+    hits = df_card[df_card['qseqid'] == q_id]
+    if hits.empty:
+        return None
+    row = hits.loc[hits['evalue'].idxmin()]
+    return {
+        'gene': row.get('Gene_Match', ''),
+        'identity': float(row['pident']),
+        'evalue': float(row['evalue']),
+        'tier': row.get('Confidence', 'none'),
+    }
+
+
+def composite_score(selection_frequency, identity_pct, evalue):
+    """ROADMAP §1.4: stability × log10(1/E) × (identity/100). NaN if inputs missing."""
+    try:
+        sf = float(selection_frequency)
+        idp = float(identity_pct)
+        ev = float(evalue)
+    except (TypeError, ValueError):
+        return float('nan')
+    if not (sf == sf) or ev <= 0:          # sf NaN or non-positive E
+        return float('nan')
+    # E-value can exceed 1 for short k-mers -> log10(1/E) goes negative; clamp the
+    # contribution at 0 so a weak hit cannot produce a negative composite score.
+    return sf * max(0.0, math.log10(1.0 / ev)) * (idp / 100.0)
+
+
+def build_kb_candidates(df_features, df_card, stability_threshold):
+    """
+    Join the candidate k-mers (07: gain top-N ∪ stable) with their best CARD hit
+    and compute the composite score. Returns (DataFrame, metrics dict).
+    """
+    rows = []
+    for _, feat in df_features.iterrows():
+        rank = int(feat['Rank'])
+        score = float(feat['Gain_Score'])
+        feat_id = str(feat['Feature_ID'])
+        q_id = f"Rank_{rank}|Score_{score:.4f}|Feature_{feat_id}"
+        sel_freq = feat.get('selection_frequency', float('nan'))
+        try:
+            sel_freq = float(sel_freq)
+        except (TypeError, ValueError):
+            sel_freq = float('nan')
+        is_stable = bool(feat.get('stable', False))
+
+        hit = best_card_hit(df_card, q_id)
+        rows.append({
+            'rank': rank,
+            'kmer': feat.get('Kmer_Sequence', ''),
+            'feature_id': feat_id,
+            'gain_score': score,
+            'in_gain_topN': bool(feat.get('in_gain_topN', True)),
+            'selection_frequency': sel_freq,
+            'stable': is_stable,
+            'card_gene': hit['gene'] if hit else '',
+            'card_identity': hit['identity'] if hit else float('nan'),
+            'card_evalue': hit['evalue'] if hit else float('nan'),
+            'confidence_tier': hit['tier'] if hit else 'none',
+            'has_card_hit': hit is not None,
+            'composite_score': composite_score(sel_freq, hit['identity'], hit['evalue']) if hit else float('nan'),
+        })
+    cols = ['rank', 'kmer', 'feature_id', 'gain_score', 'in_gain_topN',
+            'selection_frequency', 'stable', 'card_gene', 'card_identity',
+            'card_evalue', 'confidence_tier', 'has_card_hit', 'composite_score']
+    kb = pd.DataFrame(rows, columns=cols)
+    if not kb.empty:
+        kb = kb.sort_values(['composite_score', 'gain_score'],
+                            ascending=False, na_position='last')
+
+    # ---- quantitative metrics (M7 recovery rate, H2, H4 novel fraction) -----
+    n_features = len(kb)
+    stable = kb[kb['stable']] if n_features else kb
+    n_stable = len(stable)
+    n_stable_confirmed = int((stable['confidence_tier'] == 'confirmed').sum()) if n_stable else 0
+    n_stable_with_hit = int(stable['has_card_hit'].sum()) if n_stable else 0
+    n_stable_novel = n_stable - n_stable_with_hit
+    metrics = {
+        'n_candidate_features': n_features,
+        'n_in_gain_topN': int(kb['in_gain_topN'].sum()) if n_features else 0,
+        'n_stable': n_stable,
+        'stability_threshold': stability_threshold,
+        'tier_counts_all': (kb['confidence_tier'].value_counts().to_dict() if n_features else {}),
+        # M7 / H2: of the reproducible (stable) k-mers, fraction that map to a
+        # known ARG at confirmed confidence. H2 accepts >= 0.40.
+        'known_mechanism_recovery_rate': (n_stable_confirmed / n_stable) if n_stable else None,
+        'H2_pass': ((n_stable_confirmed / n_stable) >= 0.40) if n_stable else None,
+        # H4: fraction of stable k-mers with NO CARD hit (novel candidates).
+        'novel_candidate_fraction': (n_stable_novel / n_stable) if n_stable else None,
+        'n_stable_confirmed': n_stable_confirmed,
+        'n_stable_novel': n_stable_novel,
+    }
+    return kb, metrics
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 def main():
@@ -230,6 +347,7 @@ def main():
     config = load_config()
     antibiotic = config['project']['target_antibiotic']
     top_n = config.get('analysis', {}).get('top_n_features', 50)
+    tiers, report_max_evalue, weak_min_ident, stability_threshold = load_tiers(config)
 
     # Configure NCBI Entrez identity (email / api_key) from config — never a
     # hardcoded placeholder e-mail (NCBI ToS / ban risk).
@@ -275,15 +393,16 @@ def main():
         df_card = pd.read_csv(card_file, sep='\t', header=None, names=tsv_cols)
         df_card['pident'] = pd.to_numeric(df_card['pident'], errors='coerce')
         df_card['evalue'] = pd.to_numeric(df_card['evalue'], errors='coerce')
-        # Drop clearly-insignificant hits (E > 1.0 for a 21-mer is noise), then
-        # grade the survivors into confirmed/candidate tiers. The previous
-        # E ≤ 50 filter let weak/meaningless alignments through as "findings".
+        # Keep everything down to the weak tier (E ≤ report_max_evalue, identity ≥
+        # weak floor) and grade each hit. Weak hits (e.g. gyrA at E=1.5) are kept
+        # and FLAGGED rather than dropped, so the report is transparent about
+        # low-confidence signals (ROADMAP Risk-4 / §1.4).
         df_card = df_card[
-            (df_card['pident'] >= CANDIDATE_MIN_IDENT) & (df_card['evalue'] <= REPORT_MAX_EVALUE)
+            (df_card['pident'] >= weak_min_ident) & (df_card['evalue'] <= report_max_evalue)
         ].copy()
         df_card['Gene_Match'] = df_card['sseqid'].apply(extract_card_gene)
         df_card['Confidence'] = df_card.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue']), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], tiers), axis=1)
     else:
         print(f"Warning: {card_file} is missing or empty.")
         df_card = pd.DataFrame(columns=tsv_cols + ['Gene_Match'])
@@ -301,13 +420,26 @@ def main():
         df_ncbi['sstart'] = pd.to_numeric(df_ncbi['sstart'], errors='coerce').fillna(0).astype(int)
         df_ncbi['send']   = pd.to_numeric(df_ncbi['send'],   errors='coerce').fillna(0).astype(int)
         df_ncbi = df_ncbi[
-            (df_ncbi['pident'] >= CANDIDATE_MIN_IDENT) & (df_ncbi['evalue'] <= REPORT_MAX_EVALUE)
+            (df_ncbi['pident'] >= weak_min_ident) & (df_ncbi['evalue'] <= report_max_evalue)
         ].copy()
         df_ncbi['Confidence'] = df_ncbi.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue']), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], tiers), axis=1)
     else:
         print(f"Warning: {ncbi_file} is missing or empty.")
         df_ncbi = pd.DataFrame(columns=tsv_cols + ['Confidence'])
+
+    # ------------------------------------------------------------------
+    # KB-candidate table + quantitative validation (M7 / composite / H4)
+    # ------------------------------------------------------------------
+    kb, metrics = build_kb_candidates(df_features, df_card, stability_threshold)
+    kb_path = explain_dir / f"07_kb_candidates_{antibiotic}.csv"
+    kb.to_csv(kb_path, index=False)
+    metrics_path = explain_dir / f"08_validation_metrics_{antibiotic}.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2))
+    print(f"  ✓ KB candidates: {kb_path.name}  |  metrics: {metrics_path.name}")
+
+    def _pct(x):
+        return "n/a" if x is None else f"{100 * x:.1f}%"
 
     # ------------------------------------------------------------------
     # Generate Markdown report
@@ -317,10 +449,35 @@ def main():
     with open(out_file, "w") as f:
         f.write("# Final Biological Report\n")
         f.write(f"**Target Antibiotic:** {antibiotic.capitalize()}\n\n")
+
+        # --- Quantitative validation summary (top of report) ---------------
+        ct = metrics['tier_counts_all']
+        f.write("## Quantitative validation summary\n\n")
+        f.write(f"- Candidate k-mers analysed: **{metrics['n_candidate_features']}** "
+                f"(gain top-N: {metrics['n_in_gain_topN']}, "
+                f"stable ≥ {stability_threshold:g}: {metrics['n_stable']})\n")
+        f.write(f"- Known-mechanism recovery rate (M7 / H2): "
+                f"**{_pct(metrics['known_mechanism_recovery_rate'])}** of stable k-mers "
+                f"are confirmed CARD ARGs "
+                f"(H2 accept ≥ 40% → **{'PASS' if metrics['H2_pass'] else 'fail' if metrics['H2_pass'] is not None else 'n/a'}**)\n")
+        f.write(f"- Novel candidate fraction (H4): "
+                f"**{_pct(metrics['novel_candidate_fraction'])}** of stable k-mers have no CARD hit\n")
+        f.write(f"- CARD tier distribution (best hit, all candidates): "
+                f"confirmed={ct.get('confirmed', 0)}, candidate={ct.get('candidate', 0)}, "
+                f"weak={ct.get('weak', 0)}, none={ct.get('none', 0)}\n\n")
+        f.write("> Composite score = stability × log10(1/E-value) × (identity/100); "
+                "see `07_kb_candidates` for the ranked table.\n\n")
+        f.write("**Methodological note:** a high Gain/stability score is a statistical "
+                "signal, not proof of biological causation. Confidence tiers separate "
+                "statistical correlation from homology-based validation; weak hits are "
+                "reported transparently, not as findings.\n\n")
+
         f.write("**Confidence tiers** (short-alignment BLAST grading):\n")
-        f.write(f"- `confirmed` — E ≤ {CONFIRMED_MAX_EVALUE:g} and identity ≥ {CONFIRMED_MIN_IDENT:g}%\n")
-        f.write(f"- `candidate` — E ≤ {CANDIDATE_MAX_EVALUE:g} and identity ≥ {CANDIDATE_MIN_IDENT:g}%\n")
-        f.write(f"- Weaker hits (E > {REPORT_MAX_EVALUE:g}) are excluded from this report.\n\n")
+        for tier in ("confirmed", "candidate", "weak"):
+            t = tiers.get(tier, {})
+            f.write(f"- `{tier}` — E ≤ {float(t.get('max_evalue', 0)):g} and "
+                    f"identity ≥ {float(t.get('min_identity', 0)):g}%\n")
+        f.write(f"- Hits weaker than E > {report_max_evalue:g} are excluded from this report.\n\n")
         f.write("---\n\n")
 
         for _, row in df_features.iterrows():
@@ -332,7 +489,22 @@ def main():
             # Reconstruct the query ID to match BLAST qseqid column
             q_id = f"Rank_{rank}|Score_{score:.4f}|Feature_{feat_id}"
 
-            f.write(f"### Rank {rank}: {sequence} (Gain: {score:.4f})\n")
+            # Provenance flags: gain top-N membership + 07b stability (if present)
+            sel_freq = row.get('selection_frequency', float('nan'))
+            try:
+                sel_freq = float(sel_freq)
+            except (TypeError, ValueError):
+                sel_freq = float('nan')
+            flags = []
+            if bool(row.get('in_gain_topN', True)):
+                flags.append("gain-topN")
+            if bool(row.get('stable', False)):
+                flags.append(f"stable (freq={sel_freq:.2f})")
+            elif sel_freq == sel_freq:      # not NaN
+                flags.append(f"freq={sel_freq:.2f}")
+            flag_str = f" — {', '.join(flags)}" if flags else ""
+
+            f.write(f"### Rank {rank}: {sequence} (Gain: {score:.4f}){flag_str}\n")
 
             # --------------------------------------------------------------
             # CARD hits — no Entrez call needed, offline gene symbol lookup

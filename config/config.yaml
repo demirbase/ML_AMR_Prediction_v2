@@ -15,7 +15,7 @@
 project:
   name: "AMR_Genomic_Project"
   description: "Machine learning-based antimicrobial resistance prediction using k-mer features"
-  target_antibiotic: "gentamicin"  # Primary antibiotic for analysis
+  target_antibiotic: "ampicillin"  # Primary antibiotic for analysis
   organism: "ecoli"  # Organism registry slug (see config/registry/organisms.yaml)
   organism_display: "Escherichia coli"  # Human-readable name (display only)
   model: "xgboost"  # ML model
@@ -191,6 +191,21 @@ xgboost_params:
 # ----------------------------------------------------------------------------
 analysis:
   top_n_features: 50  # Number of top features to extract for biological analysis
+  stability_threshold: 0.6  # selection_frequency >= this -> "stable" k-mer (07b; ROADMAP H1)
+
+  # ── BLAST confidence tiers (step 09) ──────────────────────────────────────
+  # A 21-mer with E=1.5 is NOT confirmed homology, so every BLAST hit is graded.
+  # Thresholds live here (not hardcoded) so they are citeable in Methods and
+  # easy to defend to a reviewer (ROADMAP Risk-4 / §1.4). Tiers are checked
+  # best-first: confirmed -> candidate -> weak.
+  #   confirmed : strong homology to a known ARG
+  #   candidate : plausible but weak (e.g. gyrA at E=1.5 — kept + flagged, NOT dropped)
+  #   weak      : reported for transparency but flagged; below report_max_evalue dropped
+  confidence_tiers:
+    confirmed: {max_evalue: 1.0e-3, min_identity: 95.0}
+    candidate: {max_evalue: 2.0,    min_identity: 90.0}
+    weak:      {max_evalue: 50.0,   min_identity: 80.0}
+  report_max_evalue: 50.0  # hits weaker than this are excluded from the report entirely
 
 # ----------------------------------------------------------------------------
 # BLAST ANNOTATION PARAMETERS (Step 08)

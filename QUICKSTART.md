@@ -123,10 +123,10 @@ python scripts/03_matrix_construction.py  # sparse binary .npz matrix chunks
 python scripts/04_optimization.py         # Optuna HPO -> config/experiments/{org}/config_{ab}.yaml
 python scripts/05_model_training.py       # out-of-core XGBoost -> model + manifest
 python scripts/06_evaluation.py           # metrics, ROC/PR, calibration, bootstrap CIs
-python scripts/07_explainability.py       # top-N k-mers -> CSV + FASTA
-python scripts/07b_feature_stability.py   # 5-seed stability (AUC ±, Jaccard)
+python scripts/07b_feature_stability.py   # 5-seed stability (AUC ±, Jaccard, stable k-mers)
+python scripts/07_explainability.py       # top-N gain k-mers ∪ stable set -> CSV + FASTA
 python scripts/08_blast_annotation.py     # BLAST vs CARD + NCBI (Nextflow; needs internet)
-python scripts/09_biological_summary.py   # confidence-tiered biological report
+python scripts/09_biological_summary.py   # tiered report + recovery rate / composite / novel fraction
 ```
 
 You can also override the target per-invocation without editing config:

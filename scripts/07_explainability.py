@@ -52,6 +52,7 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
 ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 TOP_N = config['analysis']['top_n_features']
+STABILITY_THRESHOLD = config.get('analysis', {}).get('stability_threshold', 0.6)
 
 # Model filename to analyze
 MODEL_FILE = f"xgboost_{TARGET_ANTIBIOTIC}_final_v2.json"
@@ -65,6 +66,38 @@ OUTPUT_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
 
 # Create output directory
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ============================================================================
+# STABILITY INTEGRATION (07b → 07)
+# ============================================================================
+def load_stability_map():
+    """
+    Load 07b's per-k-mer stability table if it exists.
+
+    Returns {feature_index: (selection_frequency, mean_gain, kmer)}. Empty dict
+    if 07b has not been run — in that case 07 falls back to gain-only output
+    (fully backward compatible). For the stability-aware thesis run the order is
+    05 → 07b → 07 → 08 → 09 so this file is present.
+    """
+    stab_path = OUTPUT_DIR / f"06_feature_stability_{TARGET_ANTIBIOTIC}.csv"
+    if not stab_path.exists() or stab_path.stat().st_size == 0:
+        return {}
+    try:
+        df = pd.read_csv(stab_path)
+    except Exception:
+        return {}
+    out = {}
+    for _, r in df.iterrows():
+        try:
+            out[int(r['feature_index'])] = (
+                float(r['selection_frequency']),
+                float(r.get('mean_gain', 0.0)),
+                str(r['kmer']),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
 
 # ============================================================================
 # FEATURE EXTRACTION FUNCTIONS
@@ -157,7 +190,8 @@ def extract_top_features():
             print("  ⚠ WARNING: the model exposes no feature importances (no tree splits).")
             print("    Writing empty top-feature outputs and stopping cleanly.")
             empty_cols = ['Rank', 'Feature_ID', 'Feature_Index', 'Gain_Score',
-                          'Kmer_Sequence', 'Kmer_Length']
+                          'Kmer_Sequence', 'Kmer_Length',
+                          'in_gain_topN', 'selection_frequency', 'stable']
             csv_path = OUTPUT_DIR / f"01_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.csv"
             pd.DataFrame(columns=empty_cols).to_csv(csv_path, index=False, encoding='utf-8')
             fasta_path = OUTPUT_DIR / f"02_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.fasta"
@@ -237,17 +271,25 @@ def extract_top_features():
     print("\n[STEP 4/4] Exporting results...")
     
     try:
+        # 07b stability (if present) — lets us flag/extend the candidate set with
+        # k-mers that are reproducible across seeds (ROADMAP H1/H2). Both the
+        # single-model gain top-N and the stable set are carried forward so the
+        # biological validation (08/09) covers BOTH.
+        stability_map = load_stability_map()
+        gain_indices = {int(name[1:]) for name, _ in sorted_importance}
+
         # Prepare results data
         results_data = []
         fasta_lines = []
-        
+
         for rank, (feat_name, score) in enumerate(sorted_importance, 1):
             # Extract feature index (strip only the leading 'f' prefix)
             idx = int(feat_name[1:])
-            
+
             # Get k-mer sequence (use 'UNKNOWN' if not found)
             kmer_seq = features_map.get(idx, "UNKNOWN")
-            
+            sel_freq = stability_map.get(idx, (np.nan, None, None))[0]
+
             # Add to results table
             results_data.append({
                 'Rank': rank,
@@ -255,14 +297,49 @@ def extract_top_features():
                 'Feature_Index': idx,
                 'Gain_Score': score,
                 'Kmer_Sequence': kmer_seq,
-                'Kmer_Length': len(kmer_seq) if kmer_seq != "UNKNOWN" else 0
+                'Kmer_Length': len(kmer_seq) if kmer_seq != "UNKNOWN" else 0,
+                'in_gain_topN': True,
+                'selection_frequency': sel_freq,
+                'stable': bool(sel_freq >= STABILITY_THRESHOLD) if pd.notna(sel_freq) else False,
             })
-            
+
             # Format for FASTA output
             # FASTA header includes rank and importance score for reference
             fasta_header = f">Rank_{rank}|Score_{score:.4f}|Feature_{feat_name}"
             fasta_lines.append(f"{fasta_header}\n{kmer_seq}")
-        
+
+        # ---- Append STABLE k-mers (07b) not already in the gain top-N --------
+        # These are reproducible across seeds but did not make the single model's
+        # top-N; the thesis's H2 BLAST validation must include them.
+        rank = len(results_data)
+        n_stable_added = 0
+        for idx, (sel_freq, mean_gain, kmer_seq) in sorted(
+                stability_map.items(), key=lambda kv: kv[1][0], reverse=True):
+            if idx in gain_indices or sel_freq < STABILITY_THRESHOLD:
+                continue
+            if not kmer_seq or kmer_seq == "UNKNOWN":
+                continue
+            rank += 1
+            n_stable_added += 1
+            feat_name = f"f{idx}"
+            score = float(mean_gain or 0.0)
+            results_data.append({
+                'Rank': rank,
+                'Feature_ID': feat_name,
+                'Feature_Index': idx,
+                'Gain_Score': score,
+                'Kmer_Sequence': kmer_seq,
+                'Kmer_Length': len(kmer_seq),
+                'in_gain_topN': False,
+                'selection_frequency': sel_freq,
+                'stable': True,
+            })
+            fasta_lines.append(f">Rank_{rank}|Score_{score:.4f}|Feature_{feat_name}\n{kmer_seq}")
+
+        if stability_map:
+            print(f"  ✓ Stability merged: {n_stable_added} stable k-mer(s) "
+                  f"added beyond the gain top-{TOP_N} (threshold ≥ {STABILITY_THRESHOLD})")
+
         # Create DataFrame
         results_df = pd.DataFrame(results_data)
         

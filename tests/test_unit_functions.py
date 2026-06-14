@@ -47,10 +47,52 @@ def test_validate_dataset_valid_and_imbalanced(load_script):
 @pytest.mark.unit
 def test_confidence_tiers(load_script):
     m = load_script("09_biological_summary.py")
-    assert m.classify_confidence(99.0, 1e-5) == "confirmed"
-    assert m.classify_confidence(92.0, 0.5) == "candidate"
-    assert m.classify_confidence(80.0, 0.5) == "weak"     # identity too low
-    assert m.classify_confidence(99.0, 5.0) == "weak"     # 21-mer E=5 is noise
+    t = m.DEFAULT_TIERS
+    assert m.classify_confidence(99.0, 1e-5, t) == "confirmed"
+    assert m.classify_confidence(92.0, 0.5, t) == "candidate"
+    assert m.classify_confidence(99.0, 1.5, t) == "candidate"  # gyrA — kept, not dropped
+    assert m.classify_confidence(85.0, 5.0, t) == "weak"       # 21-mer E=5 → weak (flagged)
+    assert m.classify_confidence(70.0, 5.0, t) == "none"       # identity below weak floor
+
+
+# ---------------------------------------------------------------------------
+# 09_biological_summary.composite_score / build_kb_candidates (M7 / H4)
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_composite_score(load_script):
+    m = load_script("09_biological_summary.py")
+    # stability × log10(1/E) × (identity/100): 0.8 × 5 × 1.0 = 4.0
+    assert abs(m.composite_score(0.8, 100.0, 1e-5) - 4.0) < 1e-9
+    # weak hit (E>1) → log10(1/E) negative → clamped to 0
+    assert m.composite_score(0.8, 100.0, 1.5) == 0.0
+    # missing stability → NaN
+    assert m.composite_score(float("nan"), 100.0, 1e-5) != m.composite_score(float("nan"), 100.0, 1e-5)
+
+
+@pytest.mark.unit
+def test_kb_recovery_and_novel(load_script):
+    import pandas as pd
+    m = load_script("09_biological_summary.py")
+    feats = pd.DataFrame([
+        {"Rank": 1, "Gain_Score": 9.0, "Feature_ID": "f1", "Kmer_Sequence": "AAA",
+         "in_gain_topN": True, "selection_frequency": 0.8, "stable": True},
+        {"Rank": 2, "Gain_Score": 5.0, "Feature_ID": "f2", "Kmer_Sequence": "CCC",
+         "in_gain_topN": True, "selection_frequency": 0.6, "stable": True},
+        {"Rank": 3, "Gain_Score": 4.0, "Feature_ID": "f3", "Kmer_Sequence": "GGG",
+         "in_gain_topN": False, "selection_frequency": 0.8, "stable": True},
+    ])
+    card = pd.DataFrame([
+        {"qseqid": "Rank_1|Score_9.0000|Feature_f1", "pident": 100.0, "evalue": 1e-5,
+         "Gene_Match": "TEM-1", "Confidence": "confirmed"},
+        {"qseqid": "Rank_2|Score_5.0000|Feature_f2", "pident": 92.0, "evalue": 1.5,
+         "Gene_Match": "gyrA", "Confidence": "candidate"},
+    ])  # f3 has no CARD hit → novel
+    kb, met = m.build_kb_candidates(feats, card, 0.6)
+    assert met["n_stable"] == 3
+    assert abs(met["known_mechanism_recovery_rate"] - 1 / 3) < 1e-9   # 1 confirmed / 3 stable
+    assert met["H2_pass"] is False                                    # < 0.40
+    assert abs(met["novel_candidate_fraction"] - 1 / 3) < 1e-9        # 1 novel / 3 stable
+    assert met["tier_counts_all"]["confirmed"] == 1
 
 
 @pytest.mark.unit

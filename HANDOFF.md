@@ -138,7 +138,8 @@ From `docs/TECHNICAL_REVIEW.md` (merged from technical_review_report + AUDIT_ISS
 - **P-04/B06 colsample √p mismatch** — FIXED (dynamic range).
 - R/S double-count (01), hardcoded `top_50` filenames (08/09), O(N²) Gram SVD (03b), BLAST evalue≤50 → confidence tiers (09), Entrez email/api_key, PR-AUC inconsistency, KMC resume, NCBI errorStrategy, CARD version record, duplicated code → `lib/` — ALL FIXED.
 - Runtime bugs found by the integration test: `base_score must be in (0,1)`, `n_estimators=0`, empty feature-importance crash, empty-stability table — ALL FIXED.
-- **Open (future work):** full k-fold CV (P-05 — partly addressed by 07b + bootstrap), cross-antibiotic overlap (S1), permutation test (M9), known-mechanism recovery rate (M7), KB/Postgres/API (M8/M10/M11), temporal validation (S2), MLST bias (S3).
+- **Open (future work):** full k-fold CV (P-05 — partly addressed by 07b + bootstrap), cross-antibiotic overlap (S1), permutation test (M9), KB/Postgres/API (M8/M10/M11), temporal validation (S2), MLST bias (S3).
+- **Done 2026-06-14 (07/08/09 biology pass):** **M7 known-mechanism recovery rate**, **composite score** (§1.4), **H4 novel-candidate fraction** now computed in 09 → `07_kb_candidates_{ab}.csv` + `08_validation_metrics_{ab}.json`. **M3 tiers** moved to `config.analysis.confidence_tiers` (confirmed/candidate/weak), weak hits **kept + flagged** (gyrA E=1.5 → candidate, no longer dropped). **07 now merges 07b stable k-mers** into the gain top-N (flags `in_gain_topN`/`stable`/`selection_frequency`) so BLAST/biology covers both sets — pipeline order is now **07b → 07** → 08 → 09.
 
 ---
 
