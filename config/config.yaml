@@ -230,6 +230,15 @@ blast:
   word_size:    11                        # Seed word size (11 is standard for short seqs)
   threads:      8                         # CPU threads for local BLAST only
 
+  # ── CARD variant/SNP data (step 11 — k-mer-centric SNP allele check) ──────
+  # NOT shipped with the repo (the bundled card.fna is the homolog model only).
+  # Download the full CARD data bundle to get these:
+  #   mkdir -p data/external/card && cd data/external/card
+  #   wget https://card.mcmaster.ca/latest/data -O card-data.tar.bz2
+  #   tar xjf card-data.tar.bz2          # -> card.json + *_variant_model.fasta
+  card_variant_fasta: "data/external/card/nucleotide_fasta_protein_variant_model.fasta"
+  card_json:          "data/external/card/card.json"
+
 # ----------------------------------------------------------------------------
 # NCBI ENTREZ PARAMETERS (Step 09 — biological summary)
 # ----------------------------------------------------------------------------

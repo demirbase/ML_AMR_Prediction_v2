@@ -116,6 +116,41 @@ def test_kmer_background_frequency(load_script):
     assert u["enriched_in"] == "equal"
 
 
+# ---------------------------------------------------------------------------
+# 11_variant_snp_check — SNP parsing / codon mapping / allele classification
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_variant_snp_helpers(load_script):
+    m = load_script("11_variant_snp_check.py")
+    assert m.parse_snp_token("S83L") == ("S", 83, "L")
+    assert m.parse_snp_token("not-a-snp") is None
+    assert m.protein_pos_to_codon_nt(83) == (247, 249)   # (83-1)*3+1
+    assert m.translate_codon("CTG") == "L"
+    assert m.aro_from_sseqid("gb|AF469609.1|+|566-3353|ARO:3003297|gyrA") == "3003297"
+
+    # Plus strand, ungapped: subject CDS 245..253, codon 247-249.
+    # k-mer carries CTG (Leu) at the codon -> resistant for S83L.
+    qc = m.query_codon_from_alignment(245, 253, "plus",
+                                      "AG" + "CTG" + "AAGT", "AG" + "AGC" + "AAGT",
+                                      (247, 248, 249))
+    assert qc == "CTG"
+    assert m.classify_allele(qc, "S", "L") == "resistant_allele"
+    # Same codon but wildtype AGC (Ser)
+    qc_wt = m.query_codon_from_alignment(245, 253, "plus",
+                                         "AG" + "AGC" + "AAGT", "AG" + "AGC" + "AAGT",
+                                         (247, 248, 249))
+    assert m.classify_allele(qc_wt, "S", "L") == "wildtype"
+    # Minus strand: CDS-sense base = complement of aligned query char
+    qcm = m.query_codon_from_alignment(253, 245, "minus",
+                                       "AAAA" + "C" + "A" + "G" + "CT",
+                                       "TTAA" + "C" + "A" + "G" + "CT",
+                                       (247, 248, 249))
+    assert qcm == "CTG"
+    # Codon not fully covered -> None -> ambiguous
+    assert m.query_codon_from_alignment(248, 253, "plus", "CTGAAG", "AGCAAG", (247, 248, 249)) is None
+    assert m.classify_allele(None, "S", "L") == "ambiguous"
+
+
 @pytest.mark.unit
 def test_card_gene_and_accession_parsing(load_script):
     m = load_script("09_biological_summary.py")
