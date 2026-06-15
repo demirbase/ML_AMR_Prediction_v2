@@ -66,7 +66,7 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-from lib.config import resolve_path
+from lib.config import resolve_path, resolve_tool
 
 # Extract configuration values
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
@@ -89,9 +89,13 @@ KMC_OUTPUTS_DIR = resolve_path('kmc_outputs_dir', organism=ORGANISM, config=conf
 MATRIX_OUTPUT_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 TEMP_DIR = KMC_OUTPUTS_DIR / "tmp"
 
-# KMC binaries (global)
-KMC_BIN = PROJECT_ROOT / "bin" / "bin" / "kmc"
-KMC_TOOLS_BIN = PROJECT_ROOT / "bin" / "bin" / "kmc_tools"
+# KMC binaries — PATH-aware (conda/module on Linux/HPC; bundled macOS binary is
+# only a Darwin fallback). Override with AMR_KMC_BIN / AMR_KMC_TOOLS_BIN.
+KMC_BIN = resolve_tool('kmc_bin', 'kmc', config=config)
+KMC_TOOLS_BIN = resolve_tool('kmc_tools_bin', 'kmc_tools', config=config)
+if not KMC_BIN or not KMC_TOOLS_BIN:
+    sys.exit("ERROR: KMC not found. Install KMC (conda install -c bioconda kmc) so "
+             "`kmc`/`kmc_tools` are on PATH, or set AMR_KMC_BIN / AMR_KMC_TOOLS_BIN.")
 
 # Create output directories
 MATRIX_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

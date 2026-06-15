@@ -48,7 +48,7 @@ try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-    from lib.config import resolve_path
+    from lib.config import resolve_path, resolve_tool
     ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 
     K_LENGTH = config['preprocessing']['k_length']
@@ -61,11 +61,17 @@ try:
     OUTPUT_DIR = resolve_path('dir_global_exploration', organism=ORGANISM, config=config)
     TEMP_DIR = KMC_OUTPUTS_DIR / "tmp"
 
-    # KMC tools path (global)
-    KMC_TOOLS_BIN = resolve_path('kmc_tools_bin', organism=ORGANISM, config=config)
-    KMC_BIN = resolve_path('kmc_bin', organism=ORGANISM, config=config)
+    # KMC tools — PATH-aware so a conda/module install works on Linux/HPC, with
+    # the bundled macOS binary used only as a fallback on Darwin (see resolve_tool).
+    KMC_TOOLS_BIN = resolve_tool('kmc_tools_bin', 'kmc_tools', config=config)
+    KMC_BIN = resolve_tool('kmc_bin', 'kmc', config=config)
 except Exception as e:
     print(f"ERROR loading config: {e}")
+    sys.exit(1)
+
+if not KMC_TOOLS_BIN or not KMC_BIN:
+    print("ERROR: KMC not found. Install KMC (conda install -c bioconda kmc) so "
+          "`kmc`/`kmc_tools` are on PATH, or set AMR_KMC_BIN / AMR_KMC_TOOLS_BIN.")
     sys.exit(1)
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

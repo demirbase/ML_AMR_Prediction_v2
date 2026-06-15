@@ -147,8 +147,9 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -r requirements.txt
 ```
 
-Then install the external tools (see `requirements.txt` for per-OS commands):
-KMC ≥3.2 (binaries expected under `bin/bin/`), BLAST+ ≥2.12, Nextflow ≥22.10.
+Then install the external tools (conda recommended: `conda env create -f environment.yml`
+installs them all): KMC ≥3.2, BLAST+ ≥2.12, Nextflow ≥22.10. Tools are found on
+`PATH` (conda/module); a macOS binary under `bin/bin/` is used only as a fallback.
 
 ---
 
@@ -156,19 +157,25 @@ KMC ≥3.2 (binaries expected under `bin/bin/`), BLAST+ ≥2.12, Nextflow ≥22.
 
 ```bash
 # 1) choose target in config/config.yaml (project.organism + project.target_antibiotic)
-# 2) run the steps in order
+# 2) acquire data, then run the steps in order
+python scripts/00a_download_bvbrc.py --organism ecoli   # BV-BRC AMR data + assemblies
+python scripts/00_prepare_metadata.py --organism ecoli  # binary phenotype matrix
 python scripts/01_data_validation.py
 python scripts/02_kmer_extraction.py
+python scripts/02b_global_qc_analysis.py
 python scripts/03_matrix_construction.py
 python scripts/04_optimization.py
 python scripts/05_model_training.py
 python scripts/06_evaluation.py
-python scripts/07_explainability.py
+python scripts/07b_feature_stability.py   # 5-seed stability (run before 07)
+python scripts/07_explainability.py       # gain top-N ∪ stable set -> CSV + FASTA
 python scripts/08_blast_annotation.py     # needs BLAST+ / Nextflow / CARD DB
-python scripts/09_biological_summary.py   # needs config ncbi.entrez_email
+python scripts/09_biological_summary.py   # tiered report; needs config ncbi.entrez_email
+python scripts/10_kmer_background_frequency.py  # resistant-vs-susceptible discriminativeness
+python scripts/11_variant_snp_check.py    # CARD variant-model SNP allele check (optional)
 ```
 
-See `QUICKSTART.md` for prerequisites and expected outputs.
+See `QUICKSTART.md` for prerequisites, HPC notes and expected outputs.
 
 ## Testing
 
