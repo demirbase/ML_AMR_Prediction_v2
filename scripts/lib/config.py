@@ -15,10 +15,13 @@ Public API:
     resolve_path(key, organism=, antibiotic=, run_id=) -> Path
 """
 
+from __future__ import annotations
+
 import os
 import platform
 import shutil
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -27,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
 
-def load_config(config_path=None):
+def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     """Load and return the global config.yaml as a dict."""
     path = Path(config_path) if config_path else CONFIG_FILE
     if not path.exists():
@@ -36,7 +39,7 @@ def load_config(config_path=None):
         return yaml.safe_load(f)
 
 
-def get_target(args=None, config=None):
+def get_target(args: Any = None, config: dict[str, Any] | None = None) -> tuple[str | None, str | None]:
     """
     Resolve the (organism, antibiotic) target with the precedence:
         CLI args  >  environment variables  >  config.yaml defaults.
@@ -67,7 +70,8 @@ def get_target(args=None, config=None):
     return organism, antibiotic
 
 
-def resolve_path(key, organism=None, antibiotic=None, run_id=None, config=None):
+def resolve_path(key: str, organism: str | None = None, antibiotic: str | None = None,
+                 run_id: str | None = None, config: dict[str, Any] | None = None) -> Path:
     """
     Resolve a path template from config into an absolute Path.
 
@@ -116,7 +120,8 @@ def resolve_path(key, organism=None, antibiotic=None, run_id=None, config=None):
     return PROJECT_ROOT / resolved
 
 
-def resolve_tool(config_key, command_name, config=None, env_var=None):
+def resolve_tool(config_key: str, command_name: str, config: dict[str, Any] | None = None,
+                 env_var: str | None = None) -> str | None:
     """
     Locate an external tool executable in a cross-platform / HPC-friendly way.
 

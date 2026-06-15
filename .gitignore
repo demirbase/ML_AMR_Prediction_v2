@@ -59,6 +59,9 @@ data/external/card/
 # Per-organism metadata produced by 00a/00 (binary phenotype matrix, manifests)
 data/external/**/metadata/
 
+# Auto-generated experiment configs (written by step 04 — regenerate, don't track)
+config/experiments/**/config_*.yaml
+
 # ============================================================================
 # KMC DATABASE FILES
 # ============================================================================

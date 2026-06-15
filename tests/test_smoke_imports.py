@@ -28,6 +28,8 @@ PIPELINE_SCRIPTS = [
     "07b_feature_stability.py",
     "08_blast_annotation.py",
     "09_biological_summary.py",
+    "10_kmer_background_frequency.py",
+    "11_variant_snp_check.py",
     "migrate_to_organism_layout.py",
 ]
 

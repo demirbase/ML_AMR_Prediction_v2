@@ -1,9 +1,11 @@
 # ML AMR Prediction Framework v2 — Alignment-Free WGS Out-of-Core Learning
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![CI](https://github.com/demirbase/ML_AMR_Prediction_v2/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)
 ![ML](https://img.shields.io/badge/ML-XGBoost-orange.svg)
 ![Pipeline](https://img.shields.io/badge/pipeline-Nextflow-brightgreen.svg)
 ![Tests](https://img.shields.io/badge/tests-pytest-green.svg)
+![Lint](https://img.shields.io/badge/lint-ruff-261230.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## Abstract
@@ -186,3 +188,32 @@ multi-day pipeline (see `tests/README.md`):
 pytest                 # fast: smoke + unit (seconds); never touches config
 pytest -m integration  # opt-in end-to-end on a tiny synthetic dataset (minutes)
 ```
+
+## Orchestration & developer workflow
+
+```bash
+make help                          # list all targets
+make dev-install                   # install the QA toolchain (ruff/mypy/pre-commit) + pre-commit hooks
+make lint                          # ruff
+make test                          # unit + smoke
+python scripts/run_pipeline.py --list                         # show the step plan
+python scripts/run_pipeline.py --organism ecoli --antibiotic ampicillin   # run the analysis core 01->10
+```
+
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs ruff + the unit/smoke suite on Python 3.10–3.12.
+
+## Reproducibility & data
+
+The repository tracks **only code, configuration, docs, and the small CARD
+homolog BLAST DB**. All datasets, k-mer matrices, models, results and run
+metadata are *generated* and reproduced by running the pipeline (see
+`QUICKSTART.md`). Each run records its git commit, library versions and seed in
+`runs/.../run_metadata.json`. Genome data is obtained from
+[BV-BRC](https://www.bv-brc.org); resistance annotations from
+[CARD](https://card.mcmaster.ca).
+
+## License & citation
+
+Released under the [MIT License](LICENSE). If you use this software, please cite
+it via [`CITATION.cff`](CITATION.cff). Contributions are welcome — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md).

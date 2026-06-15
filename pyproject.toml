@@ -1,0 +1,106 @@
+# ============================================================================
+# pyproject.toml — ML_AMR_Prediction_v2
+# ============================================================================
+# Project metadata (PEP 621) + tooling configuration (ruff, mypy, pytest).
+# The numbered pipeline scripts live in scripts/ and are invoked directly
+# (python scripts/NN_*.py); the reusable core is the `lib` package under
+# scripts/lib. Install the dev/QA toolchain with:  pip install -e ".[dev]"
+# ============================================================================
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amr-kmer-kb"
+version = "0.1.0"
+description = "Stability-filtered, biologically validated AMR k-mer knowledge-base pipeline for E. coli"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Eren Demirbaş", email = "eren0demirbas@gmail.com" }]
+keywords = ["antimicrobial-resistance", "machine-learning", "k-mer", "bioinformatics", "xgboost", "FAIR"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "pandas>=1.3",
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "scikit-learn>=1.0",
+    "xgboost>=1.5",
+    "optuna>=2.10",
+    "joblib>=1.0",
+    "matplotlib>=3.4",
+    "seaborn>=0.11",
+    "biopython>=1.79",
+    "pyyaml>=5.4",
+    "tqdm>=4.62",
+    "certifi>=2021.10.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "pre-commit>=3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/demirbase/ML_AMR_Prediction_v2"
+Repository = "https://github.com/demirbase/ML_AMR_Prediction_v2"
+Documentation = "https://github.com/demirbase/ML_AMR_Prediction_v2/blob/main/README.md"
+
+# Expose the reusable helper package (scripts/lib) for `pip install -e .`.
+[tool.setuptools]
+package-dir = { "amr_lib" = "scripts/lib" }
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+include = ["lib*"]
+
+# ----------------------------------------------------------------------------
+# Ruff — linter + formatter
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["bin", "archive", "data", "results", "logs", "runs", "work"]
+
+[tool.ruff.lint]
+# Conservative, high-signal rule set: real correctness errors (syntax, undefined
+# names) that a working codebase already passes — so CI is meaningful without
+# forcing a large stylistic refactor of the existing scientific scripts. Stricter
+# rules (F401 unused imports, I import-sorting, etc.) can be enabled incrementally.
+select = ["E9", "F63", "F7", "F82"]
+ignore = ["E501"]
+
+# ----------------------------------------------------------------------------
+# mypy — type checking (scoped to the reusable lib/ core, not the scripts)
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+files = ["scripts/lib"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+# ----------------------------------------------------------------------------
+# pytest (mirrors pytest.ini; kept here for tooling that reads pyproject)
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = '-m "not integration and not slow" -ra'
+markers = [
+    "unit: fast, pure-function unit tests",
+    "smoke: import/load checks for every numbered script",
+    "integration: end-to-end pipeline on a tiny synthetic dataset",
+    "slow: long-running tests",
+]
