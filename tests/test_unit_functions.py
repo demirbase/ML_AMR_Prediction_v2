@@ -97,6 +97,25 @@ def test_kb_recovery_and_novel(load_script):
     assert met["tier_counts_all"]["confirmed"] == 1
 
 
+# ---------------------------------------------------------------------------
+# 10_kmer_background_frequency.compute_kmer_stats (discriminativeness)
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_kmer_background_frequency(load_script):
+    m = load_script("10_kmer_background_frequency.py")
+    # Strong resistance marker: present in most R, few S -> discriminative
+    s = m.compute_kmer_stats(present_r=90, n_r=100, present_s=10, n_s=100)
+    assert abs(s["prevalence_resistant"] - 0.9) < 1e-9
+    assert abs(s["prevalence_susceptible"] - 0.1) < 1e-9
+    assert s["enriched_in"] == "resistant"
+    assert s["fisher_p"] < 0.05
+    assert s["discriminative"] is True
+    # Ubiquitous: present everywhere, no R/S difference -> NOT discriminative
+    u = m.compute_kmer_stats(present_r=95, n_r=100, present_s=95, n_s=100)
+    assert u["discriminative"] is False
+    assert u["enriched_in"] == "equal"
+
+
 @pytest.mark.unit
 def test_card_gene_and_accession_parsing(load_script):
     m = load_script("09_biological_summary.py")

@@ -127,6 +127,7 @@ python scripts/07b_feature_stability.py   # 5-seed stability (AUC ±, Jaccard, s
 python scripts/07_explainability.py       # top-N gain k-mers ∪ stable set -> CSV + FASTA
 python scripts/08_blast_annotation.py     # BLAST vs CARD + NCBI (Nextflow; needs internet)
 python scripts/09_biological_summary.py   # tiered report + recovery rate / composite / novel fraction
+python scripts/10_kmer_background_frequency.py  # resistant-vs-susceptible prevalence + discriminativeness (Fisher)
 ```
 
 You can also override the target per-invocation without editing config:
