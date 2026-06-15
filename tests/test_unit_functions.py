@@ -47,12 +47,14 @@ def test_validate_dataset_valid_and_imbalanced(load_script):
 @pytest.mark.unit
 def test_confidence_tiers(load_script):
     m = load_script("09_biological_summary.py")
-    t = m.DEFAULT_TIERS
-    assert m.classify_confidence(99.0, 1e-5, t) == "confirmed"
-    assert m.classify_confidence(92.0, 0.5, t) == "candidate"
-    assert m.classify_confidence(99.0, 1.5, t) == "candidate"  # gyrA — kept, not dropped
-    assert m.classify_confidence(85.0, 5.0, t) == "weak"       # 21-mer E=5 → weak (flagged)
-    assert m.classify_confidence(70.0, 5.0, t) == "none"       # identity below weak floor
+    t, k = m.DEFAULT_TIERS, 21
+    # identity + coverage are primary; E-value is a loose secondary gate
+    assert m.classify_confidence(99.0, 1e-5, 21, k, t) == "confirmed"  # full-length near-exact
+    assert m.classify_confidence(92.0, 0.5, 18, k, t) == "candidate"   # high id, partial coverage
+    assert m.classify_confidence(99.0, 1e-5, 18, k, t) == "candidate"  # 99% but cov<0.95 → demoted
+    assert m.classify_confidence(85.0, 5.0, 14, k, t) == "weak"        # kept + flagged
+    assert m.classify_confidence(70.0, 5.0, 14, k, t) == "none"        # identity below weak floor
+    assert m.classify_confidence(99.0, 1e-5, 10, k, t) == "none"       # coverage below weak floor
 
 
 # ---------------------------------------------------------------------------

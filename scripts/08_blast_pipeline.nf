@@ -60,6 +60,8 @@ process CARD_BLAST {
     blastn \\
         -query       ${fasta} \\
         -db          ${params.card_db} \\
+        -task        blastn-short \\
+        -dust        no \\
         -outfmt      "${OUTFMT}" \\
         -evalue      ${params.evalue} \\
         -word_size   ${params.word_size} \\

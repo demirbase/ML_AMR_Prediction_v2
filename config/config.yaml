@@ -150,7 +150,7 @@ training:
   validation_fraction: 0.2  # Fraction of training data for early stopping validation
   
   # Hyperparameter optimization
-  n_trials: 25  # Number of Optuna optimization trials
+  n_trials: 10  # Number of Optuna optimization trials
   optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
 
@@ -194,17 +194,19 @@ analysis:
   stability_threshold: 0.6  # selection_frequency >= this -> "stable" k-mer (07b; ROADMAP H1)
 
   # ── BLAST confidence tiers (step 09) ──────────────────────────────────────
-  # A 21-mer with E=1.5 is NOT confirmed homology, so every BLAST hit is graded.
-  # Thresholds live here (not hardcoded) so they are citeable in Methods and
-  # easy to defend to a reviewer (ROADMAP Risk-4 / §1.4). Tiers are checked
-  # best-first: confirmed -> candidate -> weak.
-  #   confirmed : strong homology to a known ARG
-  #   candidate : plausible but weak (e.g. gyrA at E=1.5 — kept + flagged, NOT dropped)
-  #   weak      : reported for transparency but flagged; below report_max_evalue dropped
+  # Every BLAST hit is graded so weak matches are never presented as findings.
+  # For a 21-mer the primary, DB-size-independent criteria are IDENTITY and
+  # COVERAGE (alignment length / k); E-value is only a loose secondary gate
+  # because it depends on database size (CARD ~MB vs NCBI nt ~TB) and is NOT
+  # comparable across the two databases. Thresholds live here (citeable in
+  # Methods; ROADMAP Risk-4 / §1.4). Tiers checked best-first: confirmed→candidate→weak.
+  #   confirmed : near-exact full-length match to a known ARG
+  #   candidate : strong but partial (kept + flagged, NOT dropped)
+  #   weak      : reported transparently but flagged; below report_max_evalue dropped
   confidence_tiers:
-    confirmed: {max_evalue: 1.0e-3, min_identity: 95.0}
-    candidate: {max_evalue: 2.0,    min_identity: 90.0}
-    weak:      {max_evalue: 50.0,   min_identity: 80.0}
+    confirmed: {min_identity: 95.0, min_coverage: 0.95, max_evalue: 1.0}
+    candidate: {min_identity: 90.0, min_coverage: 0.80, max_evalue: 10.0}
+    weak:      {min_identity: 80.0, min_coverage: 0.60, max_evalue: 50.0}
   report_max_evalue: 50.0  # hits weaker than this are excluded from the report entirely
 
 # ----------------------------------------------------------------------------

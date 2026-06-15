@@ -46,33 +46,47 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # confidence_tiers) so they are citeable in Methods and easy to defend; a hard-
 # coded fallback keeps the script runnable if the keys are absent.
 DEFAULT_TIERS = {
-    "confirmed": {"max_evalue": 1e-3, "min_identity": 95.0},
-    "candidate": {"max_evalue": 2.0,  "min_identity": 90.0},
-    "weak":      {"max_evalue": 50.0, "min_identity": 80.0},
+    "confirmed": {"min_identity": 95.0, "min_coverage": 0.95, "max_evalue": 1.0},
+    "candidate": {"min_identity": 90.0, "min_coverage": 0.80, "max_evalue": 10.0},
+    "weak":      {"min_identity": 80.0, "min_coverage": 0.60, "max_evalue": 50.0},
 }
 DEFAULT_REPORT_MAX_EVALUE = 50.0
+DEFAULT_KMER_LENGTH = 21
 
 
 def load_tiers(config):
-    """Return (tiers dict, report_max_evalue, weak_min_identity, stability_threshold)."""
+    """Return (tiers, report_max_evalue, weak_min_identity, weak_min_cov, k_length, stability_threshold)."""
     analysis = config.get("analysis", {}) or {}
     tiers = analysis.get("confidence_tiers", DEFAULT_TIERS) or DEFAULT_TIERS
     report_max = float(analysis.get("report_max_evalue", DEFAULT_REPORT_MAX_EVALUE))
-    weak_min_ident = float(tiers.get("weak", DEFAULT_TIERS["weak"])["min_identity"])
+    weak = tiers.get("weak", DEFAULT_TIERS["weak"])
+    weak_min_ident = float(weak["min_identity"])
+    weak_min_cov = float(weak.get("min_coverage", DEFAULT_TIERS["weak"]["min_coverage"]))
+    k_length = int(config.get("preprocessing", {}).get("k_length", DEFAULT_KMER_LENGTH))
     stability_threshold = float(analysis.get("stability_threshold", 0.6))
-    return tiers, report_max, weak_min_ident, stability_threshold
+    return tiers, report_max, weak_min_ident, weak_min_cov, k_length, stability_threshold
 
 
-def classify_confidence(pident, evalue, tiers):
-    """Grade a BLAST hit into confirmed / candidate / weak (best-first) or 'none'."""
+def classify_confidence(pident, evalue, length, k_length, tiers):
+    """
+    Grade a BLAST hit into confirmed / candidate / weak (best-first) or 'none'.
+
+    For a short k-mer query the primary, database-size-independent criteria are
+    IDENTITY and COVERAGE (alignment length / k). E-value is only a loose
+    secondary gate, because it scales with database size and is not comparable
+    between CARD (small) and NCBI nt (huge).
+    """
     try:
         pident = float(pident)
         evalue = float(evalue)
-    except (TypeError, ValueError):
+        coverage = float(length) / float(k_length) if k_length else 0.0
+    except (TypeError, ValueError, ZeroDivisionError):
         return "none"
     for tier in ("confirmed", "candidate", "weak"):
         t = tiers.get(tier)
-        if t and evalue <= float(t["max_evalue"]) and pident >= float(t["min_identity"]):
+        if (t and pident >= float(t["min_identity"])
+                and coverage >= float(t.get("min_coverage", 0.0))
+                and evalue <= float(t["max_evalue"])):
             return tier
     return "none"
 
@@ -347,7 +361,7 @@ def main():
     config = load_config()
     antibiotic = config['project']['target_antibiotic']
     top_n = config.get('analysis', {}).get('top_n_features', 50)
-    tiers, report_max_evalue, weak_min_ident, stability_threshold = load_tiers(config)
+    tiers, report_max_evalue, weak_min_ident, weak_min_cov, k_length, stability_threshold = load_tiers(config)
 
     # Configure NCBI Entrez identity (email / api_key) from config — never a
     # hardcoded placeholder e-mail (NCBI ToS / ban risk).
@@ -393,16 +407,18 @@ def main():
         df_card = pd.read_csv(card_file, sep='\t', header=None, names=tsv_cols)
         df_card['pident'] = pd.to_numeric(df_card['pident'], errors='coerce')
         df_card['evalue'] = pd.to_numeric(df_card['evalue'], errors='coerce')
-        # Keep everything down to the weak tier (E ≤ report_max_evalue, identity ≥
-        # weak floor) and grade each hit. Weak hits (e.g. gyrA at E=1.5) are kept
-        # and FLAGGED rather than dropped, so the report is transparent about
-        # low-confidence signals (ROADMAP Risk-4 / §1.4).
+        df_card['length'] = pd.to_numeric(df_card['length'], errors='coerce')
+        # Keep everything down to the weak tier (identity + coverage floors,
+        # E ≤ report_max_evalue) and grade each hit. Weak hits are kept and
+        # FLAGGED rather than dropped, for transparency (ROADMAP Risk-4 / §1.4).
         df_card = df_card[
-            (df_card['pident'] >= weak_min_ident) & (df_card['evalue'] <= report_max_evalue)
+            (df_card['pident'] >= weak_min_ident)
+            & (df_card['length'] >= weak_min_cov * k_length)
+            & (df_card['evalue'] <= report_max_evalue)
         ].copy()
         df_card['Gene_Match'] = df_card['sseqid'].apply(extract_card_gene)
         df_card['Confidence'] = df_card.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue'], tiers), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], k_length, tiers), axis=1)
     else:
         print(f"Warning: {card_file} is missing or empty.")
         df_card = pd.DataFrame(columns=tsv_cols + ['Gene_Match'])
@@ -417,13 +433,16 @@ def main():
         df_ncbi = pd.read_csv(ncbi_file, sep='\t', header=None, names=tsv_cols)
         df_ncbi['pident'] = pd.to_numeric(df_ncbi['pident'], errors='coerce')
         df_ncbi['evalue'] = pd.to_numeric(df_ncbi['evalue'], errors='coerce')
+        df_ncbi['length'] = pd.to_numeric(df_ncbi['length'], errors='coerce')
         df_ncbi['sstart'] = pd.to_numeric(df_ncbi['sstart'], errors='coerce').fillna(0).astype(int)
         df_ncbi['send']   = pd.to_numeric(df_ncbi['send'],   errors='coerce').fillna(0).astype(int)
         df_ncbi = df_ncbi[
-            (df_ncbi['pident'] >= weak_min_ident) & (df_ncbi['evalue'] <= report_max_evalue)
+            (df_ncbi['pident'] >= weak_min_ident)
+            & (df_ncbi['length'] >= weak_min_cov * k_length)
+            & (df_ncbi['evalue'] <= report_max_evalue)
         ].copy()
         df_ncbi['Confidence'] = df_ncbi.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue'], tiers), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], k_length, tiers), axis=1)
     else:
         print(f"Warning: {ncbi_file} is missing or empty.")
         df_ncbi = pd.DataFrame(columns=tsv_cols + ['Confidence'])
@@ -467,17 +486,25 @@ def main():
                 f"weak={ct.get('weak', 0)}, none={ct.get('none', 0)}\n\n")
         f.write("> Composite score = stability × log10(1/E-value) × (identity/100); "
                 "see `07_kb_candidates` for the ranked table.\n\n")
-        f.write("**Methodological note:** a high Gain/stability score is a statistical "
-                "signal, not proof of biological causation. Confidence tiers separate "
-                "statistical correlation from homology-based validation; weak hits are "
-                "reported transparently, not as findings.\n\n")
+        f.write("**Methodological notes:**\n")
+        f.write("- A high Gain/stability score is a statistical signal, not proof of "
+                "biological causation. Confidence tiers separate statistical correlation "
+                "from homology-based validation; weak hits are reported, not claimed as findings.\n")
+        f.write("- CARD hits use the **homolog model** (gene presence). A hit indicates the "
+                "k-mer lies in a known ARG region, **not** that a resistance-conferring SNP is "
+                "present — SNP/variant mechanisms (e.g. gyrA/parC fluoroquinolone mutations) are "
+                "not confirmed here and need CARD's variant model / RGI.\n")
+        f.write("- Tiers grade on **identity + coverage** (alignment length / k); E-value is a "
+                "loose secondary gate only, as it is not comparable between CARD and NCBI nt "
+                "(different database sizes).\n\n")
 
-        f.write("**Confidence tiers** (short-alignment BLAST grading):\n")
+        f.write(f"**Confidence tiers** (k-mer length k = {k_length}; checked best-first):\n")
         for tier in ("confirmed", "candidate", "weak"):
             t = tiers.get(tier, {})
-            f.write(f"- `{tier}` — E ≤ {float(t.get('max_evalue', 0)):g} and "
-                    f"identity ≥ {float(t.get('min_identity', 0)):g}%\n")
-        f.write(f"- Hits weaker than E > {report_max_evalue:g} are excluded from this report.\n\n")
+            f.write(f"- `{tier}` — identity ≥ {float(t.get('min_identity', 0)):g}%, "
+                    f"coverage ≥ {float(t.get('min_coverage', 0)) * 100:g}%, "
+                    f"E ≤ {float(t.get('max_evalue', 0)):g}\n")
+        f.write(f"- Hits below the weak floor or with E > {report_max_evalue:g} are excluded.\n\n")
         f.write("---\n\n")
 
         for _, row in df_features.iterrows():
@@ -510,7 +537,7 @@ def main():
             # CARD hits — no Entrez call needed, offline gene symbol lookup
             # --------------------------------------------------------------
             f.write("**CARD Hits (Acquired Resistance / Plasmids):**\n")
-            card_hits = df_card[df_card['qseqid'] == q_id].head(10)
+            card_hits = df_card[df_card['qseqid'] == q_id].sort_values('evalue').head(10)
             if not card_hits.empty:
                 for _, hit in card_hits.iterrows():
                     f.write(
@@ -526,7 +553,7 @@ def main():
             # NCBI hits — real-time Entrez coordinate lookup (top 10 only)
             # --------------------------------------------------------------
             f.write("**NCBI Hits (Core Genome / SNPs):**\n")
-            ncbi_hits = df_ncbi[df_ncbi['qseqid'] == q_id].head(10)
+            ncbi_hits = df_ncbi[df_ncbi['qseqid'] == q_id].sort_values('evalue').head(10)
             if not ncbi_hits.empty:
                 for _, hit in ncbi_hits.iterrows():
                     gene_label = fetch_gene_name_at_coords(
