@@ -118,14 +118,17 @@ def clean_amr_table(df, normalize_fn=None):
     # 0) evidence filter — keep laboratory-measured phenotypes only (drop
     #    computational predictions). No-op if the column is absent.
     if "evidence" in df.columns:
-        ev = df["evidence"].astype(str).str.lower()
-        df = df[ev.str.contains("laborator")]
+        # fillna("") before astype(str): newer pandas can leave NaN as a float
+        # after astype(str).str.lower(), which then breaks substring tests.
+        ev = df["evidence"].fillna("").astype(str).str.lower()
+        df = df[ev.str.contains("laborator", na=False)]
         report["rows_after_evidence"] = len(df)
 
-    # 1) testing standard filter (EUCAST / CLSI only)
+    # 1) testing standard filter (EUCAST / CLSI only). Vectorised + NaN-safe:
+    #    empty / missing testing_standard rows are simply dropped (don't match).
     if "testing_standard" in df.columns:
-        std = df["testing_standard"].astype(str).str.lower()
-        keep = std.apply(lambda s: any(t in s for t in _ALLOWED_STANDARD_SUBSTRINGS))
+        std = df["testing_standard"].fillna("").astype(str).str.lower()
+        keep = std.str.contains("|".join(_ALLOWED_STANDARD_SUBSTRINGS), na=False)
         df = df[keep]
     else:
         report["warning"] = "no testing_standard column — standard filter skipped"
