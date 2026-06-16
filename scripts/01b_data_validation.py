@@ -5,16 +5,15 @@ Exploratory Data Analysis (EDA) & Visualization Module for AMR Data
 
 This script generates publication-quality visualizations for the raw genomic 
 metadata (genome_amr_matrix.csv) validated in 01_data_validation.py. 
-It provides visual confirmation of data integrity, class distributions, 
-missing data patterns, and co-occurrence of resistance profiles before 
-proceeding to computationally expensive k-mer extraction and model training.
+It provides visual confirmation of data integrity, class distributions and
+missing data patterns before proceeding to computationally expensive k-mer
+extraction and model training.
 
 Visualizations generated:
 1. Antibiotic Resistance Distribution (Horizontal Bar Plot)
 2. Missing Data Heatmap (Sparsity of phenotypes)
 3. Antibiotic Class Representation (Pie Chart)
 4. Target Antibiotic Deep Dive (Class Imbalance visual)
-5. Co-occurrence / Cross-Resistance Heatmap (Correlation of resistance profiles)
 """
 
 # ============================================================================
@@ -45,24 +44,20 @@ plt.rcParams['font.family'] = 'sans-serif'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 
-# Shared Dictionary from 01_data_validation.py
-ANTIBIOTIC_CLASSES = {
-    'Penicillins': ['ampicillin', 'amoxicillin', 'amoxicillin/clavulanic acid', 'piperacillin/tazobactam', 'ampicillin/sulbactam', 'penicillin', 'carbenicillin', 'piperacillin', 'ticarcillin/clavulanic acid'],
-    'Cephalosporins': ['ceftazidime', 'cefotaxime', 'cefuroxime', 'ceftriaxone', 'cefepime', 'cefoxitin', 'cephalothin', 'cefazolin', 'ceftiofur', 'cefpodoxime', 'cefotetan', 'ceftazidime/avibactam', 'ceftaroline', 'cephalexin', 'cefpodoxime_clavulanic_acid', 'ceftolozane/tazobactam', 'cefotaxime/clavulanic acid'],
-    'Beta-Lactams: Carbapenems & Others': ['meropenem', 'imipenem', 'ertapenem', 'doripenem', 'aztreonam', 'beta-lactam', 'sulbactam'],
-    'Aminoglycosides': ['gentamicin', 'amikacin', 'tobramycin', 'streptomycin', 'kanamycin', 'apramycin', 'neomycin', 'netilmicin'],
-    'Quinolones': ['ciprofloxacin', 'norfloxacin', 'levofloxacin', 'nalidixic acid', 'moxifloxacin', 'ofloxacin'],
-    'Folate Pathway Inhibitors': ['trimethoprim/sulfamethoxazole', 'trimethoprim', 'sulfamethoxazole', 'sulfisoxazole'],
-    'Tetracyclines': ['tigecycline', 'tetracycline', 'doxycycline', 'minocycline', 'oxytetracycline'],
-    'Others': ['chloramphenicol', 'nitrofurantoin', 'azithromycin', 'colistin', 'fosfomycin', 'erythromycin', 'lincomycin', 'rifampin', 'clindamycin', 'clarithromycin', 'daptomycin', 'linezolid', 'polymyxin B', 'teicoplanin', 'vancomycin']
-}
+# Shared antibiotic classification — single source of truth in
+# config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
+from lib.registry import load_antibiotic_classes
+from lib.config import resolve_path
+ANTIBIOTIC_CLASSES = load_antibiotic_classes()
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     TARGET_ANTIBIOTIC = config.get('project', {}).get('target_antibiotic', 'unknown')
-    MATRIX_FILE = PROJECT_ROOT / config['paths']['metadata_file']
-    OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_01_data_exploration'].format(antibiotic=TARGET_ANTIBIOTIC)
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    MATRIX_FILE = resolve_path('metadata_file', organism=ORGANISM, config=config)
+    OUTPUT_DIR = resolve_path('dir_01_data_exploration', organism=ORGANISM,
+                              antibiotic=TARGET_ANTIBIOTIC, config=config)
 except Exception as e:
     print(f"ERROR loading config: {e}")
     sys.exit(1)
@@ -306,82 +301,6 @@ def plot_target_antibiotic_deepdive(df_clean, target):
     free_memory()
     print(f" -> Saved: {output_path.name}")
 
-def plot_co_occurrence_heatmap(df_clean):
-    """
-    Biological Rationale: Plasmids often carry multiple resistance genes (co-selection). 
-    To prevent the ML model from hallucinating confounding k-mers, we need to see which 
-    antibiotics are highly correlated in our dataset.
-    
-    Generates a Clustered Heatmap showing Pearson correlation (Phi coefficient for 
-    binary presence/absence data).
-    """
-    print("Generating Co-occurrence / Cross-Resistance Clustered Heatmap...")
-    
-    # 1. Filter out antibiotics with fewer than 50 valid observations to reduce noise
-    valid_counts = df_clean.notna().sum()
-    well_represented = valid_counts[valid_counts >= 50].index
-    
-    df_corr = df_clean[well_represented]
-    
-    if len(df_corr.columns) < 2:
-        print(" -> Warning: Not enough well-represented antibiotics to compute correlations.")
-        return
-        
-    # 2. Compute Pearson Correlation Matrix
-    # Using 'pearson' calculates the Phi coefficient identically in purely binary data.
-    corr_matrix = df_corr.corr(method='pearson')
-    
-    # Drop rows/columns containing all NaNs in case of zero variance antibiotics
-    corr_matrix.dropna(how='all', axis=0, inplace=True)
-    corr_matrix.dropna(how='all', axis=1, inplace=True)
-    
-    if corr_matrix.empty:
-        print(" -> Warning: Correlation matrix is empty after removing nulls.")
-        return
-
-    # Fill diagonal with 1.0 explicitly and drop columns remaining with all nan to avoid clustering error
-    corr_matrix.fillna(0, inplace=True) 
-
-    # 3. Generate Clustered Heatmap
-    try:
-        cg = sns.clustermap(
-            corr_matrix, 
-            cmap="vlag", 
-            center=0,
-            vmin=-1, vmax=1,
-            figsize=(14, 12),
-            method='ward',
-            metric='euclidean',
-            cbar_kws={'label': 'Pearson Correlation (Phi)'},
-            xticklabels=True,
-            yticklabels=True
-        )
-        
-        # Adjust Title
-        cg.fig.suptitle('Antibiotic Resistance Co-occurrence (Phi Coefficient)', fontsize=16, y=1.02)
-        
-        plt.setp(cg.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=9)
-        plt.setp(cg.ax_heatmap.get_yticklabels(), rotation=0, fontsize=9)
-        
-        output_path = OUTPUT_DIR / "05_co_occurrence_clustermap.png"
-        cg.savefig(output_path)
-        
-        # Save underlying data to CSV
-        csv_path = OUTPUT_DIR / "05_co_occurrence_clustermap.csv"
-        corr_matrix.to_csv(csv_path, index=True)
-        
-        plt.close(cg.fig)
-        
-        del df_corr, corr_matrix, cg 
-        free_memory()
-        print(f" -> Saved: {output_path.name}")
-        
-    except Exception as e:
-        print(f" -> Warning: Clustermap generation failed: {e}")
-        # Cleanup partial fig
-        plt.close('all')
-        free_memory()
-
 
 # ============================================================================
 # ENTRY POINT
@@ -398,8 +317,7 @@ if __name__ == "__main__":
     plot_missing_data_heatmap(clean_df)
     plot_antibiotic_classes(clean_df)
     plot_target_antibiotic_deepdive(clean_df, TARGET_ANTIBIOTIC)
-    plot_co_occurrence_heatmap(clean_df)
 
-    print("\n=" * 60)
+    print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
     print("=" * 60)

@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Unit tests for BV-BRC AMR cleaning + name normalisation (step 00)."""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+
+from lib import registry                      # noqa: E402
+from lib.bvbrc import clean_amr_table, pivot_binary  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# antibiotic name normalisation (registry)
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_normalize_aliases_and_typos():
+    n = registry.normalize_antibiotic
+    assert n("amipicillin_sulbactam") == "ampicillin/sulbactam"
+    assert n("rifampicin") == "rifampin"
+    assert n("cefalotin") == "cephalothin"
+    assert n("tigecyklin") == "tigecycline"
+    assert n("amoxicillin_clavulanat") == "amoxicillin/clavulanic acid"
+
+
+@pytest.mark.unit
+def test_normalize_cotrimoxazole_merged():
+    n = registry.normalize_antibiotic
+    # co-trimoxazole and its variants all fold to one canonical
+    assert n("co-trimoxazole") == "trimethoprim/sulfamethoxazole"
+    assert n("sulfamethoxazole/trimethoprim") == "trimethoprim/sulfamethoxazole"
+
+
+@pytest.mark.unit
+def test_normalize_case_trim_and_passthrough():
+    n = registry.normalize_antibiotic
+    assert n("  GENTAMICIN ") == "gentamicin"
+    assert n("some_unlisted_drug") == "some_unlisted_drug"   # unknown kept, not dropped
+    assert n(None) is None
+
+
+# ---------------------------------------------------------------------------
+# cleaning
+# ---------------------------------------------------------------------------
+def _df(rows):
+    return pd.DataFrame(rows, columns=["Genome ID", "Antibiotic", "Resistant Phenotype",
+                                       "Testing standard", "Testing standard year"])
+
+
+@pytest.mark.unit
+def test_clean_standard_and_phenotype_filters():
+    df = _df([
+        ("562.1", "ampicillin", "Resistant", "EUCAST", 2020),
+        ("562.1", "tetracycline", "Resistant", "NARMS", 2021),       # standard dropped
+        ("562.1", "ciprofloxacin", "Intermediate", "EUCAST", 2021),  # phenotype dropped
+        ("562.1", "gentamicin", "Susceptible", "EUCAST, CLSI", 2019),  # combined std kept
+    ])
+    cleaned, rep = clean_amr_table(df)
+    got = {(r.genome_id, r.antibiotic): r.label for r in cleaned.itertuples()}
+    assert got == {("562.1", "ampicillin"): 1, ("562.1", "gentamicin"): 0}
+    assert rep["rows_after_standard"] == 3
+    assert rep["rows_after_phenotype"] == 2
+
+
+@pytest.mark.unit
+def test_clean_conflict_majority():
+    df = _df([
+        ("562.3", "ampicillin", "Resistant", "EUCAST", 2019),
+        ("562.3", "ampicillin", "Resistant", "CLSI", 2020),
+        ("562.3", "ampicillin", "Susceptible", "EUCAST", 2018),
+    ])
+    cleaned, rep = clean_amr_table(df)
+    assert cleaned.iloc[0]["label"] == 1          # 2R vs 1S -> R
+    assert rep["pairs_conflicted"] == 1
+
+
+@pytest.mark.unit
+def test_clean_conflict_tie_newest_year():
+    df = _df([
+        ("562.4", "gentamicin", "Resistant", "EUCAST", 2015),
+        ("562.4", "gentamicin", "Susceptible", "CLSI", 2022),
+    ])
+    cleaned, _ = clean_amr_table(df)
+    assert cleaned.iloc[0]["label"] == 0          # tie -> 2022 Susceptible
+
+
+@pytest.mark.unit
+def test_clean_conflict_tie_no_year_dropped():
+    df = _df([
+        ("562.5", "cefotaxime", "Resistant", "EUCAST", np.nan),
+        ("562.5", "cefotaxime", "Susceptible", "CLSI", np.nan),
+    ])
+    cleaned, rep = clean_amr_table(df)
+    assert cleaned.empty
+    assert rep["pairs_unresolved_dropped"] == 1
+
+
+@pytest.mark.unit
+def test_clean_cli_prefixed_headers_and_evidence_filter():
+    # Simulates BV-BRC CLI output: table-prefixed headers + an evidence column.
+    df = pd.DataFrame({
+        "genome.genome_id": ["562.1", "562.1", "562.2"],
+        "genome_drug.antibiotic": ["ampicillin", "gentamicin", "rifampicin"],
+        "genome_drug.resistant_phenotype": ["Resistant", "Susceptible", "Resistant"],
+        "genome_drug.testing_standard": ["EUCAST", "CLSI", "EUCAST"],
+        "genome_drug.testing_standard_year": [2020, 2019, 2021],
+        "genome_drug.evidence": ["Laboratory Method", "Laboratory Method", "Computational Method"],
+    })
+    cleaned, rep = clean_amr_table(df)
+    assert rep["rows_after_evidence"] == 2           # computational row dropped
+    assert set(cleaned["antibiotic"]) == {"ampicillin", "gentamicin"}
+
+
+@pytest.mark.unit
+def test_pivot_binary_shape_and_nan():
+    cleaned = pd.DataFrame({
+        "genome_id": ["562.1", "562.1", "562.2"],
+        "antibiotic": ["ampicillin", "gentamicin", "ampicillin"],
+        "label": [1, 0, 1],
+    })
+    wide = pivot_binary(cleaned)
+    assert list(wide.columns) == ["Genome ID", "ampicillin", "gentamicin"]
+    row2 = wide[wide["Genome ID"] == "562.2"].iloc[0]
+    assert row2["ampicillin"] == 1 and pd.isna(row2["gentamicin"])

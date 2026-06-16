@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "ML_AMR_Prediction_v2: A stability-filtered, biologically validated AMR k-mer Knowledge Base pipeline for Escherichia coli"
+abstract: >-
+  An alignment-free, out-of-core machine-learning pipeline that predicts
+  antimicrobial resistance (AMR) in Escherichia coli from whole-genome
+  assemblies using canonical 21-mer features and XGBoost, then reverse-translates
+  the most important k-mers into biology via 5-seed feature stability, CARD/NCBI
+  BLAST confidence tiering, resistant-versus-susceptible discriminativeness, and
+  CARD variant-model SNP allele checks — building a queryable, confidence-tiered
+  AMR k-mer knowledge base.
+type: software
+authors:
+  - family-names: "Demirbaş"
+    given-names: "Eren"
+    email: "eren0demirbas@gmail.com"
+repository-code: "https://github.com/demirbase/ML_AMR_Prediction_v2"
+license: MIT
+version: "0.1.0"
+date-released: "2026-06-15"
+keywords:
+  - antimicrobial resistance
+  - machine learning
+  - k-mer
+  - XGBoost
+  - bioinformatics
+  - knowledge base
+  - Escherichia coli
+  - CARD
+  - reproducible research
+  - FAIR

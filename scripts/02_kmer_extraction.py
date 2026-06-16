@@ -12,10 +12,12 @@ K-mer Analysis Background:
     genes or regulatory elements. By representing each genome as a k-mer frequency
     vector, we can apply machine learning algorithms to identify resistance patterns.
     
-    K-mer length (k=31) is chosen to balance:
+    K-mer length (k=21, set via config.yaml `preprocessing.k_length`) is chosen
+    to balance (see METHODOLOGY.md for the full justification):
     - Specificity: Longer k-mers are more unique
     - Computational efficiency: Shorter k-mers are faster to process
-    - Biological relevance: 31-mers capture gene-level features
+    - Biological relevance: 21-mers capture gene-level features while keeping
+      the feature space tractable
 
 Multi-Antibiotic Architecture:
     K-mer databases are stored in antibiotic-specific directories to prevent
@@ -33,12 +35,10 @@ Technical Notes:
 # LIBRARY IMPORTS
 # ============================================================================
 import subprocess
-import os
 import yaml
 from pathlib import Path
 from tqdm import tqdm
 import sys
-import pandas as pd
 
 
 # ============================================================================
@@ -57,24 +57,36 @@ if not CONFIG_PATH.exists():
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
+# Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+from lib.config import resolve_path, resolve_tool
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+
 # Extract configuration values
 K_LENGTH = config['preprocessing']['k_length']
 MEMORY_GB = config['preprocessing']['kmc_mem']
 THREADS = config['preprocessing']['threads']
-MIN_COUNT = 1  # Fixed for assembled genomes (not in config)
+# Minimum k-mer count threshold WITHIN a single genome. Fixed at 1 because
+# inputs are assembled genomes (not raw reads): every k-mer that exists should
+# be retained at this stage. Cross-genome rarity filtering (min_support) is
+# applied later, globally, in 03_matrix_construction.py. Falls back to config
+# if a `preprocessing.min_count` key is ever added.
+MIN_COUNT = config['preprocessing'].get('min_count', 1)
 
 # ============================================================================
 # CROSS-PLATFORM COMPATIBLE PATHS (ANTIBIOTIC-SPECIFIC)
 # ============================================================================
-RAW_GENOMES_DIR = PROJECT_ROOT / config['paths']['raw_genomes_dir']
-AMR_MATRIX_PATH = PROJECT_ROOT / config['paths']['metadata_file']
+RAW_GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
+AMR_MATRIX_PATH = resolve_path('metadata_file', organism=ORGANISM, config=config)
 
-# Global output directories
-KMC_OUTPUTS_DIR = PROJECT_ROOT / config['paths']['kmc_outputs_dir']
+# Organism-scoped KMC output directory
+KMC_OUTPUTS_DIR = resolve_path('kmc_outputs_dir', organism=ORGANISM, config=config)
 TEMP_DIR = KMC_OUTPUTS_DIR / "tmp"
 
-# KMC binary location
-KMC_BIN = PROJECT_ROOT / "bin" / "bin" / "kmc"
+# KMC binary location — cross-platform: prefer the project-bundled binary if it
+# exists and is executable for this OS, otherwise fall back to `kmc` on PATH
+# (the normal case on Linux/HPC where KMC is installed via conda). Override with
+# the AMR_KMC_BIN environment variable.
+KMC_BIN = resolve_tool('kmc_bin', 'kmc', config=config)
 
 # Create necessary directories if they don't exist
 KMC_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -120,11 +132,13 @@ def count_kmers():
     # SECTION 1: Validate KMC Binary
     # ------------------------------------------------------------------------
     try:
-        if not KMC_BIN.exists():
+        if not KMC_BIN:
             raise FileNotFoundError(
-                f"KMC binary not found at: {KMC_BIN}\n"
-                f"Please install KMC and update the KMC_BIN path.\n"
-                f"Installation instructions: https://github.com/refresh-bio/KMC"
+                "KMC executable not found.\n"
+                "Install KMC (conda: `conda install -c bioconda kmc`) so `kmc` is on PATH,\n"
+                "or set the AMR_KMC_BIN environment variable to its full path,\n"
+                "or place the binary at bin/bin/kmc.\n"
+                "Docs: https://github.com/refresh-bio/KMC"
             )
         print(f"✓ KMC binary located: {KMC_BIN}")
     except FileNotFoundError as e:
@@ -171,8 +185,13 @@ def count_kmers():
         
         output_db = KMC_OUTPUTS_DIR / genome_id
         
-        # Skip if k-mer database already exists (resume capability)
-        if (KMC_OUTPUTS_DIR / f"{genome_id}.kmc_pre").exists():
+        # Skip if k-mer database already exists (resume capability).
+        # A complete KMC database is BOTH .kmc_pre and .kmc_suf. Requiring both
+        # prevents reusing a corrupt/partial database left behind by an
+        # interrupted run (which would silently produce truncated features).
+        kmc_pre = KMC_OUTPUTS_DIR / f"{genome_id}.kmc_pre"
+        kmc_suf = KMC_OUTPUTS_DIR / f"{genome_id}.kmc_suf"
+        if kmc_pre.exists() and kmc_suf.exists():
             skipped_count += 1
             continue
         

@@ -69,7 +69,11 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
 
 # Extract project-level identifiers
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+ORGANISM          = config.get('project', {}).get('organism', 'ecoli')
 TOP_N             = config['analysis']['top_n_features']
+
+# Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+from lib.config import resolve_path
 
 # Resolve BLAST parameters from config
 blast_cfg   = config.get('blast', {})
@@ -79,11 +83,12 @@ EVALUE      = blast_cfg.get('evalue',    10)
 WORD_SIZE   = blast_cfg.get('word_size', 11)
 THREADS     = blast_cfg.get('threads',   8)
 
-# Resolve I/O paths using the centralised config keys
-EXPLAINABILITY_DIR = PROJECT_ROOT / config['paths']['dir_05_explainability'].format(
-    antibiotic=TARGET_ANTIBIOTIC
-)
-FASTA_INPUT = EXPLAINABILITY_DIR / f"02_top_50_features_{TARGET_ANTIBIOTIC}.fasta"
+# Resolve I/O paths (organism-aware)
+EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
+                                  antibiotic=TARGET_ANTIBIOTIC, config=config)
+# Filename must track top_n_features from config — 07 writes 02_top_{TOP_N}_features.
+# Hardcoding 50 silently broke this step whenever top_n_features != 50.
+FASTA_INPUT = EXPLAINABILITY_DIR / f"02_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.fasta"
 
 # Nextflow pipeline path
 PIPELINE_PATH = PROJECT_ROOT / "scripts" / "08_blast_pipeline.nf"
@@ -164,8 +169,16 @@ def main() -> None:
     # -------------------------------------------------------------------------
     print("\n[STEP 3/4] Validating CARD local database...")
 
-    card_pre = CARD_DB.parent / (CARD_DB.name + ".nhr")   # blastn index file
-    if not card_pre.exists():
+    # A blastn nucleotide DB may be single-volume (<db>.nhr) or split into
+    # multiple volumes (<db>.00.nhr, <db>.01.nhr, ...) described by an alias
+    # file (<db>.nal). Checking only ".nhr" gave a false "missing" verdict on
+    # multi-volume CARD databases. Accept any of these layouts.
+    card_present = (
+        (CARD_DB.parent / (CARD_DB.name + ".nhr")).exists()
+        or (CARD_DB.parent / (CARD_DB.name + ".nal")).exists()
+        or any(CARD_DB.parent.glob(CARD_DB.name + ".*.nhr"))
+    )
+    if not card_present:
         print(f"  ⚠ CARD database not found at: {CARD_DB}")
         print(f"    CARD local BLAST will fail. To build the database:")
         print(f"      1. Download: https://card.mcmaster.ca/download")
@@ -173,6 +186,24 @@ def main() -> None:
         print(f"    Continuing — NCBI remote BLAST will still run.\n")
     else:
         print(f"  ✓ CARD database   : {CARD_DB}")
+
+        # Record the CARD database provenance for reproducibility (was P-14:
+        # "CARD version not recorded"). blastdbcmd -info reports the build date
+        # and sequence counts; we persist it next to the BLAST outputs so the
+        # exact database snapshot used can be cited in Methods.
+        try:
+            info = subprocess.run(
+                ["blastdbcmd", "-db", str(CARD_DB), "-info"],
+                capture_output=True, text=True, check=False
+            )
+            if info.returncode == 0 and info.stdout.strip():
+                EXPLAINABILITY_DIR.mkdir(parents=True, exist_ok=True)
+                version_file = EXPLAINABILITY_DIR / "card_db_version.txt"
+                version_file.write_text(info.stdout, encoding='utf-8')
+                first_line = info.stdout.strip().splitlines()[0]
+                print(f"    ↳ CARD DB info recorded: {version_file.name} ({first_line})")
+        except Exception as e:
+            print(f"    ⚠ Could not record CARD DB version: {e}")
 
     # -------------------------------------------------------------------------
     # STEP 4: Execute Nextflow pipeline
@@ -197,7 +228,7 @@ def main() -> None:
     # On systems with a Turkish locale, Java's String.toLowerCase() converts
     # 'I' → 'ı' (dotless-i), which breaks Nextflow's errorStrategy keyword
     # matching ('ignore' fails because the JVM sees 'ıgnore').
-    import os
+    # (os is already imported at module level.)
     nxf_env = os.environ.copy()
     nxf_env['NXF_OPTS'] = nxf_env.get('NXF_OPTS', '') + ' -Duser.language=en -Duser.country=US'
 
@@ -225,10 +256,11 @@ def main() -> None:
             print(f"  ⚠ Not found: {out_path.name}  (check Nextflow logs)")
 
     print(f"\nAll outputs in: {EXPLAINABILITY_DIR}")
-    print("\nNext steps for biological interpretation:")
-    print("  1. Filter TSVs for pident > 90% and evalue < 1e-10")
-    print("  2. Cross-reference CARD hits with known resistance mechanisms")
-    print("  3. BLAST the NCBI TSV gene names against literature")
+    print("\nNext step:")
+    print("  Run 09_biological_summary.py — it grades every hit into")
+    print("  confirmed / candidate / weak tiers (thresholds in config.yaml →")
+    print("  analysis.confidence_tiers), joins 07b stability, and computes the")
+    print("  known-mechanism recovery rate, composite score and novel fraction.")
     print("=" * 80)
 
 

@@ -1,0 +1,153 @@
+# ============================================================================
+# ANTIBIOTIC REGISTRY — single source of truth for antibiotic → class mapping
+# ============================================================================
+# Replaces the ANTIBIOTIC_CLASSES dictionary previously copy-pasted in
+# 01_data_validation.py and 01b_data_validation.py (audit B09/B10).
+# Accessed via scripts/lib/registry.py.
+#
+# Adding/renaming an antibiotic class = editing this file only. No code change.
+# ============================================================================
+schema_version: "1.0"
+
+classes:
+  penicillins:
+    display_name: "Penicillins"
+    members:
+      - ampicillin
+      - amoxicillin
+      - "amoxicillin/clavulanic acid"
+      - "piperacillin/tazobactam"
+      - "ampicillin/sulbactam"
+      - penicillin
+      - carbenicillin
+      - piperacillin
+      - "ticarcillin/clavulanic acid"
+
+  cephalosporins:
+    display_name: "Cephalosporins"
+    members:
+      - ceftazidime
+      - cefotaxime
+      - cefuroxime
+      - ceftriaxone
+      - cefepime
+      - cefoxitin
+      - cephalothin
+      - cefazolin
+      - ceftiofur
+      - cefpodoxime
+      - cefotetan
+      - "ceftazidime/avibactam"
+      - ceftaroline
+      - cephalexin
+      - cefpodoxime_clavulanic_acid
+      - "ceftolozane/tazobactam"
+      - "cefotaxime/clavulanic acid"
+      - cefpirome
+      - "cefepime/taniborbactam"
+
+  beta_lactams_carbapenems_others:
+    display_name: "Beta-Lactams: Carbapenems & Others"
+    members:
+      - meropenem
+      - imipenem
+      - ertapenem
+      - doripenem
+      - aztreonam
+      - beta-lactam
+      - sulbactam
+      - "meropenem/vaborbactam"
+
+  aminoglycosides:
+    display_name: "Aminoglycosides"
+    members:
+      - gentamicin
+      - amikacin
+      - tobramycin
+      - streptomycin
+      - kanamycin
+      - apramycin
+      - neomycin
+      - netilmicin
+
+  quinolones:
+    display_name: "Quinolones"
+    members:
+      - ciprofloxacin
+      - norfloxacin
+      - levofloxacin
+      - "nalidixic acid"
+      - moxifloxacin
+      - ofloxacin
+
+  folate_pathway_inhibitors:
+    display_name: "Folate Pathway Inhibitors"
+    members:
+      - "trimethoprim/sulfamethoxazole"
+      - trimethoprim
+      - sulfamethoxazole
+      - sulfisoxazole
+
+  tetracyclines:
+    display_name: "Tetracyclines"
+    members:
+      - tigecycline
+      - tetracycline
+      - doxycycline
+      - minocycline
+      - oxytetracycline
+
+  others:
+    display_name: "Others"
+    members:
+      - chloramphenicol
+      - nitrofurantoin
+      - azithromycin
+      - colistin
+      - fosfomycin
+      - erythromycin
+      - lincomycin
+      - rifampin
+      - clindamycin
+      - clarithromycin
+      - daptomycin
+      - linezolid
+      - polymyxin B
+      - teicoplanin
+      - vancomycin
+
+# ============================================================================
+# ANTIBIOTIC NAME ALIASES (raw-source spelling variants / typos -> canonical)
+# ============================================================================
+# Single source for name normalisation, used by lib.registry.normalize_antibiotic()
+# when cleaning raw AMR downloads (step 00). The canonical (key) MUST also appear
+# as a `members` entry above so class grouping stays consistent. Raw names not
+# listed here pass through unchanged (case-insensitively matched to a member).
+#
+# NOTE: co-trimoxazole == trimethoprim/sulfamethoxazole (same drug) — merged into
+# one canonical to avoid an ambiguous alias mapping.
+aliases:
+  "amoxicillin/clavulanic acid": ["amoxicillin-clavulanic acid", "amoxicillin_clavulanic_acid", "amoxicillin_clavulanat"]
+  "ampicillin/sulbactam": ["ampicillin_sulbactam", "amipicillin_sulbactam"]
+  cephalothin: ["cefalotin", "cefalothin"]
+  cefpirome: ["cefpirom"]
+  ceftaroline: ["ceftarolin"]
+  "ceftazidime/avibactam": ["ceftazidime-avibactam", "ceftazidime_avibactam"]
+  "ceftolozane/tazobactam": ["ceftolozane-tazobactam"]
+  fosfomycin: ["phosphomycin"]
+  gentamicin: ["geamycin"]
+  "piperacillin/tazobactam": ["piperacillin-tazobactam", "tazobactam_piperacillin"]
+  "polymyxin B": ["polymyxin b", "polymyxin_b"]
+  rifampin: ["rifampicin"]
+  tetracycline: ["tetracyklin"]
+  tigecycline: ["tigecyklin"]
+  trimethoprim: ["trimotheprim"]
+  "trimethoprim/sulfamethoxazole":
+    - "co-trimoxazole"
+    - "co_trimoxazole"
+    - "trimethoprim-sulfamethoxazole"
+    - "trimethoprim_sulfamethoxazole"
+    - "sulfamethoxazole/trimethoprim"
+  "ticarcillin/clavulanic acid": ["ticarcillin_clavulanate"]
+  "meropenem/vaborbactam": ["meropenem-vaborbactam"]
+  "cefepime/taniborbactam": ["cefepime_taniborbactam"]

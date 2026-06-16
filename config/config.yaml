@@ -15,10 +15,18 @@
 project:
   name: "AMR_Genomic_Project"
   description: "Machine learning-based antimicrobial resistance prediction using k-mer features"
-  target_antibiotic: "gentamicin"  # Primary antibiotic for analysis
-  organism: "Escherichia coli"  # Target organism
+  target_antibiotic: "ampicillin"  # Primary antibiotic for analysis
+  organism: "ecoli"  # Organism registry slug (see config/registry/organisms.yaml)
+  organism_display: "Escherichia coli"  # Human-readable name (display only)
   model: "xgboost"  # ML model
   version: "M4-pro"
+
+# ----------------------------------------------------------------------------
+# REGISTRY (single source of truth for organisms & antibiotic classes)
+# ----------------------------------------------------------------------------
+registry:
+  organisms_file:   "config/registry/organisms.yaml"
+  antibiotics_file: "config/registry/antibiotics.yaml"
 
 # ----------------------------------------------------------------------------
 # DIRECTORY PATHS (Relative to project root)
@@ -67,6 +75,54 @@ paths:
   kmc_tools_bin: "bin/bin/kmc_tools"  # Relative to project root
 
 # ----------------------------------------------------------------------------
+# ORGANISM-AWARE PATH TEMPLATES (SCALE_MLOPS_PLAN.md §4) — ADDITIVE / FORWARD
+# ----------------------------------------------------------------------------
+# These {organism}-scoped templates are consumed ONLY by scripts/lib/config.py
+# (resolve_path) and scripts/migrate_to_organism_layout.py. The legacy `paths:`
+# keys above are intentionally left untouched so the current numbered scripts
+# keep working on the existing single-organism layout. Once you run the
+# migration script and cut a script over to resolve_path(), it reads from here.
+paths_organism:
+  # ── Global / shared (organism-independent — NOT moved by the migration) ────
+  data_dir:               "data"
+  blast_db_dir:           "data/external/blast_db/card_nt"
+  kmc_bin:                "bin/bin/kmc"
+  kmc_tools_bin:          "bin/bin/kmc_tools"
+
+  # Global QC / validation outputs are now ORGANISM-SCOPED so two organisms do
+  # not overwrite each other's validation_report.txt / global_qc_outliers.csv.
+  dir_global_exploration: "results/{organism}/global_exploration"
+
+  # ── Organism-scoped ────────────────────────────────────────────────────────
+  raw_genomes_dir:  "data/raw/{organism}/genomes"
+  metadata_file:    "data/external/{organism}/metadata/amr_phenotypes.csv"
+  kmc_outputs_dir:  "data/interim/{organism}/kmc_outputs"
+
+  # ── Organism + antibiotic-scoped ───────────────────────────────────────────
+  matrix_dir:           "data/processed/{organism}/{antibiotic}/matrix"
+  models_dir:           "models/{organism}/{antibiotic}"
+  logs_dir:             "logs/{organism}/{antibiotic}"
+  analysis_results_dir: "results/{organism}/{antibiotic}"
+  dir_01_data_exploration:   "results/{organism}/{antibiotic}/01_data_exploration"
+  dir_02_matrix_qc:          "results/{organism}/{antibiotic}/02_matrix_qc"
+  dir_03_model_optimization: "results/{organism}/{antibiotic}/03_model_optimization"
+  dir_04_evaluation:         "results/{organism}/{antibiotic}/04_evaluation"
+  dir_05_explainability:     "results/{organism}/{antibiotic}/05_explainability"
+  experiment_config:    "config/experiments/{organism}/config_{antibiotic}.yaml"
+
+  # MLOps run metadata (SCALE_MLOPS_PLAN.md §7)
+  run_dir:              "runs/{organism}/{antibiotic}/{run_id}"
+
+# ----------------------------------------------------------------------------
+# PROVENANCE (reproducibility / future Knowledge Base — SCALE_MLOPS_PLAN.md §4.1)
+# ----------------------------------------------------------------------------
+provenance:
+  card_version:     null      # e.g. "CARD v3.2.9" — fill in before BLAST for citeability
+  kb_schema_version: "v0.1.0"
+  # NCBI Entrez identity is configured under the `ncbi:` section below
+  # (entrez_email / api_key); it is the single source for Step 09.
+
+# ----------------------------------------------------------------------------
 # DATA PREPROCESSING PARAMETERS
 # ----------------------------------------------------------------------------
 preprocessing:
@@ -95,7 +151,7 @@ training:
   
   # Hyperparameter optimization
   n_trials: 25  # Number of Optuna optimization trials
-  optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (25%)
+  optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
 
 # ----------------------------------------------------------------------------
@@ -135,6 +191,23 @@ xgboost_params:
 # ----------------------------------------------------------------------------
 analysis:
   top_n_features: 50  # Number of top features to extract for biological analysis
+  stability_threshold: 0.6  # selection_frequency >= this -> "stable" k-mer (07b; ROADMAP H1)
+
+  # ── BLAST confidence tiers (step 09) ──────────────────────────────────────
+  # Every BLAST hit is graded so weak matches are never presented as findings.
+  # For a 21-mer the primary, DB-size-independent criteria are IDENTITY and
+  # COVERAGE (alignment length / k); E-value is only a loose secondary gate
+  # because it depends on database size (CARD ~MB vs NCBI nt ~TB) and is NOT
+  # comparable across the two databases. Thresholds live here (citeable in
+  # Methods; ROADMAP Risk-4 / §1.4). Tiers checked best-first: confirmed→candidate→weak.
+  #   confirmed : near-exact full-length match to a known ARG
+  #   candidate : strong but partial (kept + flagged, NOT dropped)
+  #   weak      : reported transparently but flagged; below report_max_evalue dropped
+  confidence_tiers:
+    confirmed: {min_identity: 95.0, min_coverage: 0.95, max_evalue: 1.0}
+    candidate: {min_identity: 90.0, min_coverage: 0.80, max_evalue: 10.0}
+    weak:      {min_identity: 80.0, min_coverage: 0.60, max_evalue: 50.0}
+  report_max_evalue: 50.0  # hits weaker than this are excluded from the report entirely
 
 # ----------------------------------------------------------------------------
 # BLAST ANNOTATION PARAMETERS (Step 08)
@@ -156,3 +229,24 @@ blast:
   evalue:       10                        # E-value threshold for reporting hits
   word_size:    11                        # Seed word size (11 is standard for short seqs)
   threads:      8                         # CPU threads for local BLAST only
+
+  # ── CARD variant/SNP data (step 11 — k-mer-centric SNP allele check) ──────
+  # NOT shipped with the repo (the bundled card.fna is the homolog model only).
+  # Download the full CARD data bundle to get these:
+  #   mkdir -p data/external/card && cd data/external/card
+  #   wget https://card.mcmaster.ca/latest/data -O card-data.tar.bz2
+  #   tar xjf card-data.tar.bz2          # -> card.json + *_variant_model.fasta
+  card_variant_fasta: "data/external/card/nucleotide_fasta_protein_variant_model.fasta"
+  card_json:          "data/external/card/card.json"
+
+# ----------------------------------------------------------------------------
+# NCBI ENTREZ PARAMETERS (Step 09 — biological summary)
+# ----------------------------------------------------------------------------
+# 09_biological_summary.py queries NCBI Entrez efetch to resolve gene names.
+# NCBI's Terms of Use REQUIRE a valid contact e-mail; a placeholder address
+# (e.g. user@example.com) risks an IP ban. Set your real e-mail below.
+# An optional API key raises the rate limit from 3 to 10 requests/sec:
+#   https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
+ncbi:
+  entrez_email: ""    # REQUIRED — set to your real e-mail before running Step 09
+  api_key:      ""     # OPTIONAL — NCBI API key for a higher rate limit

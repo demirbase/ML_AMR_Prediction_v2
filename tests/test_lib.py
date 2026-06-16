@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Unit tests for the shared library (SCALE_MLOPS_PLAN.md §7.5).
+
+Run with:
+    pytest tests/
+or directly:
+    python tests/test_lib.py
+"""
+
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+
+from lib import registry, run_metadata           # noqa: E402
+from lib.chunking import get_y_chunk              # noqa: E402
+from lib.config import load_config, resolve_path, get_target  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# chunking
+# ---------------------------------------------------------------------------
+def test_get_y_chunk_basic():
+    data = list(range(10))
+    assert get_y_chunk(data, 0, 3, 10) == [0, 1, 2]
+    assert get_y_chunk(data, 1, 3, 10) == [3, 4, 5]
+
+
+def test_get_y_chunk_last_partial():
+    data = list(range(10))
+    # chunk 3 with size 3 -> indices 9..10 clamped to total_len
+    assert get_y_chunk(data, 3, 3, 10) == [9]
+
+
+def test_get_y_chunk_out_of_range():
+    data = list(range(10))
+    assert get_y_chunk(data, 5, 3, 10) == []
+
+
+# ---------------------------------------------------------------------------
+# registry
+# ---------------------------------------------------------------------------
+def test_registry_classes_structure():
+    classes = registry.load_antibiotic_classes()
+    assert "Aminoglycosides" in classes
+    assert "gentamicin" in classes["Aminoglycosides"]
+    # legacy structure: {DisplayName: [members]}
+    assert all(isinstance(v, list) for v in classes.values())
+
+
+def test_registry_reverse_index():
+    assert registry.antibiotic_to_class("gentamicin") == "aminoglycosides"
+    assert registry.antibiotic_to_class("ciprofloxacin") == "quinolones"
+    assert registry.antibiotic_to_class("not_a_real_drug") is None
+
+
+def test_registry_targets_and_validation():
+    targets = registry.list_targets(enabled_only=True)
+    assert ("ecoli", "gentamicin") in targets
+    # kpneumoniae is enabled: false -> excluded
+    assert all(org == "ecoli" for org, _ab in targets)
+    assert registry.validate_target("ecoli", "gentamicin") is True
+    assert registry.validate_target("ecoli", "meropenem") is False
+
+
+# ---------------------------------------------------------------------------
+# config / path resolution
+# ---------------------------------------------------------------------------
+def test_resolve_path_organism_antibiotic():
+    p = resolve_path("matrix_dir", organism="ecoli", antibiotic="gentamicin")
+    assert p.as_posix().endswith("data/processed/ecoli/gentamicin/matrix")
+
+
+def test_resolve_path_run_id():
+    p = resolve_path("run_dir", organism="ecoli", antibiotic="gentamicin", run_id="RID123")
+    assert p.name == "RID123"
+
+
+def test_resolve_path_global_key_no_placeholder():
+    # A global key with no placeholder (kmc_bin) resolves directly, with or
+    # without organism/antibiotic supplied.
+    p = resolve_path("kmc_bin")
+    assert p.name == "kmc"
+
+
+def test_resolve_path_unknown_key():
+    raised = False
+    try:
+        resolve_path("definitely_not_a_real_key")
+    except KeyError:
+        raised = True
+    assert raised, "resolve_path should raise KeyError for an unknown key"
+
+
+def test_get_target_defaults_from_config():
+    org, ab = get_target()
+    assert org == "ecoli"
+    assert ab  # a non-empty antibiotic from config
+
+
+# ---------------------------------------------------------------------------
+# run metadata
+# ---------------------------------------------------------------------------
+def test_make_run_id_format():
+    rid = run_metadata.make_run_id("ecoli", "gentamicin")
+    parts = rid.split("__")
+    assert len(parts) == 4
+    assert parts[0] == "ecoli" and parts[1] == "gentamicin"
+
+
+def test_hash_files_stable(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("hello")
+    h1 = run_metadata.hash_files([f])
+    h2 = run_metadata.hash_files([f])
+    assert h1 == h2 and len(h1) == 64
+
+
+if __name__ == "__main__":
+    # Minimal runner so the file works without pytest installed.
+    import tempfile, traceback
+    funcs = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    passed = failed = 0
+    for fn in funcs:
+        try:
+            if "tmp_path" in fn.__code__.co_varnames:
+                with tempfile.TemporaryDirectory() as d:
+                    fn(Path(d))
+            else:
+                fn()
+            print(f"  PASS  {fn.__name__}")
+            passed += 1
+        except Exception:
+            print(f"  FAIL  {fn.__name__}")
+            traceback.print_exc()
+            failed += 1
+    print(f"\n{passed} passed, {failed} failed")
+    sys.exit(1 if failed else 0)

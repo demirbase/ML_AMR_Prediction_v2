@@ -27,23 +27,17 @@ import pandas as pd
 import yaml
 from pathlib import Path
 
+# Shared antibiotic classification — single source of truth in
+# config/registry/antibiotics.yaml, accessed via the registry (SCALE_MLOPS_PLAN §3).
+from lib.registry import load_antibiotic_classes
+from lib.config import resolve_path
+ANTIBIOTIC_CLASSES = load_antibiotic_classes()
+
 # ============================================================================
 # CONFIGURATION: CROSS-PLATFORM COMPATIBLE PATHS
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
-
-# Antibiotic Classification System
-ANTIBIOTIC_CLASSES = {
-    'Penicillins': ['ampicillin', 'amoxicillin', 'amoxicillin/clavulanic acid', 'piperacillin/tazobactam', 'ampicillin/sulbactam', 'penicillin', 'carbenicillin', 'piperacillin', 'ticarcillin/clavulanic acid'],
-    'Cephalosporins': ['ceftazidime', 'cefotaxime', 'cefuroxime', 'ceftriaxone', 'cefepime', 'cefoxitin', 'cephalothin', 'cefazolin', 'ceftiofur', 'cefpodoxime', 'cefotetan', 'ceftazidime/avibactam', 'ceftaroline', 'cephalexin', 'cefpodoxime_clavulanic_acid', 'ceftolozane/tazobactam', 'cefotaxime/clavulanic acid'],
-    'Beta-Lactams: Carbapenems & Others': ['meropenem', 'imipenem', 'ertapenem', 'doripenem', 'aztreonam', 'beta-lactam', 'sulbactam'],
-    'Aminoglycosides': ['gentamicin', 'amikacin', 'tobramycin', 'streptomycin', 'kanamycin', 'apramycin', 'neomycin', 'netilmicin'],
-    'Quinolones': ['ciprofloxacin', 'norfloxacin', 'levofloxacin', 'nalidixic acid', 'moxifloxacin', 'ofloxacin'],
-    'Folate Pathway Inhibitors': ['trimethoprim/sulfamethoxazole', 'trimethoprim', 'sulfamethoxazole', 'sulfisoxazole'],
-    'Tetracyclines': ['tigecycline', 'tetracycline', 'doxycycline', 'minocycline', 'oxytetracycline'],
-    'Others': ['chloramphenicol', 'nitrofurantoin', 'azithromycin', 'colistin', 'fosfomycin', 'erythromycin', 'lincomycin', 'rifampin', 'clindamycin', 'clarithromycin', 'daptomycin', 'linezolid', 'polymyxin B', 'teicoplanin', 'vancomycin']
-}
 
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -54,9 +48,12 @@ except Exception:
     config = None
 
 if config:
-    MATRIX_FILE = PROJECT_ROOT / config['paths']['metadata_file']
-    GENOMES_DIR = PROJECT_ROOT / config['paths']['raw_genomes_dir']
-    REPORT_PATH = PROJECT_ROOT / config['paths']['dir_global_exploration'] / "validation_report.txt"
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2). Reads the
+    # {organism} templates from config 'paths_organism:' (falls back to 'paths:').
+    MATRIX_FILE = resolve_path('metadata_file', organism=ORGANISM, config=config)
+    GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
+    REPORT_PATH = resolve_path('dir_global_exploration', organism=ORGANISM, config=config) / "validation_report.txt"
 else:
     BASE_DIR = PROJECT_ROOT / "data"
     MATRIX_FILE = BASE_DIR / "metadata" / "genome_amr_matrix.csv"
@@ -212,9 +209,12 @@ def check_data() -> None:
                 col_data = pd.to_numeric(df_final[antibiotic], errors='coerce')
                 counts = col_data.value_counts()
 
-                # Robust sum - gracefully handling both strictly integer or float encoded tags
-                resistant = int(counts.get(1.0, 0) + counts.get(1, 0))
-                susceptible = int(counts.get(0.0, 0) + counts.get(0, 0))
+                # After pd.to_numeric the index is float64, so 1.0 and 1 reference
+                # the SAME bucket. Summing counts.get(1.0) + counts.get(1) would
+                # double-count every resistant/susceptible isolate. Use the float
+                # keys only (matches the correct logic in 01b/03).
+                resistant = int(counts.get(1.0, 0))
+                susceptible = int(counts.get(0.0, 0))
                 total = resistant + susceptible
 
                 if total > 0:

@@ -43,6 +43,12 @@ import random
 import datetime
 import shutil
 
+# Shared label-slicing helper (single source of truth) — see scripts/utils.py
+from utils import get_y_chunk
+# MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
+from lib import run_metadata as rm
+from lib.config import resolve_path
+
 
 # ============================================================================
 # LOAD CONFIGURATION FROM YAML
@@ -76,13 +82,10 @@ BASE_PARAMS = {
     'verbosity': config['xgboost_params']['verbosity']
 }
 
-# Cross-platform paths - loaded from global config
-# Antibiotic-specific paths will be constructed using target_antibiotic
-MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-MODELS_DIR = PROJECT_ROOT / config['paths']['models_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
-
-# Create output directory
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
+# Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
+ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
+MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Create output directory
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -121,7 +124,8 @@ def load_optimized_hyperparameters():
         yaml.YAMLError: If the YAML file is malformed
     """
     # Define antibiotic-specific config path
-    antibiotic_config_path = CONFIG_DIR / f"config_{TARGET_ANTIBIOTIC}.yaml"
+    antibiotic_config_path = resolve_path('experiment_config', organism=ORGANISM,
+                                          antibiotic=TARGET_ANTIBIOTIC, config=config)
     
     if not antibiotic_config_path.exists():
         raise FileNotFoundError(
@@ -204,23 +208,7 @@ def load_optimized_hyperparameters():
         sys.exit(1)
 
 
-def get_y_chunk(y_all, chunk_id, chunk_size, total_len):
-    """
-    Extract label subset for a specific chunk.
-    
-    Args:
-        y_all: Complete label array
-        chunk_id: Chunk identifier
-        chunk_size: Samples per chunk
-        total_len: Total number of samples
-    
-    Returns:
-        Label subset for the chunk
-    """
-    start = chunk_id * chunk_size
-    end = min((chunk_id + 1) * chunk_size, total_len)
-    return y_all[start:end]
-
+# get_y_chunk() is imported from utils.py (shared with 04 and 06).
 
 
 # ============================================================================
@@ -246,35 +234,61 @@ def final_training_incremental(best_params, train_files, y_all):
     print("EPOCH-BASED INCREMENTAL MODEL TRAINING (SHUFFLED)")
     print("=" * 80)
     
-    total_trees = best_params.pop('n_estimators', 100)
-    
-    # To distribute learning globally, we train 1 tree per chunk across multiple epochs
+    # Guard against a degenerate tuned budget (0 or missing): always train at
+    # least one tree so the model is never left as None.
+    total_trees = max(1, int(best_params.pop('n_estimators', 100)))
+
+    # To distribute learning globally, we train 1 tree per chunk across multiple
+    # epochs. ceil() can overshoot the Optuna-tuned tree budget by up to
+    # (len(train_files) - 1) trees; we therefore compute the epoch count with
+    # ceil() but stop early once exactly `total_trees` have been added, so the
+    # final model honours the tuned n_estimators instead of overshooting.
     epochs = max(1, int(np.ceil(total_trees / len(train_files))))
-    actual_total_trees = epochs * len(train_files)
-    
-    print(f"Target trees (Optuna): {total_trees} | Epochs required: {epochs}")
-    print(f"Strategy: 1 tree/chunk/epoch -> Total final trees: {actual_total_trees}")
+
+    print(f"Target trees (Optuna): {total_trees} | Max epochs: {epochs}")
+    print("Strategy: 1 tree/chunk/epoch, capped at the tuned tree budget")
     print("=" * 80)
-    
+
     params = best_params.copy()
+    # Pop scale_pos_weight ONCE (before the loop) to avoid double-dipping with
+    # the per-chunk Dynamic Instance Weighting applied below. Calling it every
+    # iteration was redundant (the key is already gone after the first pop).
+    params.pop('scale_pos_weight', None)
+
+    # Pin base_score to the neutral 0.5. XGBoost >= 2.0 auto-estimates base_score
+    # from the (instance-weighted) label mean of the DMatrix; with per-chunk
+    # incremental training, a pure or heavily-weighted chunk can drive that
+    # estimate to exactly 0.0 or 1.0, which raises
+    # "base_score must be in (0,1) for the logistic loss" and aborts training.
+    # Fixing it makes every chunk train regardless of its class balance.
+    params.setdefault('base_score', 0.5)
+
     model = None
-    
+    trees_built = 0
+
+    # Dedicated RNG instance so shuffling is reproducible WITHOUT mutating the
+    # process-global random state (the previous random.seed() call reseeded the
+    # global RNG every epoch, an unexpected side effect for any other consumer).
+    rng = random.Random(RANDOM_SEED)
+
     for epoch in range(epochs):
+        if trees_built >= total_trees:
+            break
         print(f"\n--- EPOCH {epoch+1}/{epochs} ---")
-        
-        # CRITICAL FIX: Shuffle chunks to destroy the Resistance-Ratio sorting bias
+
+        # CRITICAL FIX: Shuffle chunks to destroy the Resistance-Ratio sorting bias.
+        # Per-epoch reseed keeps each epoch's order reproducible yet distinct.
         shuffled_files = train_files.copy()
-        random.seed(RANDOM_SEED + epoch)
-        random.shuffle(shuffled_files)
-        
+        rng.seed(RANDOM_SEED + epoch)
+        rng.shuffle(shuffled_files)
+
         for i, chunk_file in enumerate(shuffled_files):
+            if trees_built >= total_trees:
+                break
             try:
                 X_chunk = load_npz(chunk_file)
                 chunk_num = int(chunk_file.stem.split('_')[-1])
                 y_chunk = get_y_chunk(y_all, chunk_num, CHUNK_SIZE, len(y_all))
-                
-                # Pop scale_pos_weight to avoid double-dipping with dynamic weights
-                params.pop('scale_pos_weight', None)
 
                 # Dynamic Instance Weighting (Solves Local Chunk Imbalance)
                 pos_count = np.sum(y_chunk)
@@ -291,14 +305,17 @@ def final_training_incremental(best_params, train_files, y_all):
 
                 # Train exactly 1 tree per chunk to distribute learning evenly
                 model = xgb.train(params, dtrain, num_boost_round=1, xgb_model=model)
+                trees_built += 1
 
                 del X_chunk, y_chunk, dtrain, weights
                 gc.collect()
             except Exception as e:
                 print(f"  ✗ ERROR in Chunk {chunk_file.name}: {e}")
                 sys.exit(1)
-        
+
         print(f"  ✓ Epoch {epoch+1} Complete. Current Trees in Model: {model.num_boosted_rounds()}")
+
+    print(f"\n  ✓ Training stopped at {trees_built} trees (tuned budget: {total_trees}).")
     
     # Dynamic Instance Weighting is active: threshold remains 0.5 (no double-dipping)
     print("\n[Threshold Configuration]")
@@ -390,6 +407,14 @@ def final_test(model, test_files, y_all, optimal_threshold):
     print(cm)
     print("\n" + "=" * 80)
 
+    return {
+        'accuracy': float(acc),
+        'roc_auc': float(auc),
+        'mcc': float(final_mcc),
+        'threshold': float(optimal_threshold),
+        'n_test_samples': int(len(y_true_all)),
+    }
+
 
 # ============================================================================
 # MAIN PIPELINE
@@ -446,7 +471,8 @@ def main():
     
     # Load antibiotic-specific config to show optuna subset info
     try:
-        antibiotic_config_path = CONFIG_DIR / f"config_{TARGET_ANTIBIOTIC}.yaml"
+        antibiotic_config_path = resolve_path('experiment_config', organism=ORGANISM,
+                                              antibiotic=TARGET_ANTIBIOTIC, config=config)
         with open(antibiotic_config_path, 'r') as f:
             antibiotic_config = yaml.safe_load(f)
         optuna_count = antibiotic_config.get('data_split', {}).get('optuna_count', 'N/A')
@@ -491,7 +517,7 @@ def main():
     
     # Evaluate without test set leakage
     print("\n[5/5] Evaluating model...")
-    final_test(final_model, test_files, y_all, optimal_threshold)
+    train_metrics = final_test(final_model, test_files, y_all, optimal_threshold)
     
     # Save model
     model_path = MODELS_DIR / f"xgboost_{TARGET_ANTIBIOTIC}_final_v2.json"
@@ -506,21 +532,68 @@ def main():
         shutil.copy2(model_path, backup_model_path)
         print(f"✓ Timestamped Backup Model saved successfully: {backup_model_path.name} in {MODELS_DIR}")
         
-        # Save threshold to the antibiotic-specific config
+        # Save threshold to the antibiotic-specific config.
+        # This script is the SINGLE writer of the operating threshold:
+        # 06_evaluation.py now only REPORTS Youden's J and never overwrites the
+        # config (removing the previous test-set data leakage + write conflict).
         antibiotic_config['evaluation'] = {
             'optimal_threshold': float(round(float(optimal_threshold), 4)),
             'threshold_type': 'Dynamic_Instance_Weighting (0.5 — per-chunk neg/pos ratio applied to DMatrix)'
         }
-        
+
+        # Preserve the auto-generated comment header (leading '#' lines written
+        # by 04_optimization.py) so repeated runs stay idempotent and do not
+        # silently strip the provenance banner.
+        header_lines = []
+        try:
+            with open(antibiotic_config_path, 'r', encoding='utf-8') as hf:
+                for line in hf:
+                    if line.startswith('#') or line.strip() == '':
+                        header_lines.append(line)
+                    else:
+                        break
+        except Exception:
+            header_lines = []
+
         with open(antibiotic_config_path, 'w', encoding='utf-8') as f:
+            if header_lines:
+                f.writelines(header_lines)
             yaml.dump(antibiotic_config, f, default_flow_style=False, sort_keys=False)
-            
+
         print(f"✓ Unbiased Threshold saved to config: {antibiotic_config_path.name}")
-        
+
     except Exception as e:
         print(f"ERROR: Failed to save model or config: {e}")
         sys.exit(1)
-    
+
+    # ------------------------------------------------------------------------
+    # MLOps: write models/{organism}/{antibiotic}/manifest.json (model card).
+    # "Best model" selection can use these metrics instead of guessing from
+    # timestamps / fragile _final_v2 naming (SCALE_MLOPS_PLAN.md §7.2).
+    # Best-effort — never break a successful training run.
+    # ------------------------------------------------------------------------
+    try:
+        organism = config.get('project', {}).get('organism', 'unknown')
+        run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
+        manifest = {
+            "run_id": run_id,
+            "organism": organism,
+            "antibiotic": TARGET_ANTIBIOTIC,
+            "model_file": model_path.name,
+            "metrics": train_metrics,
+            "params": best_params,
+            "threshold": float(optimal_threshold),
+            "threshold_type": "Dynamic_Instance_Weighting (0.5)",
+            "data_split_hash": rm.hash_files([str(f) for f in train_files]),
+            "git_commit": rm.git_commit_hash(),
+            "git_dirty": rm.git_is_dirty(),
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        if rm.write_json(MODELS_DIR / "manifest.json", manifest):
+            print(f"✓ Model manifest written: {(MODELS_DIR / 'manifest.json')}")
+    except Exception as e:
+        print(f"⚠ Could not write model manifest: {e}")
+
     print("\n" + "=" * 80)
     print("TRAINING COMPLETE")
     print("=" * 80)
@@ -530,5 +603,14 @@ def main():
 # SCRIPT ENTRY POINT
 # ============================================================================
 if __name__ == "__main__":
-    main()
+    # Global guard: report any unhandled exception with a traceback and exit
+    # non-zero so a crash mid-training cannot leave a half-written model that a
+    # downstream step silently consumes.
+    import traceback
+    try:
+        main()
+    except Exception as e:
+        print(f"\nFATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 

@@ -28,11 +28,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
 import scipy.sparse as sp
-import glob
 from tqdm import tqdm
 import warnings
 import gc
-from sklearn.decomposition import TruncatedSVD
 
 warnings.filterwarnings('ignore')
 
@@ -50,14 +48,16 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
+    from lib.config import resolve_path
     TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 
-    MATRIX_DIR = PROJECT_ROOT / config['paths']['matrix_dir'].format(antibiotic=TARGET_ANTIBIOTIC)
+    MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
     # Derive output directory from the centralised config key (02_matrix_qc)
-    OUTPUT_DIR = PROJECT_ROOT / config['paths']['dir_02_matrix_qc'].format(
-        antibiotic=TARGET_ANTIBIOTIC
-    )
+    OUTPUT_DIR = resolve_path('dir_02_matrix_qc', organism=ORGANISM,
+                              antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 except Exception as e:
     print(f"ERROR loading config: {e}")
@@ -149,9 +149,13 @@ def plot_class_balance(y_df):
     
     plt.figure(figsize=(8, 6))
     
+    # Assign x to `hue` + legend=False: required by seaborn >=0.14 to use a
+    # per-category palette without triggering the deprecated-palette warning.
     ax = sns.barplot(x=['Susceptible (0)', 'Resistant (1)'], y=[sus, res],
-                     palette=['#1f78b4', '#d95f02'])
-                     
+                     hue=['Susceptible (0)', 'Resistant (1)'],
+                     palette=['#1f78b4', '#d95f02'], legend=False)
+
+
     # Annotate with exact numbers and percentages
     for i, v in enumerate([sus, res]):
         pct = (v / total) * 100
@@ -375,128 +379,6 @@ def plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR):
         sys.exit(1)
 
 
-def plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data):
-    print("\nGenerating Exact Global SVD Separability Proof (100% Data Deduction)...")
-    output_path_2d = OUTPUT_DIR / f"05_svd_2d_separability_{TARGET_ANTIBIOTIC}.png"
-    output_path_3d = OUTPUT_DIR / f"05_svd_3d_separability_{TARGET_ANTIBIOTIC}.png"
-    
-    if output_path_2d.exists() and output_path_3d.exists():
-        print(" -> Skipping SVD: 2D and 3D plots already exist.")
-        return
-        
-    chunk_files = sorted(list(MATRIX_DIR.glob(f"X_{TARGET_ANTIBIOTIC}_part_*.npz")), 
-                         key=lambda x: int(x.stem.split('_part_')[1]))
-    if not chunk_files: return
-        
-    try:
-        import scipy.sparse as sp
-        from scipy.linalg import eigh
-        from mpl_toolkits.mplot3d import Axes3D
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import gc
-        import numpy as np
-        
-        print("  [Pass 1/3] Scanning chunk dimensions...")
-        offsets = []
-        current_idx = 0
-        for f in chunk_files:
-            mat = sp.load_npz(f)
-            r = mat.shape[0]
-            offsets.append((current_idx, current_idx + r))
-            current_idx += r
-            del mat
-            
-        N_total = current_idx
-        K = np.zeros((N_total, N_total), dtype=np.float32)
-        
-        print("  [Pass 2/3] Computing Exact Gram Matrix (XX^T) safely...")
-        print("             Strategy: Safe Dual-Load (Max ~5GB RAM). Processing 48M+ features...")
-        
-        for i in tqdm(range(len(chunk_files)), desc="Block Matrix Multiplication (Outer)"):
-            start_i, end_i = offsets[i]
-            # Load as float32 to optimize BLAS dot product speed
-            X_i = sp.load_npz(chunk_files[i]).astype(np.float32)
-            
-            # Diagonal Block
-            K[start_i:end_i, start_i:end_i] = X_i.dot(X_i.T).toarray()
-            
-            # Off-diagonal Blocks
-            for j in range(i + 1, len(chunk_files)):
-                start_j, end_j = offsets[j]
-                X_j = sp.load_npz(chunk_files[j]).astype(np.float32)
-                
-                block = X_i.dot(X_j.T).toarray()
-                K[start_i:end_i, start_j:end_j] = block
-                K[start_j:end_j, start_i:end_i] = block.T
-                
-                del X_j
-                gc.collect()
-                
-            del X_i
-            gc.collect()
-            
-        print("  [Pass 3/3] Extracting Principal Components via Eigendecomposition...")
-        # Diagonalize the full Gram matrix
-        evals, evecs = eigh(K)
-        
-        # Sort and take top 3 components
-        evals = evals[-3:][::-1]
-        evecs = evecs[:, -3:][:, ::-1]
-        
-        # Compute Variance Ratio
-        trace_K = np.trace(K)
-        var_ratio = evals / trace_K
-        
-        # Project into 3D Space (X_proj = U * sqrt(Sigma))
-        X_proj = evecs * np.sqrt(np.maximum(evals, 0))
-        
-        N = X_proj.shape[0]
-        y_global = y_data['label'].iloc[:N].values
-        
-        print("  Generating Plots...")
-        # 2D Plot
-        plt.figure(figsize=(10, 8))
-        scatter = sns.scatterplot(
-            x=X_proj[:, 0], y=X_proj[:, 1], hue=y_global, 
-            palette=['#1f78b4', '#d95f02'], alpha=0.7, s=80, edgecolor='k'
-        )
-        plt.title('Exact Global SVD Separability (100% Data, All K-mers)', fontsize=16, pad=20)
-        plt.xlabel(f'Principal Component 1 ({var_ratio[0]*100:.2f}%)')
-        plt.ylabel(f'Principal Component 2 ({var_ratio[1]*100:.2f}%)')
-        handles, labels = scatter.get_legend_handles_labels()
-        plt.legend(handles, ['Susceptible (0)', 'Resistant (1)'], title="Phenotype")
-        sns.despine()
-        plt.tight_layout()
-        plt.savefig(output_path_2d, dpi=300)
-        plt.close()
-        print(f" -> Saved 2D plot: {output_path_2d.name}")
-        
-        # 3D Plot
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        mask_0, mask_1 = (y_global == 0), (y_global == 1)
-        ax.scatter(X_proj[mask_0, 0], X_proj[mask_0, 1], X_proj[mask_0, 2], 
-                   c='#1f78b4', alpha=0.7, s=50, edgecolor='k', label='Susceptible (0)')
-        ax.scatter(X_proj[mask_1, 0], X_proj[mask_1, 1], X_proj[mask_1, 2], 
-                   c='#d95f02', alpha=0.7, s=50, edgecolor='k', label='Resistant (1)')
-        ax.set_title('Exact Global SVD 3D Separability (100% Data)', fontsize=16)
-        ax.set_xlabel(f'PC 1 ({var_ratio[0]*100:.2f}%)')
-        ax.set_ylabel(f'PC 2 ({var_ratio[1]*100:.2f}%)')
-        ax.set_zlabel(f'PC 3 ({var_ratio[2]*100:.2f}%)')
-        ax.legend(title="Phenotype", loc='best')
-        plt.tight_layout()
-        plt.savefig(output_path_3d, dpi=300)
-        plt.close()
-        print(f" -> Saved 3D plot: {output_path_3d.name}")
-        
-    except Exception as e:
-        print(f"  ⚠ Failed to generate Exact SVD: {e}")
-    finally:
-        try: del K, X_proj, evecs, evals
-        except: pass
-        gc.collect()
-
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
@@ -512,9 +394,8 @@ if __name__ == "__main__":
     plot_matrix_sparsity(chunk_data)
     plot_chunk_memory_footprint(chunk_data)
     plot_feature_prevalence(MATRIX_DIR, TARGET_ANTIBIOTIC, OUTPUT_DIR)
-    plot_svd_separability(MATRIX_DIR, TARGET_ANTIBIOTIC, y_data)
-    
-    print("\n=" * 60)
+
+    print("\n" + "=" * 60)
     print(f"All visualizations saved to: {OUTPUT_DIR}")
     print("=" * 60)
 
