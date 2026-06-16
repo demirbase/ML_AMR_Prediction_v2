@@ -113,6 +113,44 @@ def main() -> None:
     # arguments and argparse would reject unknown options.
     failures = []
     for sid, script in steps:
+        # Just-in-time resolution for --antibiotic auto (after metadata is prepared)
+        if sid >= "01" and env.get("AMR_ANTIBIOTIC") == "auto":
+            try:
+                from lib.config import get_target
+                import pandas as pd
+                import yaml
+                
+                org, _ = get_target()
+                reg_path = PROJECT_ROOT / "config/registry/organisms.yaml"
+                with open(reg_path) as f:
+                    registry = yaml.safe_load(f)
+                
+                org_conf = registry["organisms"].get(org, {})
+                candidates = org_conf.get("antibiotics", [])
+                meta_file = PROJECT_ROOT / org_conf.get("metadata_file", f"data/external/{org}/metadata/amr_phenotypes.csv")
+                
+                if not meta_file.exists():
+                    best_ab = candidates[0] if candidates else "ampicillin"
+                    log.warning("Metadata %s not found. Auto-selecting '%s' fallback.", meta_file.name, best_ab)
+                else:
+                    df = pd.read_csv(meta_file)
+                    best_ab = candidates[0] if candidates else "ampicillin"
+                    best_score = -1
+                    for ab in candidates:
+                        if ab in df.columns:
+                            counts = df[df[ab].notna()][ab].value_counts()
+                            r = counts.get("Resistant", 0)
+                            s = counts.get("Susceptible", 0)
+                            score = min(r, s)  # Maximize the minority class size
+                            if score > best_score:
+                                best_score = score
+                                best_ab = ab
+                    log.info("Auto-selected ideal antibiotic '%s' based on class balance (minority class size: %d).", best_ab, best_score)
+                env["AMR_ANTIBIOTIC"] = best_ab
+            except Exception as e:
+                log.warning("Failed to auto-select antibiotic, using fallback 'ampicillin': %s", e)
+                env["AMR_ANTIBIOTIC"] = "ampicillin"
+
         script_path = PROJECT_ROOT / "scripts" / script
         log.info("=== STEP %s : %s ===", sid, script)
         t0 = time.time()
