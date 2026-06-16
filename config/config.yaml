@@ -150,7 +150,7 @@ training:
   validation_fraction: 0.2  # Fraction of training data for early stopping validation
   
   # Hyperparameter optimization
-  n_trials: 25  # Number of Optuna optimization trials
+  n_trials: 30  # Number of Optuna optimization trials
   optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
 
