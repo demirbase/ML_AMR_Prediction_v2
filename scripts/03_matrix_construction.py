@@ -385,42 +385,36 @@ def create_feature_matrix():
         
         print(f"  [Chunk {chunk_id+1}/{num_chunks}] Processing {len(chunk_genomes)} genomes...")
         
-        # Initialize sparse matrix components
-        # For CSR format, we need: data values, row indices, column indices
-        col_indices = array.array('i')  # Signed 32-bit integer for column indices
-        indptr = array.array('q', [0])  # Signed 64-bit integer for row pointers
-        
-        # Process each genome in the chunk
-        for local_genome_idx, genome_id in enumerate(tqdm(chunk_genomes, leave=False, desc=f"    Chunk {chunk_id+1}")):
-            
+        # Build each genome's column indices in parallel — kmc_tools dump per
+        # genome is the bottleneck; a thread pool (workers = preprocessing.threads)
+        # saturates the core allocation. ThreadPoolExecutor.map preserves genome
+        # order, so the CSR indptr stays correct.
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _dump_cols(genome_id):
             kmc_db = KMC_OUTPUTS_DIR / genome_id
             temp_dump_file = TEMP_DIR / f"{genome_id}_dump.txt"
-            
+            cols = []
             try:
-                # Export k-mer database to text format
-                dump_cmd = f"{KMC_TOOLS_BIN} transform {kmc_db} dump {temp_dump_file}"
-                run_command(dump_cmd)
-                
-                # Read k-mers and populate matrix
+                run_command(f"{KMC_TOOLS_BIN} transform {kmc_db} dump {temp_dump_file}")
                 with open(temp_dump_file, 'r', encoding='utf-8') as f:
                     for line in f:
-                        kmer_sequence = line.split()[0]
-                        
-                        # Only include k-mers that are in the global vocabulary
-                        if kmer_sequence in kmer_to_index:
-                            col_idx = kmer_to_index[kmer_sequence]
-                            col_indices.append(col_idx)
-                    
+                        ci = kmer_to_index.get(line.split()[0])
+                        if ci is not None:
+                            cols.append(ci)
             except Exception as e:
                 print(f"    WARNING: Failed to process {genome_id}: {e}")
-                continue
             finally:
-                # Guarantee cleanup of the per-genome temporary dump file
-                # regardless of success or failure, to prevent disk space leaks.
                 if temp_dump_file.exists():
                     temp_dump_file.unlink()
-            
-            indptr.append(len(col_indices))
+            return cols
+
+        col_indices = array.array('i')
+        indptr = array.array('q', [0])
+        with ThreadPoolExecutor(max_workers=max(1, int(THREADS))) as _ex:
+            for cols in _ex.map(_dump_cols, chunk_genomes):
+                col_indices.extend(cols)
+                indptr.append(len(col_indices))
         
         # Construct sparse matrix for this chunk
         # shape = (number of genomes in chunk, total number of features)
