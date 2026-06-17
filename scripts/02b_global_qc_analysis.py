@@ -125,45 +125,43 @@ def analyze_kmer_databases(sample_size=None):
     aggregated_hist = {}
     genome_complexities = []
     
-    for db_file in tqdm(target_files, desc="Parsing KMC DBs"):
+    def _extract_one(db_file):
         prefix = db_file.with_suffix('')
         genome_id = db_file.stem
         hist_out = TEMP_DIR / f"{genome_id}_hist.txt"
-        
-        # 1. Ask KMC tools to generate a frequency histogram
-        # This tells us: "How many k-mers appear exactly 1 time, 2 times, etc."
         cmd = f"{KMC_TOOLS_BIN} transform {prefix} histogram {hist_out}"
         if not run_command(cmd):
-            continue
-            
+            return None
+        total_unique_kmers = 0
+        local_hist = {}
         try:
-            # 2. Parse the histogram file mathematically
-            # Format: Count_Value Number_of_Kmers
-            total_unique_kmers = 0
             with open(hist_out, 'r') as f:
                 for line in f:
                     parts = line.split()
                     if len(parts) == 2:
-                        kmer_freq = int(parts[0])      # e.g., K-mer occurs 5 times in the genome
-                        num_kmers = int(parts[1])      # e.g., 10,000 different k-mers have this frequency
-                        
-                        total_unique_kmers += num_kmers
-                        
-                        # Add to aggregated histogram
-                        aggregated_hist[kmer_freq] = aggregated_hist.get(kmer_freq, 0) + num_kmers
-            
-            # Store complexity metric (size of the genome's k-mer space)
-            genome_complexities.append({
-                'Genome': genome_id,
-                'Unique_Kmers': total_unique_kmers
-            })
-            
+                        kf = int(parts[0]); nk = int(parts[1])
+                        total_unique_kmers += nk
+                        local_hist[kf] = local_hist.get(kf, 0) + nk
         finally:
             if hist_out.exists():
                 hist_out.unlink()
-        
-        # Explicit garbage collection per file
-        gc.collect()
+        return genome_id, total_unique_kmers, local_hist
+
+    # Parallel histogram extraction (one kmc_tools per genome) — concurrency =
+    # preprocessing.threads. The serial version left the many-core allocation
+    # idle (low CPU efficiency); this saturates it and finishes far faster.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    _workers = max(1, int(THREADS))
+    with ThreadPoolExecutor(max_workers=_workers) as _ex:
+        _futs = [_ex.submit(_extract_one, _db) for _db in target_files]
+        for _fut in tqdm(as_completed(_futs), total=len(_futs), desc="Parsing KMC DBs"):
+            _res = _fut.result()
+            if _res is None:
+                continue
+            genome_id, total_unique_kmers, local_hist = _res
+            for _kf, _nk in local_hist.items():
+                aggregated_hist[_kf] = aggregated_hist.get(_kf, 0) + _nk
+            genome_complexities.append({'Genome': genome_id, 'Unique_Kmers': total_unique_kmers})
                 
     # --- IQR Outlier Detection ---
     if not genome_complexities:
