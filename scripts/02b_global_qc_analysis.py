@@ -495,11 +495,14 @@ if __name__ == "__main__":
     print("K-MER DATABASE EXPLORATION AND VISUALIZATION")
     print("=" * 60)
     
-    if not KMC_TOOLS_BIN.exists():
-        print(f"ERROR: KMC tools not found at {KMC_TOOLS_BIN}")
-        print("Please ensure the binary is installed for extracting histograms.")
+    # KMC tools path is resolved (and validated) at load time via resolve_tool,
+    # which returns an absolute executable path as a str (or None -> we exit
+    # above). The earlier Path.exists() check broke on that str; the truthiness
+    # check below is the equivalent guard.
+    if not KMC_TOOLS_BIN:
+        print("ERROR: KMC tools not found. Install KMC or set AMR_KMC_TOOLS_BIN.")
         sys.exit(1)
-        
+
     hist_data, complexity_data, outliers = analyze_kmer_databases(sample_size=None)
     
     print("\n[Running Visualizations]")
