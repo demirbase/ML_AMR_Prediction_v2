@@ -266,11 +266,18 @@ def download_one(gid, dest_dir, retries=3, timeout=120):
     out = dest_dir / f"{gid}.fna"
     if out.exists() and out.stat().st_size > 0:
         return gid, "skipped", out.stat().st_size, ""
-    url = FTP_FASTA.format(gid=gid)
+    # Fetch contigs from the BV-BRC Data API (genome_sequence) rather than the
+    # FTP host: ftp.bv-brc.org is frequently firewall-blocked on HPC/cluster
+    # networks (e.g. TRUBA), whereas the API host (www.bv-brc.org) is reachable.
+    # The API returns the full assembly as FASTA via the dna+fasta accept type.
+    url = ("https://www.bv-brc.org/api/genome_sequence/"
+           "?eq(genome_id,%s)&limit(100000)" % gid)
     last = ""
     for attempt in range(1, retries + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "amr-pipeline/00a"})
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "amr-pipeline/00a",
+                "Accept": "application/dna+fasta"})
             with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
                 data = r.read()
             if not data or not data.lstrip().startswith(b">"):

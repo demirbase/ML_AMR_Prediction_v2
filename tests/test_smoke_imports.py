@@ -18,6 +18,7 @@ PIPELINE_SCRIPTS = [
     "01_data_validation.py",
     "01b_data_validation.py",
     "02_kmer_extraction.py",
+    "02p_kmer_parallel.py",
     "02b_global_qc_analysis.py",
     "03_matrix_construction.py",
     "03b_matrix_validation_qc.py",
