@@ -1,8 +1,56 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · **Branch:** `fix/amr-audit-remediation` (HEAD `647c0d9`, pushed to `github.com/demirbase/ML_AMR_Prediction_v2`)
-> **Local path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
-> **Last full real-data run:** 2026-06-15, *E. coli* / ampicillin, 1788 genomes — pipeline `00a → 11` end-to-end, every step exit 0.
+> **Repo:** `ML_AMR_Prediction_v2` · **Active branch now `main`** (HEAD `3ddc476`, pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). (Earlier work was on `fix/amr-audit-remediation`, since merged to `main`.)
+> **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
+> **Last full local run:** 2026-06-15, *E. coli* / ampicillin, 1788 genomes — `00a → 11` end-to-end.
+> **LIVE: real production run on TRUBA (ARF) HPC, 5470 genomes — in progress (see §0 below).**
+
+---
+
+# 0. TRUBA (ARF) deployment — LIVE STATE (resume here)
+
+> A full real run is in progress on the **TRUBA ARF** cluster (user `edemirbas`). New session: continue from here.
+
+**Where we are:** Data acquired (5470 *E. coli* genomes). Pipeline on TRUBA: `00a✓ 00✓ 01✓ 02 KMC✓ 02b QC✓ 03 matrix✓` — **FEATURES DONE**: `data/processed/ecoli/ampicillin/matrix/` has **22 `.npz` chunks + `features.txt` (1.27 GB)** = **4446 ampicillin genomes × 50.8M k-mers** (~90% sparse; full matrix ≈ **109 GB** decompressed / 21.8B nnz).
+
+**ML done once (OLD regime), then training refactored — re-run pending.** `run_ml.slurm` (04→05→06) finished 2026-06-18 16:23 with the *old* incremental regime: test **ROC-AUC 0.903, PR-AUC 0.952, MCC 0.693, acc 0.84** (threshold 0.5). User found MCC/acc low → root cause was the **1-tree-per-chunk incremental training** (each tree saw one ~200-genome slice) + it also caused a TRUBA **low-CPU-efficiency warning** (Eff ~13%). **FIXED in code (2026-06-18, local, tested, not yet pushed):** new `scripts/lib/xgb_data.py` (streaming `QuantileDMatrix`), and **05 + 07b rewritten to standard full-data gradient boosting** (every tree sees all train rows; global `neg/pos` weight; bounded memory ~one chunk + ~22 GB quantised). 57 unit/smoke + 1 integration test pass. The existing `config_ampicillin.yaml` (chunk split + best params + n_estimators=47) is still valid → **no need to re-run 04**.
+
+**Immediate TODO on TRUBA:** (1) get the 3 changed files onto TRUBA (push to GitHub from Mac, then `git fetch && git checkout origin/main -- scripts/lib/xgb_data.py scripts/05_model_training.py scripts/07b_feature_stability.py` — targeted, won't touch TRUBA's manual 02p/02b/03/config patches); (2) verify container xgboost has `QuantileDMatrix`/`DataIter` (xgboost ≥1.7 — local is 3.1.2); (3) re-run **05 → 06** (new metrics, hopefully higher MCC/acc) then the biology chain **07b → 07 → 08 → 09 → 10 → 11**. With full-data boosting each step saturates cores → no low-efficiency warning; `-c 20` on barbun is enough.
+
+**Connection / layout (all on TRUBA):**
+- Login: OpenVPN → `ssh edemirbas@172.16.6.11` (UI = `arf-ui1`; transfer hosts `arf-ui4/5` = .14/.15).
+- `$AMR_HOME=/arf/home/edemirbas/ML_AMR_Prediction_v2` (git clone of `main` = **code**).
+- `$AMR_WORK=/arf/scratch/edemirbas/amr` (**data/outputs/container**). `$SIF=$AMR_WORK/containers/amr.sif`.
+- All three + `APPTAINER_BINDPATH=/arf` are in `~/.bashrc`; `~/.bash_profile` does `source ~/.bashrc`.
+- In the repo, `data/ results/ logs/ runs/ models/` are **symlinks → `$AMR_WORK/…`**. CARD homolog DB copied to `$AMR_WORK/data/external/blast_db/card_nt/`.
+
+**Environment = Apptainer container** (TRUBA forbids conda/pip on the shared FS):
+- `apptainer` is at `/usr/bin/apptainer` (v1.3.6, **no `module load` needed**).
+- `amr.sif` built from `$AMR_HOME/amr.def` (Bootstrap docker `condaforge/miniforge3` + `environment.yml`) on an **interactive debug node** with `apptainer build --fakeroot` (set `APPTAINER_TMPDIR/CACHEDIR=/tmp/...`). Contains python+xgboost+sklearn+biopython+certifi, KMC 3.2.4, BLAST+ 2.17, Nextflow.
+- Run everything as `apptainer exec $SIF python scripts/...`.
+
+**Hard TRUBA rules learned (critical):**
+1. **Submit jobs from `/arf/scratch`** (`cd $AMR_WORK` before `sbatch`/`srun`) — else `srun: error: Lutfen islerinizi /arf/scratch/ ...`.
+2. **`APPTAINER_BINDPATH=/arf`** required, else the container can't see scratch (symlinks → `mkdir`/FileNotFound errors).
+3. **`ftp.bv-brc.org` is FIREWALL-BLOCKED** on TRUBA. Genome FASTAs are fetched from the **BV-BRC Data API** (`www.bv-brc.org/api/genome_sequence`, dna+fasta) — already the repo default in `00a` (commit `5d0c9a3`).
+4. **Queues:** `barbun` **min 20 cores/node** (hamsi 28, orfoz 56). **MS-student limit = 40 cores.** → use `barbun -c 20` (or `-c 40` for the parallel ML step). `debug` ≤4h for tests.
+5. **Low CPU efficiency → TRUBA warns (`Eff:%…`) and may auto-cancel + cut your core quota.** barbun's 20-core minimum means any single-threaded step looks ~5%. Mitigations applied & on `main`: **`scripts/02p_kmer_parallel.py`** (parallel KMC, 5470 genomes in ~2.5 min), **parallel 02b** spectra extraction (`1cd0119`), **parallel 03** per-genome KMC dump (`3ddc476`). **Caveat:** 03's per-genome *parse* (matching 5M k-mers/genome against the ~8 GB `kmer_to_index` dict) is **GIL-bound**, so thread parallelism only partly helps → 03 still ran ~5% and got warned. **03 is resume-safe** (skips existing `*.npz` + `features.txt`), so a kill is harmless — just resubmit. **True 03 fix (future):** 2-bit integer-encode k-mers + numpy `searchsorted` (drop the Python dict) or multiprocessing. **ML steps (04/05) use cores via `n_jobs=40`** → expected high efficiency.
+6. Quotas (banner): `/arf/home` 100 GB / 100K inode; `/arf/scratch` 1 TB / 200K inode; **no backup**; `/arf` is NVMe Lustre (fast — no separate `/tmp` needed for KMC).
+
+**`config.yaml` on TRUBA (NOT committed — TRUBA-specific tuning):** `kmc_mem:128`, `threads:20`, `n_jobs:40`, `chunk_size:200`, `n_trials:30`, `target_antibiotic:ampicillin`.
+
+**SLURM scripts in `$AMR_HOME/slurm/`:** `00_test.slurm` (debug sanity ✓), `run_features.slurm` (02p→02b→03, barbun `-c 20 --mem 120G`, **done**), `run_matrix.slurm` (03-only spare), `run_ml.slurm` (04→05→06, `-c 40 --mem 300G --time 3-00:00:00`, **current**). All use `export APPTAINER_BINDPATH=/arf`, `set -euo pipefail`, mail to `eren0demirbas@gmail.com`, submit from `$AMR_WORK`.
+
+**Data state:** 5470 genomes downloaded (395 had no API sequence, dropped). `amr_phenotypes.csv` = 5470×72. ampicillin 4446 tested (recommended target). KMC dbs for all 5470 in `$AMR_WORK/data/interim/ecoli/kmc_outputs/`.
+
+**Commits made during deployment (all on `main`):** `bvbrc` NaN-safe filters (`17b1301`); `00a` FTP→API download + new `02p` parallel KMC (`5d0c9a3`); `02b` str-path KMC check (`c352c48`); **parallel 02b spectra (`1cd0119`)**; **parallel 03 dump (`3ddc476`)**. **Do NOT `git pull` on TRUBA** — its working copy is manually patched (02p, parallel 02b/03) + TRUBA-specific `config.yaml`; pull would conflict. `main` already contains all the code fixes.
+
+**Immediate next steps (new session):**
+1. Check `run_ml.slurm` (`amr-ml`): `squeue -u $USER`; `tail $AMR_WORK/amr-ml-*.out`. 04 HPO (30 Optuna trials × out-of-core over 22 chunks × 50.8M features) is the long phase. On success: `config/experiments/ecoli/config_ampicillin.yaml` + model + `06_evaluation` metrics appear.
+2. If `run_ml` is killed for low efficiency: 04 is **not** resume-safe (restarts HPO). Re-submit; if it keeps getting flagged, note that 04/05's per-chunk DMatrix *load* is serial between trees — acceptable for a one-off, or reduce scope.
+3. After ML → **biology job** (`barbun -c 20`): `07b → 07 → 09 → 10`. `08` CARD-local BLAST works on compute nodes; `08` NCBI-remote + `09` Entrez need internet → run those on the **UI** (compute nodes may lack outbound internet) or skip.
+4. Then download results: `tar` `results/ models/ runs/` from scratch → home or `rsync` to laptop (scratch auto-purges in 30 days).
+5. Token: pushes use a fine-grained PAT pasted in chat (expires fast; ask for a fresh one with Contents:write). Full step-by-step + real-run corrections in `docs/TRUBA_Kurulum_ve_Calistirma_Rehberi.md` (Appendix).
 
 ---
 
@@ -31,7 +79,8 @@ scripts/
   03_matrix_construction.py         # global vocab (KMC) -> sparse binary CSR .npz chunks (+ y, genomes, features.txt)
   03b_matrix_validation_qc.py       # matrix QC (sparsity/prevalence)
   04_optimization.py                # Optuna HPO -> experiment config + run_metadata.json
-  05_model_training.py              # out-of-core incremental XGBoost -> model + manifest.json + unbiased threshold
+  05_model_training.py              # full-data boosting over streaming QuantileDMatrix -> model + manifest.json + threshold
+  lib/xgb_data.py                   # ChunkDMatrixIter + build_quantile_dmatrix (streaming DMatrix; used by 05/07b)
   06_evaluation.py                  # metrics, ROC/PR, calibration, bootstrap 95% CIs, error analysis
   07b_feature_stability.py          # 5-seed repeated holdout: AUC mean±std, selection freq, Jaccard, stable set
   07_explainability.py              # Gain top-N ∪ 07b stable set -> CSV + FASTA (flagged)
@@ -80,9 +129,9 @@ Run order (config-driven; each reads `config.yaml` for organism/antibiotic):
 - **02b `global_qc_analysis`** — scans all KMC DBs for genome-complexity outliers (IQR on unique-k-mer count) and computes a `min_support` "elbow" advisory (does **not** change config).
 - **03 `matrix_construction`** — builds the **global k-mer vocabulary** with one KMC pass over all genomes (`-ci min_support` rare filter, `-cx max_support` drops core-genome k-mers), dumps it to `features.txt`, then writes the genome×k-mer presence/absence matrix as **CSR `.npz` chunks** of `chunk_size=200` genomes + `y_{ab}.csv` + `genomes_{ab}.csv`.
 - **04 `optimization`** — Optuna HPO (`n_trials=25`, `eval_metric=auc`). Stratified chunk split into train/test/optuna subsets. `colsample_bytree` searched on a **√p-anchored log range**; `n_estimators = best_iteration+1`; `base_score=0.5` pinned. Writes `config/experiments/{organism}/config_{antibiotic}.yaml` (the data split + best params) and `run_metadata.json`.
-- **05 `model_training`** — out-of-core **incremental** XGBoost: 1 tree per chunk-slice per epoch, per-chunk dynamic instance weighting (`neg/pos`), `base_score=0.5`, trees capped at the tuned budget. Saves the model + `manifest.json`, and an **unbiased operating threshold** computed on train/val only (no test leakage).
+- **05 `model_training`** — **standard full-data gradient boosting** over a single, streaming **`QuantileDMatrix`**: `lib/xgb_data.ChunkDMatrixIter` feeds the chunks to XGBoost one at a time, so the full ~100 GB sparse matrix is never materialised (binary data + `max_bin=2` → ~1 byte/non-zero quantised). Trains the Optuna-tuned `n_estimators` trees on the whole training set (every tree sees all training rows), with a single **global `neg/pos` instance weight** for class imbalance, `base_score=0.5`. Saves the model + `manifest.json`, and an **operating threshold fixed at 0.5** (global weighting; no test-set tuning → no leakage). *Replaces the previous 1-tree-per-chunk incremental regime, which trained each tree on one ~200-genome slice (weaker fit + very low HPC CPU efficiency).*
 - **06 `evaluation`** — single stratified split; ROC/PR curves, calibration, confusion matrix, **bootstrap 95% CIs**, MCC/κ, error analysis. **Does not overwrite** the config threshold (leakage fix).
-- **07b `feature_stability`** — runs **before** 07. 5 seeds `[42,123,777,1024,2025]`, stratified 80/20, **fixed HPO across seeds** (no per-seed retune → leakage-safe; "repeated holdout", Mahé 2018 resampling, not true k-fold because of the out-of-core constraint). Reports AUC mean±std, per-k-mer **selection_frequency** (`stable` if ≥ `stability_threshold=0.6`), and mean pairwise **Jaccard** of the top-N sets. Fully out-of-core (one chunk in RAM, sample-level row masks).
+- **07b `feature_stability`** — runs **before** 07. 5 seeds `[42,123,777,1024,2025]`, stratified 80/20, **fixed HPO across seeds** (no per-seed retune → leakage-safe; "repeated holdout", Mahé 2018 resampling, not true k-fold because of the out-of-core constraint). Each seed trains with the **same full-data boosting regime as 05** — a streaming `QuantileDMatrix` built from the seed's train rows (sample-level `row_mask` over the chunks), so it stays out-of-core (one chunk in RAM at a time) while every tree sees the whole train split. Reports AUC mean±std, per-k-mer **selection_frequency** (`stable` if ≥ `stability_threshold=0.6`), and mean pairwise **Jaccard** of the top-N sets.
 - **07 `explainability`** — extracts the single model's Gain top-N k-mers, **then merges in the 07b stable set** (k-mers reproducible across seeds but not in the gain top-N), flagging each row `in_gain_topN` / `stable` / `selection_frequency`. Emits the candidate CSV + FASTA. So BLAST/biology (08–11) covers **both** the gain and stability views.
 - **08 `blast_annotation`** — Nextflow runs two parallel BLASTs of the candidate FASTA: **CARD local** and **NCBI nt remote**, both with `-task blastn-short -dust no` (correct for 21-mer queries). Records the CARD DB version (`blastdbcmd -info`).
 - **09 `biological_summary`** — grades every hit into **confirmed / candidate / weak / none** using **identity + coverage** (alignment length / k) as the primary, DB-size-independent criteria, with E-value a loose secondary gate (E-value is *not* comparable between CARD and NCBI). Joins 07b stability, resolves NCBI gene names via Entrez, and writes: the Markdown report (with quantitative summary + reification-fallacy + gyrA/SNP caveats), `07_kb_candidates_{ab}.csv` (per-k-mer KB record incl. **composite_score = stability × log10(1/E) × identity**), and `08_validation_metrics_{ab}.json` (**M7 known-mechanism recovery rate**, **H2 pass/fail ≥40%**, **H4 novel-candidate fraction**, tier counts).
@@ -179,7 +228,7 @@ The project must run on the user's Mac **and** a remote HPC pulled from GitHub. 
 - **Step 11 needs the full CARD download** (`data/external/card/card.json` + `nucleotide_fasta_protein_variant_model.fasta`); not shipped (ignored). Skips cleanly if absent.
 - **BV-BRC API deep-pagination cap** on the full 243k-row table — `--backend api` works and is fast, but if truncated fall back to `--backend cli` (batched, slow) or website `--raw-csv`.
 - **No pipeline orchestrator** (`run_pipeline.py`) — steps run manually.
-- **04 vs 05 training regimes differ** (single early-stopped fit vs 1-tree/chunk incremental) — documented methodological caveat, not a bug.
+- ~~**04 vs 05 training regimes differ** (single early-stopped fit vs 1-tree/chunk incremental)~~ — **RESOLVED 2026-06-18**: 05 (and 07b) now use the same standard full-data boosting as 04's HPO (streaming `QuantileDMatrix`, `lib/xgb_data.py`). 04 still tunes `n_estimators` on a representative chunk subset; 05 trains that many trees on the full set. Minor remaining nuance: the budget is tuned on a subset, not the full train set (acceptable, keeps HPO fast).
 - **BV-BRC env footgun:** `source /Applications/BV-BRC.app/user-env.sh` shadows `python` with BV-BRC's Python 2.7 → run scripts with `python3` or the explicit conda path while it's sourced (so `p3-*` stay on PATH).
 - **Only ampicillin** has been run on real data so far; cefotaxime/ciprofloxacin/gentamicin matrices not regenerated at full scale.
 

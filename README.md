@@ -104,7 +104,7 @@ Paths are resolved through `scripts/lib/config.py:resolve_path()` from the
 | 02 | `02_kmer_extraction.py` / `02b_…` | KMC k-mer counting + global QC |
 | 03 | `03_matrix_construction.py` / `03b_…` | Sparse binary matrices + matrix QC |
 | 04 | `04_optimization.py` | Optuna Bayesian HPO → `config_{antibiotic}.yaml` + run metadata |
-| 05 | `05_model_training.py` | Out-of-core incremental XGBoost → model + `manifest.json` |
+| 05 | `05_model_training.py` | Full-data XGBoost boosting over a streaming `QuantileDMatrix` → model + `manifest.json` |
 | 06 | `06_evaluation.py` | Metrics, ROC/PR, calibration, bootstrap CIs |
 | 07 | `07_explainability.py` | Gain-based top k-mers → CSV + FASTA |
 | 08 | `08_blast_annotation.py` / `.nf` | BLAST top k-mers vs CARD + NCBI (Nextflow) |

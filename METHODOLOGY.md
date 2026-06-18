@@ -12,7 +12,7 @@
    - [3.1 Binary Histogram Quantization (`max_bin = 2`)](#31-binary-histogram-quantization-max_bin--2)
    - [3.2 Optuna HPO and the Square Root Heuristic](#32-optuna-hpo-and-the-square-root-heuristic)
    - [3.3 Stratified Linspace Chunk Selection](#33-stratified-linspace-chunk-selection)
-   - [3.4 Epoch-Based Incremental Learning](#34-epoch-based-incremental-learning)
+   - [3.4 Full-Data Boosting over a Streaming `QuantileDMatrix`](#34-full-data-boosting-over-a-streaming-quantiledmatrix)
 4. [Explainable AI and Biological Validation](#4-explainable-ai-and-biological-validation)
    - [4.1 Feature Importance Mapping](#41-feature-importance-mapping)
    - [4.2 Automated Nextflow BLAST Pipeline](#42-automated-nextflow-blast-pipeline)
@@ -216,54 +216,27 @@ $$\left| \frac{1}{k} \sum_{j=1}^{k} r_{c_j} - \bar{r} \right|$$
 
 compared to random selection, by ensuring the selected ratios span the full observed range of $r_c$ values.
 
-### 3.4 Epoch-Based Incremental Learning
+### 3.4 Full-Data Boosting over a Streaming `QuantileDMatrix`
 
-#### Problem: Catastrophic Forgetting in Sequential Learning
+#### Problem: the matrix does not fit in RAM, but per-chunk training is weak
 
-Standard XGBoost `train()` with `xgb_model` (warm-starting) allows incremental tree addition. However, if chunks are always presented in the **same order**, the model successively updates gradients on each chunk — effectively overwriting knowledge from earlier chunks with signal from the most recently seen chunk. This is analogous to **catastrophic forgetting** in neural network sequential learning.
+The genome × k-mer matrix is far too large to hold densely in memory (e.g. ~109 GB decompressed for ~4.4k genomes × 50.8M k-mers, 21.8B non-zeros). An earlier version handled this by **incremental warm-started boosting** — one tree per chunk via repeated `xgb.train(num_boost_round=1, xgb_model=...)` over shuffled chunks. While this bounded memory, it had two drawbacks: **(i)** each tree was fit to the residuals of only a single ~200-genome chunk, so no tree ever saw the full training distribution (a weaker fit than standard boosting); and **(ii)** the work was dominated by serial chunk decompression with tiny per-tree compute, leaving HPC cores idle (a TRUBA low-efficiency warning at ~13% utilisation).
 
-Specifically: if chunks $\{1, 2, \ldots, C\}$ are always trained in this order, the final gradient updates predominantly reflect the distribution of chunk $C$, biasing predictions toward isolates in the tail of the dataset.
+#### Solution: stream chunks into one quantised DMatrix, then boost normally
 
-#### Solution: Epoch-Based Shuffled Training
+XGBoost's external-data iterator API lets us build a **single** in-core, quantised `QuantileDMatrix` by pulling one chunk at a time, without ever materialising the full sparse matrix. We implement `ChunkDMatrixIter` (`scripts/lib/xgb_data.py`), an `xgb.DataIter` whose `next()` loads chunk $c$, optionally applies a sample-level row mask (used by 07b's seed splits), and feeds $(X_c, y_c, w_c)$ to XGBoost. Because the data are binary, `max_bin = 2` makes the quantised histogram ~1 byte per non-zero, so the resulting DMatrix is compact (~22 GB here) and peak memory stays at roughly **one chunk + the histogram**.
 
-We define an **epoch** as a complete pass through all $C$ training chunks. Over $E$ epochs, we perform $E \times C$ incremental `xgb.train()` calls with `num_boost_round = 1` each time, shuffling the chunk order at the beginning of every epoch.
+Training is then ordinary gradient boosting on the whole training set:
 
-The training sequence across epochs is:
+$$\mathcal{L}^{(t)} = \sum_{i=1}^{N_{\text{train}}} \ell\!\left(y_i,\, \hat{y}_i^{(t-1)} + f_t(x_i)\right) + \Omega(f_t)$$
 
-$$\text{Epoch 1: } \pi^{(1)}(1),\, \pi^{(1)}(2),\, \ldots,\, \pi^{(1)}(C)$$
-$$\text{Epoch 2: } \pi^{(2)}(1),\, \pi^{(2)}(2),\, \ldots,\, \pi^{(2)}(C)$$
-$$\vdots$$
-$$\text{Epoch } E: \pi^{(E)}(1),\, \pi^{(E)}(2),\, \ldots,\, \pi^{(E)}(C)$$
+where the sum now runs over **all** $N_{\text{train}}$ training rows for every tree $f_t$, not a single chunk. The number of trees $T_{\text{total}}$ is the `n_estimators` budget found by early stopping during HPO (Section 3.3); we keep `num_boost_round = T_{\text{total}}` over the full DMatrix.
 
-where $\pi^{(e)}$ is a random permutation of $\{1, \ldots, C\}$ drawn independently for each epoch $e$.
+#### Class imbalance
 
-#### Why This Prevents Forgetting
+Imbalance is corrected **once**, globally: positive rows receive instance weight $w^{+} = N^{-}_{\text{train}} / N^{+}_{\text{train}}$ (negatives weighted 1.0). HPO (Section 3.3) deliberately leaves `scale_pos_weight` untuned so the correction is applied a single time at training, never double-counted. The operating threshold is fixed at $0.5$ and is **not** tuned on the test set (leakage prevention; Section 4 / `06_evaluation.py` only reports Youden's J).
 
-The gradient boosting objective at tree-building step $t$ is:
-
-$$\mathcal{L}^{(t)} = \sum_{i=1}^{n_{\text{chunk}}} \ell\left(y_i,\, \hat{y}_i^{(t-1)} + f_t(x_i)\right) + \Omega(f_t)$$
-
-Each new tree $f_t$ is fit to the **residuals of the current ensemble** on the **current mini-batch**. The key insight is:
-
-> **XGBoost's additive structure is not overwritten.** Previously added trees $\{f_1, \ldots, f_{t-1}\}$ are immutable. New trees $f_t$ correct their mistakes on whatever batch is currently shown.
-
-Shuffling ensures that over $E$ epochs, each chunk appears in every possible ordinal position in the training sequence, guaranteeing that:
-
-1. **No systematic positional bias** is introduced — no chunk systematically dominates late-stage gradient updates.
-2. **Every genomic region** (different chunks may contain genomes from different collection sites or clades) contributes equally to refining the ensemble.
-3. **Convergence stability** improves: the learning rate schedule effectively sees a smoothed gradient signal averaged across the shuffled chunk order.
-
-#### Total Trees and Learning Rate
-
-With $E$ epochs, $C$ chunks, and 1 tree per chunk per epoch:
-
-$$T_{\text{total}} = E \times C$$
-
-The effective learning rate per epoch is $\eta$ (XGBoost `learning_rate`), which must be chosen small enough that the ensemble does not overfit within a single chunk pass. The standard recommendation is:
-
-$$\eta \leq \frac{1}{\sqrt{T_{\text{total}}}}$$
-
-ensuring the cumulative update magnitude scales appropriately with the number of boosting rounds.
+This same regime is reused by `07b_feature_stability.py`: each of the 5 seeds builds its own train-split `QuantileDMatrix` via a sample-level `row_mask`, so the stability analysis is methodologically identical to the final model. Both are organism/antibiotic-agnostic — the iterator simply streams whatever chunk files it is given.
 
 ### 3.5 Reproducibility & MLOps Best Practices
 
@@ -304,7 +277,7 @@ To bridge the gap between raw alignment metrics (BLAST `outfmt 6` TSV format) an
 | `colsample_bytree = 1/√p` | Overfitting + computational cost | Square Root Heuristic for column subsampling |
 | Optuna TPE + early stopping | Conflicting HPO and early stopping | Fixed `num_boost_round`; `best_iteration` captured |
 | Stratified linspace chunk selection | Biased mini-batch resistance ratios | Sorted-by-ratio linspace chunk indexing |
-| Epoch-based shuffled training | Catastrophic forgetting in sequential learning | Per-epoch random permutation of chunk order |
+| Streaming `QuantileDMatrix` + full-data boosting | Matrix too large for RAM, yet per-chunk training is weak/inefficient | `ChunkDMatrixIter` streams chunks into one quantised DMatrix; standard boosting sees all train rows per tree |
 | Nextflow Dual-BLAST (CARD + NCBI) | Black-box ML lack of biological interpretability | Asynchronous pipeline mapping mathematical Gain scores back to known physical AMR mechanisms (SNPs & Plasmids). |
 | MLOps Artifact Versioning | Accidental loss of high-cost optimization and model binaries | Strict timestamp-based backup system protecting historical Optuna studies and models. |
 | Source Data Extraction | Opaque, irreproducible numerical plots | Automated parallel export of plot arrays to `.csv` for transparent third-party rendering. |

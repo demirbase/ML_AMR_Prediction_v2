@@ -33,7 +33,6 @@ Outputs:
 """
 
 import gc
-import random
 import sys
 from collections import Counter
 from itertools import combinations
@@ -48,6 +47,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from lib.config import load_config, resolve_path
+from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 
 SEEDS = [42, 123, 777, 1024, 2025]
 TEST_SIZE = 0.20
@@ -57,6 +57,7 @@ config = load_config()
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
 ORGANISM = config.get('project', {}).get('organism', 'ecoli')
 TOP_N = config['analysis']['top_n_features']
+CHUNK_SIZE = config['preprocessing']['chunk_size']
 
 MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
@@ -102,39 +103,21 @@ def chunk_offsets(chunk_files):
     return offsets, cur
 
 
-def train_one_seed(params, total_trees, offsets, y_all, train_mask, n_jobs):
-    """05-style incremental training over the train-rows of each chunk (out-of-core)."""
-    n_chunks = len(offsets)
-    epochs = max(1, int(np.ceil(total_trees / n_chunks)))
-    model, trees_built = None, 0
-    rng = random.Random(12345)
-    for epoch in range(epochs):
-        if trees_built >= total_trees:
-            break
-        order = offsets.copy()
-        rng.shuffle(order)
-        for f, start, end in order:
-            if trees_built >= total_trees:
-                break
-            local = train_mask[start:end]
-            if not local.any():
-                continue
-            X = load_npz(f)[local]
-            y = y_all[start:end][local]
-            pos, neg = int(np.sum(y)), int(len(y) - np.sum(y))
-            if pos > 0 and neg > 0:
-                w = np.where(y == 1, neg / pos, 1.0)
-            else:
-                w = np.ones(len(y))
-            dtrain = xgb.DMatrix(X, label=y, weight=w, nthread=n_jobs)
-            model = xgb.train(params, dtrain, num_boost_round=1, xgb_model=model)
-            trees_built += 1
-            del X, y, w, dtrain
-            gc.collect()
-    return model
+def train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin):
+    """Full-data boosting on this seed's train rows (streaming QuantileDMatrix).
+
+    Matches 05's regime: one DMatrix over all train-split rows (selected via the
+    sample-level mask), global neg/pos class weighting, standard boosting. The
+    full matrix is never materialised — chunks stream one at a time.
+    """
+    pos_weight = global_pos_weight(chunk_files, y_all, CHUNK_SIZE, row_mask=train_mask)
+    dtrain = build_quantile_dmatrix(chunk_files, y_all, CHUNK_SIZE,
+                                    max_bin=max_bin, row_mask=train_mask,
+                                    pos_weight=pos_weight)
+    return xgb.train(params, dtrain, num_boost_round=total_trees)
 
 
-def eval_one_seed(model, offsets, y_all, test_mask, n_jobs):
+def eval_one_seed(model, offsets, y_all, test_mask):
     """Stream the test-rows of each chunk and return ROC-AUC."""
     y_true, y_prob = [], []
     for f, start, end in offsets:
@@ -142,7 +125,7 @@ def eval_one_seed(model, offsets, y_all, test_mask, n_jobs):
         if not local.any():
             continue
         X = load_npz(f)[local]
-        y_prob.extend(model.predict(xgb.DMatrix(X, nthread=n_jobs)))
+        y_prob.extend(model.predict(xgb.DMatrix(X)))
         y_true.extend(y_all[start:end][local])
         del X
         gc.collect()
@@ -193,7 +176,6 @@ def main():
     print("=" * 80)
 
     params, total_trees = load_fixed_params()
-    n_jobs = config['xgboost_params'].get('n_jobs', -1)
 
     y_path = MATRIX_DIR / f"y_{TARGET_ANTIBIOTIC}.csv"
     if not y_path.exists():
@@ -212,6 +194,11 @@ def main():
         print(f"WARNING: matrix rows ({n_total}) != labels ({len(y_all)}); using min.")
     print(f"  Samples: {n_total} | chunks: {len(offsets)} | trees/seed: {total_trees} | top-N: {TOP_N}")
 
+    max_bin = int(params.get('max_bin', 2))
+
+    # Seeds run sequentially; each seed's full-data boosting already saturates the
+    # allocated cores (one QuantileDMatrix over all train rows), so there is no
+    # need to parallelise across seeds.
     seed_rows, seed_sets, gain_accum = [], [], {}
     for seed in SEEDS:
         print(f"\n--- SEED {seed} ---")
@@ -221,11 +208,8 @@ def main():
             train_mask = np.zeros(n_total, dtype=bool); train_mask[train_idx] = True
             test_mask = np.zeros(n_total, dtype=bool); test_mask[test_idx] = True
 
-            model = train_one_seed(params, total_trees, offsets, y_all, train_mask, n_jobs)
-            if model is None:
-                print("  ⚠ no model trained (empty train set?); skipping seed.")
-                continue
-            auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask, n_jobs)
+            model = train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin)
+            auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask)
             idx_set, idx_gain = top_feature_indices(model)
 
             seed_rows.append({'seed': seed, 'roc_auc': auc, 'n_top_features': len(idx_set)})

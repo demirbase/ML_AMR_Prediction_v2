@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- `lib/xgb_data.py` — `ChunkDMatrixIter` (streaming `xgb.DataIter`) +
+  `build_quantile_dmatrix` / `global_pos_weight`: build a single in-core
+  `QuantileDMatrix` from on-disk chunks without materialising the full sparse
+  matrix (binary data + `max_bin=2` → ~1 byte/non-zero). Supports sample-level
+  row masks and global class weighting; shared by steps 05 and 07b.
 - Research-software-engineering scaffolding: `LICENSE` (MIT), `CITATION.cff`,
   `pyproject.toml` (PEP 621 metadata + ruff/mypy/pytest config), GitHub Actions
   CI (ruff + unit/smoke tests on Python 3.10–3.12), `.pre-commit-config.yaml`,
@@ -21,6 +26,14 @@ All notable changes to this project are documented here. The format is based on
   (M7), novel-candidate fraction (H4); confidence tiers moved to `config.yaml`.
 
 ### Changed
+- Training regime (steps 05 and 07b): replaced the epoch-based 1-tree-per-chunk
+  incremental warm-start with **standard full-data gradient boosting** over a
+  streaming `QuantileDMatrix`. Every tree now sees the whole training set
+  (stronger fit; saturates HPC cores, fixing the low-CPU-efficiency warning).
+  Class imbalance handled once via a global `neg/pos` instance weight. Resolves
+  the documented "04 vs 05 training regimes differ" caveat. On-disk chunking and
+  the chunk-level train/test split are unchanged, so no re-run of 03/04 is
+  required.
 - BLAST: CARD search uses `blastn-short -dust no`; confidence tiers grade on
   identity + coverage (database-size-independent), E-value secondary.
 - Tool discovery is PATH-aware (`lib.config.resolve_tool`): conda/module on

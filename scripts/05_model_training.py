@@ -39,12 +39,13 @@ from sklearn.metrics import (
 )
 import sys
 import gc
-import random
 import datetime
 import shutil
 
 # Shared label-slicing helper (single source of truth) — see scripts/utils.py
 from utils import get_y_chunk
+# Streaming QuantileDMatrix construction (full-data boosting; bounded memory).
+from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 # MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
 from lib import run_metadata as rm
 from lib.config import resolve_path
@@ -214,116 +215,71 @@ def load_optimized_hyperparameters():
 # ============================================================================
 # TRAINING FUNCTIONS
 # ============================================================================
-def final_training_incremental(best_params, train_files, y_all):
+def final_training(best_params, train_files, y_all):
     """
-    Train XGBoost model using an Epoch-based shuffled incremental strategy.
-    
-    Trains exactly 1 tree per chunk per epoch across multiple epochs, with
-    chunk order shuffled each epoch to prevent catastrophic forgetting and
-    eliminate the resistance-ratio sorting bias from the stratified split.
-    
+    Train the final model with standard full-data gradient boosting.
+
+    Builds ONE QuantileDMatrix by streaming every training chunk through
+    lib.xgb_data (the full ~100 GB sparse matrix is never materialised in RAM;
+    binary data + max_bin=2 keep the quantised matrix to ~1 byte per non-zero),
+    then boosts the Optuna-tuned number of trees over it.
+
+    This replaces the legacy 1-tree-per-chunk incremental regime, where each tree
+    saw only a single ~200-genome slice — weaker fit and very low CPU efficiency
+    on HPC. Full-data boosting gives every tree the whole training set and uses
+    all allocated cores.
+
+    Class imbalance is corrected ONCE here via a single global neg/pos instance
+    weight on positive rows (04's HPO intentionally leaves scale_pos_weight
+    untuned to avoid double-counting the correction).
+
     Args:
-        best_params: XGBoost hyperparameters dictionary
-        train_files: List of paths to matrix chunk files
-        y_all: Complete label array
-    
+        best_params: XGBoost hyperparameters dictionary (incl. n_estimators).
+        train_files: List of paths to matrix chunk files.
+        y_all: Complete label array.
+
     Returns:
         tuple: (Trained XGBoost Booster model, optimal_threshold)
     """
     print("\n" + "=" * 80)
-    print("EPOCH-BASED INCREMENTAL MODEL TRAINING (SHUFFLED)")
+    print("FULL-DATA GRADIENT BOOSTING (streaming QuantileDMatrix)")
     print("=" * 80)
-    
-    # Guard against a degenerate tuned budget (0 or missing): always train at
-    # least one tree so the model is never left as None.
+
+    # Guard against a degenerate tuned budget (0 or missing): always at least one
+    # tree so the model is never left as None.
     total_trees = max(1, int(best_params.pop('n_estimators', 100)))
 
-    # To distribute learning globally, we train 1 tree per chunk across multiple
-    # epochs. ceil() can overshoot the Optuna-tuned tree budget by up to
-    # (len(train_files) - 1) trees; we therefore compute the epoch count with
-    # ceil() but stop early once exactly `total_trees` have been added, so the
-    # final model honours the tuned n_estimators instead of overshooting.
-    epochs = max(1, int(np.ceil(total_trees / len(train_files))))
-
-    print(f"Target trees (Optuna): {total_trees} | Max epochs: {epochs}")
-    print("Strategy: 1 tree/chunk/epoch, capped at the tuned tree budget")
-    print("=" * 80)
-
     params = best_params.copy()
-    # Pop scale_pos_weight ONCE (before the loop) to avoid double-dipping with
-    # the per-chunk Dynamic Instance Weighting applied below. Calling it every
-    # iteration was redundant (the key is already gone after the first pop).
+    # Imbalance is handled by the global instance weight below, so drop any
+    # scale_pos_weight to avoid double-counting the correction.
     params.pop('scale_pos_weight', None)
-
-    # Pin base_score to the neutral 0.5. XGBoost >= 2.0 auto-estimates base_score
-    # from the (instance-weighted) label mean of the DMatrix; with per-chunk
-    # incremental training, a pure or heavily-weighted chunk can drive that
-    # estimate to exactly 0.0 or 1.0, which raises
-    # "base_score must be in (0,1) for the logistic loss" and aborts training.
-    # Fixing it makes every chunk train regardless of its class balance.
+    # Pin base_score to the neutral 0.5 (XGBoost >= 2.0 otherwise derives the
+    # intercept from the weighted label mean; pinning keeps runs reproducible and
+    # avoids the "base_score must be in (0,1)" edge case on skewed weights).
     params.setdefault('base_score', 0.5)
+    max_bin = int(params.get('max_bin', 2))
 
-    model = None
-    trees_built = 0
+    # Single global neg/pos weight (replaces per-chunk dynamic instance weighting,
+    # which only made sense when each tree trained on one chunk in isolation).
+    pos_weight = global_pos_weight(train_files, y_all, CHUNK_SIZE)
+    print(f"Target trees (Optuna): {total_trees} | global pos weight (neg/pos): {pos_weight:.3f}")
+    print(f"Streaming {len(train_files)} chunks into one QuantileDMatrix (max_bin={max_bin})...")
 
-    # Dedicated RNG instance so shuffling is reproducible WITHOUT mutating the
-    # process-global random state (the previous random.seed() call reseeded the
-    # global RNG every epoch, an unexpected side effect for any other consumer).
-    rng = random.Random(RANDOM_SEED)
+    dtrain = build_quantile_dmatrix(train_files, y_all, CHUNK_SIZE,
+                                    max_bin=max_bin, pos_weight=pos_weight)
+    print(f"  ✓ DMatrix built: {dtrain.num_row():,} rows × {dtrain.num_col():,} features")
 
-    for epoch in range(epochs):
-        if trees_built >= total_trees:
-            break
-        print(f"\n--- EPOCH {epoch+1}/{epochs} ---")
+    model = xgb.train(params, dtrain, num_boost_round=total_trees)
+    print(f"  ✓ Trained {model.num_boosted_rounds()} trees over the full training set.")
 
-        # CRITICAL FIX: Shuffle chunks to destroy the Resistance-Ratio sorting bias.
-        # Per-epoch reseed keeps each epoch's order reproducible yet distinct.
-        shuffled_files = train_files.copy()
-        rng.seed(RANDOM_SEED + epoch)
-        rng.shuffle(shuffled_files)
-
-        for i, chunk_file in enumerate(shuffled_files):
-            if trees_built >= total_trees:
-                break
-            try:
-                X_chunk = load_npz(chunk_file)
-                chunk_num = int(chunk_file.stem.split('_')[-1])
-                y_chunk = get_y_chunk(y_all, chunk_num, CHUNK_SIZE, len(y_all))
-
-                # Dynamic Instance Weighting (Solves Local Chunk Imbalance)
-                pos_count = np.sum(y_chunk)
-                neg_count = len(y_chunk) - pos_count
-
-                if pos_count > 0 and neg_count > 0:
-                    weight_ratio = neg_count / pos_count
-                    weights = np.where(y_chunk == 1, weight_ratio, 1.0)
-                else:
-                    weights = np.ones(len(y_chunk))  # Fallback if perfectly pure chunk
-
-                n_jobs = params.get('nthread', params.get('n_jobs', -1))
-                dtrain = xgb.DMatrix(X_chunk, label=y_chunk, weight=weights, nthread=n_jobs)
-
-                # Train exactly 1 tree per chunk to distribute learning evenly
-                model = xgb.train(params, dtrain, num_boost_round=1, xgb_model=model)
-                trees_built += 1
-
-                del X_chunk, y_chunk, dtrain, weights
-                gc.collect()
-            except Exception as e:
-                print(f"  ✗ ERROR in Chunk {chunk_file.name}: {e}")
-                sys.exit(1)
-
-        print(f"  ✓ Epoch {epoch+1} Complete. Current Trees in Model: {model.num_boosted_rounds()}")
-
-    print(f"\n  ✓ Training stopped at {trees_built} trees (tuned budget: {total_trees}).")
-    
-    # Dynamic Instance Weighting is active: threshold remains 0.5 (no double-dipping)
-    print("\n[Threshold Configuration]")
-    print("  Dynamic Instance Weighting active. Per-chunk neg/pos weight ratio applied to DMatrix.")
-    print("  scale_pos_weight removed from params (prevents double-dipping with dynamic weights).")
+    # Global class weighting is active → the operating threshold stays the neutral
+    # 0.5. It is NOT tuned on the test set (P-01 leakage fix); 06 only reports
+    # Youden's J and never overwrites this value.
     optimal_threshold = 0.5
-    print(f"  Optimal Threshold fixed to: {optimal_threshold:.4f} (calibrated via Dynamic Instance Weighting)")
-    
+    print("\n[Threshold Configuration]")
+    print(f"  Operating threshold fixed at {optimal_threshold:.4f} "
+          f"(global class weighting; no test-set tuning).")
+
     return model, optimal_threshold
 
 
@@ -513,7 +469,7 @@ def main():
     
     # Train model and calculate unbiased threshold from training prevalence
     print("\n[4/5] Training model...")
-    final_model, optimal_threshold = final_training_incremental(best_params.copy(), train_files, y_all)
+    final_model, optimal_threshold = final_training(best_params.copy(), train_files, y_all)
     
     # Evaluate without test set leakage
     print("\n[5/5] Evaluating model...")
