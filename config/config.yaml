@@ -153,6 +153,13 @@ training:
   n_trials: 30  # Number of Optuna optimization trials
   optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
+  # Parallel HPO (04_optimization.py): run several trials CONCURRENTLY, each
+  # XGBoost using this many threads. Optuna n_jobs is derived as
+  # (allocated cores // optuna_threads_per_trial) so all cores stay busy on the
+  # small HPO subset (avoids low SLURM CPU-efficiency warnings on HPC). Lower =
+  # more concurrent trials (e.g. 1 -> one trial per core); higher = fewer, fatter
+  # trials. Allocated cores come from SLURM_CPUS_PER_TASK (else os.cpu_count()).
+  optuna_threads_per_trial: 2
 
 # ----------------------------------------------------------------------------
 # XGBOOST MODEL CONFIGURATION
