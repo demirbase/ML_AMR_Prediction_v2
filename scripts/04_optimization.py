@@ -51,6 +51,7 @@ import joblib
 from pathlib import Path
 from scipy.sparse import load_npz, vstack
 from sklearn.model_selection import train_test_split
+import os
 import sys
 import datetime
 import shutil
@@ -92,6 +93,15 @@ N_TRIALS = config['training']['n_trials']
 VAL_SPLIT = config['training']['validation_fraction']
 EARLY_STOPPING_ROUNDS = config['xgboost_params']['early_stopping_rounds']
 
+# Parallel HPO. A single trial on the small Optuna subset (a few hundred genomes)
+# cannot saturate a many-core HPC allocation → very low SLURM CPU efficiency
+# (TRUBA flags/kills such jobs). XGBoost releases the GIL during training, so we
+# instead run several trials CONCURRENTLY (Optuna n_jobs threads), each XGBoost
+# using only THREADS_PER_TRIAL threads — keeping all allocated cores busy.
+TOTAL_CORES = int(os.environ.get('SLURM_CPUS_PER_TASK') or os.cpu_count() or 1)
+THREADS_PER_TRIAL = max(1, int(config['training'].get('optuna_threads_per_trial', 2)))
+OPTUNA_N_JOBS = max(1, min(N_TRIALS, TOTAL_CORES // THREADS_PER_TRIAL))
+
 # XGBoost base parameters (fetched from config)
 BASE_PARAMS = {
     'objective': config['xgboost_params'].get('objective', 'binary:logistic'),
@@ -101,7 +111,9 @@ BASE_PARAMS = {
     # ROC AUC, consistent with the metadata field `best_auc_score`.
     'eval_metric': config['xgboost_params'].get('eval_metric', 'auc'),
     'tree_method': config['xgboost_params'].get('tree_method', 'hist'),
-    'nthread': config['xgboost_params'].get('n_jobs', -1),
+    # Threads PER trial — the remaining cores are used by running OPTUNA_N_JOBS
+    # trials concurrently (see study.optimize(n_jobs=...) below).
+    'nthread': THREADS_PER_TRIAL,
     'device': config['xgboost_params'].get('device', 'cpu'),
     'random_state': RANDOM_SEED,
     'verbosity': config['xgboost_params'].get('verbosity', 0),
@@ -744,7 +756,9 @@ def main():
     
     print("\n[STEP 4/5] Running Optuna hyperparameter optimization...")
     print("=" * 80)
-    print(f"Starting {N_TRIALS} trials (this may take 10-30 minutes)")
+    print(f"Starting {N_TRIALS} trials")
+    print(f"Parallelism: {OPTUNA_N_JOBS} concurrent trials × {THREADS_PER_TRIAL} threads "
+          f"(allocated cores: {TOTAL_CORES})")
     print("=" * 80)
     
     # Create Optuna study
@@ -758,6 +772,7 @@ def main():
         study.optimize(
             lambda trial: objective(trial, dtrain_opt, dval_opt, BASE_PARAMS, colsample_range),
             n_trials=N_TRIALS,
+            n_jobs=OPTUNA_N_JOBS,   # run trials concurrently to use all cores
             show_progress_bar=False
         )
     except KeyboardInterrupt:
