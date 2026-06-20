@@ -414,14 +414,21 @@ def load_data_for_optuna(selected_files, y_all, chunk_size):
     )
     
     print(f"  Train: {X_train.shape} | Val: {X_val.shape}")
-    
-    # Convert to XGBoost DMatrix format
-    print("\nConverting to XGBoost DMatrix format...")
-    dtrain = xgb.DMatrix(X_train, label=y_train)
-    dval = xgb.DMatrix(X_val, label=y_val)
-    
+
+    # Build a compact, quantised QuantileDMatrix (max_bin=2 for binary data)
+    # instead of a plain DMatrix. CRITICAL for parallel HPO: the quantised
+    # gradient-index matrix is built ONCE and shared by all concurrent trials,
+    # whereas a plain DMatrix makes every trial rebuild its own ~20 GB gmat →
+    # running 20 trials at once OOM-killed the job (~550 GB). It also shrinks the
+    # subset matrix itself from ~150 GB to a few GB. The validation matrix must
+    # reference the training quantiles via ref=dtrain.
+    max_bin = int(BASE_PARAMS.get('max_bin', 2))
+    print(f"\nBuilding QuantileDMatrix (max_bin={max_bin})...")
+    dtrain = xgb.QuantileDMatrix(X_train, label=y_train, max_bin=max_bin)
+    dval = xgb.QuantileDMatrix(X_val, label=y_val, ref=dtrain, max_bin=max_bin)
+
     print("  ✓ Data preparation complete")
-    
+
     return dtrain, dval
 
 
