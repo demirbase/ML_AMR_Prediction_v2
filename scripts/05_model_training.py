@@ -282,8 +282,22 @@ def final_training(best_params, train_files, y_all):
     es_rounds = int(config['xgboost_params'].get('early_stopping_rounds', 50))
     max_rounds = int(config['training'].get('max_boost_rounds', 5000))
     use_extmem = bool(config['training'].get('external_memory', True))
+    max_train_chunks = config['training'].get('max_train_chunks', None)
     print(f"early_stopping_rounds={es_rounds} | max_boost_rounds={max_rounds} | "
           f"external_memory={use_extmem}")
+
+    # Optional: train on a stratified subset of the train chunks. nnz (and thus
+    # RAM) is driven by common k-mers, so raising min_support barely shrinks it —
+    # the only way to fit the matrix IN-CORE (fast, no low-efficiency warning) is
+    # to use fewer GENOMES. Chunks are picked by linspace over the
+    # resistance-ratio-sorted train list (04's order) so the subset spans the
+    # difficulty spectrum. None = use all train chunks.
+    if max_train_chunks and len(train_files) > int(max_train_chunks):
+        k = int(max_train_chunks)
+        idx = np.linspace(0, len(train_files) - 1, k, dtype=int)
+        train_files = [train_files[i] for i in sorted(set(idx.tolist()))]
+        print(f"  Sub-sampling train chunks → {len(train_files)} chunks "
+              f"(training.max_train_chunks={k}) for in-core training.")
 
     fit_files, val_files = _es_val_split(train_files)
     cache_dir = MODELS_DIR / "_xgb_cache"
