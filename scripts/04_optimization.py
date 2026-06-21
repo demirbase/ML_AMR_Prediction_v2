@@ -768,10 +768,14 @@ def main():
           f"(allocated cores: {TOTAL_CORES})")
     print("=" * 80)
     
-    # Create Optuna study
+    # Create Optuna study with a SEEDED TPE sampler so the hyperparameter search
+    # is reproducible (random_seed from config). NB: with parallel trials
+    # (n_jobs>1) completion order still varies slightly, but the proposed
+    # parameter sequence is fixed by the seed.
     study = optuna.create_study(
         direction='maximize',  # Maximize ROC AUC
-        study_name=f"xgboost_{TARGET_ANTIBIOTIC}_optimization"
+        study_name=f"xgboost_{TARGET_ANTIBIOTIC}_optimization",
+        sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED),
     )
     
     # Run optimization with Graceful Shutdown (Fault Tolerance)

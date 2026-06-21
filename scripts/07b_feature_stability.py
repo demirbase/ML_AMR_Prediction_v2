@@ -21,10 +21,10 @@ DESIGN (agreed):
           ("stable" >= 0.6) and mean Gain
         - mean pairwise Jaccard similarity of the 5 top-N k-mer sets
 
-MEMORY MODEL: option B — fully out-of-core. Only ONE chunk is held in RAM at a
-time; the global feature matrix is never materialised. A sample-level boolean
-mask selects the train/test rows that fall inside each chunk's offset range, and
-training reuses the proven 05-style incremental 1-tree-per-chunk-slice regime.
+MEMORY MODEL: streamed, never materialised. A sample-level boolean mask selects
+the train/test rows that fall inside each chunk's offset range, and training
+reuses the same regime as 05 — standard full-data boosting over a streaming
+(Ext)QuantileDMatrix (lib.xgb_data), one chunk read at a time.
 
 Outputs:
     models/{organism}/{antibiotic}/seed{S}/xgboost_{antibiotic}_seed{S}.json
@@ -104,23 +104,27 @@ def chunk_offsets(chunk_files):
     return offsets, cur
 
 
-def train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin, cache_dir):
-    """Full-data boosting on this seed's train rows (external-memory DMatrix).
+def train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin,
+                   cache_dir, use_extmem):
+    """Full-data boosting on this seed's train rows.
 
     Matches 05's regime: one DMatrix over all train-split rows (selected via the
-    sample-level mask), global neg/pos class weighting, standard boosting. The
-    matrix is built as an ExtMemQuantileDMatrix (pages spilled to ``cache_dir``
-    on fast scratch) so it never has to fit in RAM. The cache is removed after.
+    sample-level mask), global neg/pos class weighting, standard boosting. Built
+    in-core when ``use_extmem`` is False (config training.external_memory), else
+    as an ExtMemQuantileDMatrix spilling to ``cache_dir`` (removed after).
     """
     pos_weight = global_pos_weight(chunk_files, y_all, CHUNK_SIZE, row_mask=train_mask)
-    shutil.rmtree(cache_dir, ignore_errors=True)
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_prefix = None
+    if use_extmem:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_prefix = str(cache_dir / "cache")
     dtrain = None
     try:
         dtrain = build_quantile_dmatrix(chunk_files, y_all, CHUNK_SIZE,
                                         max_bin=max_bin, row_mask=train_mask,
                                         pos_weight=pos_weight,
-                                        cache_prefix=str(cache_dir / "cache"))
+                                        cache_prefix=cache_prefix)
         model = xgb.train(params, dtrain, num_boost_round=total_trees)
     finally:
         dtrain = None              # release so the cache files unlock
@@ -207,10 +211,12 @@ def main():
     print(f"  Samples: {n_total} | chunks: {len(offsets)} | trees/seed: {total_trees} | top-N: {TOP_N}")
 
     max_bin = int(params.get('max_bin', 2))
+    use_extmem = bool(config['training'].get('external_memory', True))
+    print(f"  external_memory={use_extmem}")
 
     # Seeds run sequentially; each seed's full-data boosting already saturates the
-    # allocated cores (one QuantileDMatrix over all train rows), so there is no
-    # need to parallelise across seeds.
+    # allocated cores (one DMatrix over all train rows), so there is no need to
+    # parallelise across seeds.
     seed_rows, seed_sets, gain_accum = [], [], {}
     for seed in SEEDS:
         print(f"\n--- SEED {seed} ---")
@@ -222,7 +228,7 @@ def main():
 
             cache_dir = MODELS_DIR / f"_xgb_cache_seed{seed}"
             model = train_one_seed(params, total_trees, chunk_files, y_all,
-                                   train_mask, max_bin, cache_dir)
+                                   train_mask, max_bin, cache_dir, use_extmem)
             auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask)
             idx_set, idx_gain = top_feature_indices(model)
 

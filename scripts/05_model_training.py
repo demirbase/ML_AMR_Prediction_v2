@@ -4,8 +4,10 @@
 Final Model Training Module for AMR Prediction
 
 This script trains the final XGBoost model using pre-optimized hyperparameters
-for antibiotic resistance prediction. Implements incremental learning for
-large-scale genomic data processing with threshold optimization.
+for antibiotic resistance prediction. It uses standard full-data gradient
+boosting over a streaming (Ext)QuantileDMatrix (lib.xgb_data), with the tree
+count set by early stopping on a held-out slice of the training data, so the
+full multi-million-feature matrix is processed without materialising it in RAM.
 
 Configuration Architecture:
     This script uses a two-stage configuration loading system:
@@ -215,11 +217,12 @@ def load_optimized_hyperparameters():
 # ============================================================================
 # TRAINING FUNCTIONS
 # ============================================================================
-def _es_val_split(train_files, frac=0.15):
+def _es_val_split(train_files, frac):
     """Hold out ~frac of the train chunks as an early-stopping validation set.
 
     The held-out chunks are spread across the (resistance-ratio-sorted) train
     list via linspace so the ES validation spans the difficulty spectrum.
+    ``frac`` comes from config (training.validation_fraction) — not hardcoded.
     """
     n = len(train_files)
     n_val = max(1, int(round(n * frac)))
@@ -251,14 +254,13 @@ def final_training(best_params, train_files, y_all):
     """
     Train the final model with full-data boosting + early stopping.
 
-    The number of trees is NOT taken from the Optuna config: that count was found
-    by early stopping on the tiny HPO subset and is far too small for the full
-    training set, which underfits (compressed probabilities → poor MCC/accuracy
-    even when AUC looks fine). Instead we hold out a slice of the training data,
-    boost up to a high ceiling with early stopping to find the tree count that
-    fits THIS data size, then retrain on the whole training set with that count.
-    Every tree still sees all (fit) training rows; the other tuned hyperparameters
-    (learning rate, depth, …) come from 04.
+    The tree count is chosen by early stopping on a held-out slice of the FULL
+    training set, rather than reusing the Optuna config's n_estimators (which was
+    found on the small HPO subset). This makes the tree count adapt to the real
+    training-set size per antibiotic/organism instead of assuming the subset
+    count transfers. The other tuned hyperparameters (learning rate, depth, …)
+    come from 04. After the count is found, the model is retrained on the WHOLE
+    training set with that many trees so the final model sees all training data.
 
     The matrix is streamed via lib.xgb_data — in-core QuantileDMatrix when it
     fits RAM (`training.external_memory: false`, fast), otherwise an
@@ -299,7 +301,8 @@ def final_training(best_params, train_files, y_all):
         print(f"  Sub-sampling train chunks → {len(train_files)} chunks "
               f"(training.max_train_chunks={k}) for in-core training.")
 
-    fit_files, val_files = _es_val_split(train_files)
+    es_val_frac = float(config['training'].get('validation_fraction', 0.2))
+    fit_files, val_files = _es_val_split(train_files, es_val_frac)
     cache_dir = MODELS_DIR / "_xgb_cache"
     shutil.rmtree(cache_dir, ignore_errors=True)
     model = None
@@ -443,7 +446,7 @@ def main():
         1. Load optimized hyperparameters and data split from antibiotic-specific config
         2. Load labels and resolve chunk file paths
         3. Use stratified train/test split from optimization (NO randomization)
-        4. Train model incrementally on exact training chunks
+        4. Train model with full-data boosting + early stopping on the training chunks
         5. Evaluate on exact test chunks (same as optimization)
         6. Save trained model
     """
@@ -554,7 +557,7 @@ def main():
         # config (removing the previous test-set data leakage + write conflict).
         antibiotic_config['evaluation'] = {
             'optimal_threshold': float(round(float(optimal_threshold), 4)),
-            'threshold_type': 'Dynamic_Instance_Weighting (0.5 — per-chunk neg/pos ratio applied to DMatrix)'
+            'threshold_type': 'global_neg_pos_weight (0.5 — single global neg/pos instance weight; no test-set tuning)'
         }
 
         # Preserve the auto-generated comment header (leading '#' lines written
@@ -598,8 +601,9 @@ def main():
             "model_file": model_path.name,
             "metrics": train_metrics,
             "params": best_params,
+            "n_trees": int(final_model.num_boosted_rounds()),  # actual count from early stopping
             "threshold": float(optimal_threshold),
-            "threshold_type": "Dynamic_Instance_Weighting (0.5)",
+            "threshold_type": "global_neg_pos_weight (operating threshold 0.5, no test tuning)",
             "data_split_hash": rm.hash_files([str(f) for f in train_files]),
             "git_commit": rm.git_commit_hash(),
             "git_dirty": rm.git_is_dirty(),
