@@ -33,6 +33,7 @@ Outputs:
 """
 
 import gc
+import shutil
 import sys
 from collections import Counter
 from itertools import combinations
@@ -103,18 +104,29 @@ def chunk_offsets(chunk_files):
     return offsets, cur
 
 
-def train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin):
-    """Full-data boosting on this seed's train rows (streaming QuantileDMatrix).
+def train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin, cache_dir):
+    """Full-data boosting on this seed's train rows (external-memory DMatrix).
 
     Matches 05's regime: one DMatrix over all train-split rows (selected via the
     sample-level mask), global neg/pos class weighting, standard boosting. The
-    full matrix is never materialised — chunks stream one at a time.
+    matrix is built as an ExtMemQuantileDMatrix (pages spilled to ``cache_dir``
+    on fast scratch) so it never has to fit in RAM. The cache is removed after.
     """
     pos_weight = global_pos_weight(chunk_files, y_all, CHUNK_SIZE, row_mask=train_mask)
-    dtrain = build_quantile_dmatrix(chunk_files, y_all, CHUNK_SIZE,
-                                    max_bin=max_bin, row_mask=train_mask,
-                                    pos_weight=pos_weight)
-    return xgb.train(params, dtrain, num_boost_round=total_trees)
+    shutil.rmtree(cache_dir, ignore_errors=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dtrain = None
+    try:
+        dtrain = build_quantile_dmatrix(chunk_files, y_all, CHUNK_SIZE,
+                                        max_bin=max_bin, row_mask=train_mask,
+                                        pos_weight=pos_weight,
+                                        cache_prefix=str(cache_dir / "cache"))
+        model = xgb.train(params, dtrain, num_boost_round=total_trees)
+    finally:
+        dtrain = None              # release so the cache files unlock
+        gc.collect()
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    return model
 
 
 def eval_one_seed(model, offsets, y_all, test_mask):
@@ -208,7 +220,9 @@ def main():
             train_mask = np.zeros(n_total, dtype=bool); train_mask[train_idx] = True
             test_mask = np.zeros(n_total, dtype=bool); test_mask[test_idx] = True
 
-            model = train_one_seed(params, total_trees, chunk_files, y_all, train_mask, max_bin)
+            cache_dir = MODELS_DIR / f"_xgb_cache_seed{seed}"
+            model = train_one_seed(params, total_trees, chunk_files, y_all,
+                                   train_mask, max_bin, cache_dir)
             auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask)
             idx_set, idx_gain = top_feature_indices(model)
 

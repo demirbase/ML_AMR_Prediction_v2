@@ -28,12 +28,17 @@ All notable changes to this project are documented here. The format is based on
 ### Changed
 - Training regime (steps 05 and 07b): replaced the epoch-based 1-tree-per-chunk
   incremental warm-start with **standard full-data gradient boosting** over a
-  streaming `QuantileDMatrix`. Every tree now sees the whole training set
-  (stronger fit; saturates HPC cores, fixing the low-CPU-efficiency warning).
-  Class imbalance handled once via a global `neg/pos` instance weight. Resolves
-  the documented "04 vs 05 training regimes differ" caveat. On-disk chunking and
-  the chunk-level train/test split are unchanged, so no re-run of 03/04 is
-  required.
+  streaming **`ExtMemQuantileDMatrix`** (external memory). Every tree now sees
+  the whole training set (stronger fit; saturates HPC cores, fixing the
+  low-CPU-efficiency warning). Quantised pages spill to fast scratch
+  (`cache_prefix`) so the matrix never has to fit in RAM — an in-core
+  `QuantileDMatrix` of the full train set peaked >400 GB and OOM-killed a 384 GB
+  node. Class imbalance handled once via a global `neg/pos` instance weight.
+  Resolves the documented "04 vs 05 training regimes differ" caveat. On-disk
+  chunking and the chunk-level train/test split are unchanged, so no re-run of
+  03/04 is required.
+- HPO (step 04): runs trials concurrently (`training.optuna_threads_per_trial`)
+  over a `QuantileDMatrix` HPO subset, to use all allocated cores without OOM.
 - BLAST: CARD search uses `blastn-short -dust no`; confidence tiers grade on
   identity + coverage (database-size-independent), E-value secondary.
 - Tool discovery is PATH-aware (`lib.config.resolve_tool`): conda/module on

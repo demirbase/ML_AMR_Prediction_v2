@@ -37,9 +37,14 @@ class ChunkDMatrixIter(xgb.DataIter):
         pos_weight:  Optional instance weight applied to positive-label rows
                      (typically the global neg/pos ratio); negatives get 1.0.
                      ``None`` trains unweighted.
+        cache_prefix: Optional path prefix. When set, XGBoost spills the
+                     quantised pages to disk here (external memory) instead of
+                     holding the whole matrix in RAM — required when the full
+                     train set is too large for the node (see build_quantile_dmatrix).
     """
 
-    def __init__(self, files, y_all, chunk_size, *, row_mask=None, pos_weight=None):
+    def __init__(self, files, y_all, chunk_size, *, row_mask=None, pos_weight=None,
+                 cache_prefix=None):
         self._files = list(files)
         self._y_all = np.asarray(y_all)
         self._chunk_size = int(chunk_size)
@@ -47,7 +52,7 @@ class ChunkDMatrixIter(xgb.DataIter):
         self._row_mask = row_mask
         self._pos_weight = pos_weight
         self._i = 0
-        super().__init__()
+        super().__init__(cache_prefix=cache_prefix)
 
     def reset(self):
         """Rewind to the first chunk (XGBoost calls this between passes)."""
@@ -98,8 +103,17 @@ def global_pos_weight(files, y_all, chunk_size, row_mask=None):
 
 
 def build_quantile_dmatrix(files, y_all, chunk_size, *, max_bin=2,
-                           row_mask=None, pos_weight=None):
-    """Stream the given chunks into a single in-core ``QuantileDMatrix``."""
-    it = ChunkDMatrixIter(files, y_all, chunk_size,
-                          row_mask=row_mask, pos_weight=pos_weight)
+                           row_mask=None, pos_weight=None, cache_prefix=None):
+    """Stream the given chunks into a single quantised DMatrix.
+
+    With ``cache_prefix`` set, builds an ``ExtMemQuantileDMatrix`` that spills
+    pages to disk (external memory) — use this for the full train set, which can
+    need far more RAM in-core than the node has (the ~109 GB matrix peaked >400 GB
+    as a plain in-core QuantileDMatrix). Without it, builds an in-core
+    ``QuantileDMatrix`` (fine for small subsets, e.g. HPO).
+    """
+    it = ChunkDMatrixIter(files, y_all, chunk_size, row_mask=row_mask,
+                          pos_weight=pos_weight, cache_prefix=cache_prefix)
+    if cache_prefix is not None:
+        return xgb.ExtMemQuantileDMatrix(it, max_bin=max_bin)
     return xgb.QuantileDMatrix(it, max_bin=max_bin)

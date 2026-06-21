@@ -263,14 +263,30 @@ def final_training(best_params, train_files, y_all):
     # which only made sense when each tree trained on one chunk in isolation).
     pos_weight = global_pos_weight(train_files, y_all, CHUNK_SIZE)
     print(f"Target trees (Optuna): {total_trees} | global pos weight (neg/pos): {pos_weight:.3f}")
-    print(f"Streaming {len(train_files)} chunks into one QuantileDMatrix (max_bin={max_bin})...")
+    print(f"Streaming {len(train_files)} chunks into an ExtMemQuantileDMatrix (max_bin={max_bin})...")
 
-    dtrain = build_quantile_dmatrix(train_files, y_all, CHUNK_SIZE,
-                                    max_bin=max_bin, pos_weight=pos_weight)
-    print(f"  ✓ DMatrix built: {dtrain.num_row():,} rows × {dtrain.num_col():,} features")
+    # External memory: the full train matrix is too large to hold in-core (the
+    # ~109 GB sparse matrix peaks >400 GB as a plain QuantileDMatrix, OOM-killing
+    # a 384 GB node). Spill quantised pages to fast scratch instead; RAM then
+    # stays bounded to ~one page + histograms. Cache lives next to the model and
+    # is removed after training.
+    cache_dir = MODELS_DIR / "_xgb_cache_train"
+    shutil.rmtree(cache_dir, ignore_errors=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_prefix = str(cache_dir / "cache")
+    dtrain = None
+    try:
+        dtrain = build_quantile_dmatrix(train_files, y_all, CHUNK_SIZE,
+                                        max_bin=max_bin, pos_weight=pos_weight,
+                                        cache_prefix=cache_prefix)
+        print(f"  ✓ DMatrix built: {dtrain.num_row():,} rows × {dtrain.num_col():,} features")
 
-    model = xgb.train(params, dtrain, num_boost_round=total_trees)
-    print(f"  ✓ Trained {model.num_boosted_rounds()} trees over the full training set.")
+        model = xgb.train(params, dtrain, num_boost_round=total_trees)
+        print(f"  ✓ Trained {model.num_boosted_rounds()} trees over the full training set.")
+    finally:
+        dtrain = None              # release the DMatrix so its cache files unlock
+        gc.collect()
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
     # Global class weighting is active → the operating threshold stays the neutral
     # 0.5. It is NOT tuned on the test set (P-01 leakage fix); 06 only reports
