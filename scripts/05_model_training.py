@@ -215,76 +215,106 @@ def load_optimized_hyperparameters():
 # ============================================================================
 # TRAINING FUNCTIONS
 # ============================================================================
+def _es_val_split(train_files, frac=0.15):
+    """Hold out ~frac of the train chunks as an early-stopping validation set.
+
+    The held-out chunks are spread across the (resistance-ratio-sorted) train
+    list via linspace so the ES validation spans the difficulty spectrum.
+    """
+    n = len(train_files)
+    n_val = max(1, int(round(n * frac)))
+    if n_val >= n:                       # too few chunks to split → reuse all
+        return train_files, train_files
+    val_idx = set(np.linspace(0, n - 1, n_val, dtype=int).tolist())
+    val = [f for i, f in enumerate(train_files) if i in val_idx]
+    fit = [f for i, f in enumerate(train_files) if i not in val_idx]
+    return fit, val
+
+
+def _build_dmatrix(files, y_all, max_bin, pos_weight, cache_dir, name, use_extmem, ref=None):
+    """Build one (Ext)QuantileDMatrix, spilling to cache_dir/name when external.
+
+    Pass ``ref`` = the training DMatrix when building an evaluation matrix
+    (XGBoost requires eval QuantileDMatrices to reuse the training quantiles).
+    """
+    cache_prefix = None
+    if use_extmem:
+        sub = cache_dir / name
+        shutil.rmtree(sub, ignore_errors=True)
+        sub.mkdir(parents=True, exist_ok=True)
+        cache_prefix = str(sub / "cache")
+    return build_quantile_dmatrix(files, y_all, CHUNK_SIZE, max_bin=max_bin,
+                                  pos_weight=pos_weight, cache_prefix=cache_prefix, ref=ref)
+
+
 def final_training(best_params, train_files, y_all):
     """
-    Train the final model with standard full-data gradient boosting.
+    Train the final model with full-data boosting + early stopping.
 
-    Builds ONE QuantileDMatrix by streaming every training chunk through
-    lib.xgb_data (the full ~100 GB sparse matrix is never materialised in RAM;
-    binary data + max_bin=2 keep the quantised matrix to ~1 byte per non-zero),
-    then boosts the Optuna-tuned number of trees over it.
+    The number of trees is NOT taken from the Optuna config: that count was found
+    by early stopping on the tiny HPO subset and is far too small for the full
+    training set, which underfits (compressed probabilities → poor MCC/accuracy
+    even when AUC looks fine). Instead we hold out a slice of the training data,
+    boost up to a high ceiling with early stopping to find the tree count that
+    fits THIS data size, then retrain on the whole training set with that count.
+    Every tree still sees all (fit) training rows; the other tuned hyperparameters
+    (learning rate, depth, …) come from 04.
 
-    This replaces the legacy 1-tree-per-chunk incremental regime, where each tree
-    saw only a single ~200-genome slice — weaker fit and very low CPU efficiency
-    on HPC. Full-data boosting gives every tree the whole training set and uses
-    all allocated cores.
-
-    Class imbalance is corrected ONCE here via a single global neg/pos instance
-    weight on positive rows (04's HPO intentionally leaves scale_pos_weight
-    untuned to avoid double-counting the correction).
-
-    Args:
-        best_params: XGBoost hyperparameters dictionary (incl. n_estimators).
-        train_files: List of paths to matrix chunk files.
-        y_all: Complete label array.
+    The matrix is streamed via lib.xgb_data — in-core QuantileDMatrix when it
+    fits RAM (`training.external_memory: false`, fast), otherwise an
+    ExtMemQuantileDMatrix spilling to scratch (default; safe for the full
+    50.8M-feature matrix that OOMs a 384 GB node in-core). Class imbalance is
+    corrected once via a global neg/pos instance weight.
 
     Returns:
         tuple: (Trained XGBoost Booster model, optimal_threshold)
     """
     print("\n" + "=" * 80)
-    print("FULL-DATA GRADIENT BOOSTING (streaming QuantileDMatrix)")
+    print("FULL-DATA GRADIENT BOOSTING + EARLY STOPPING")
     print("=" * 80)
 
-    # Guard against a degenerate tuned budget (0 or missing): always at least one
-    # tree so the model is never left as None.
-    total_trees = max(1, int(best_params.pop('n_estimators', 100)))
-
+    best_params.pop('n_estimators', None)   # tree count is re-derived by ES below
     params = best_params.copy()
-    # Imbalance is handled by the global instance weight below, so drop any
-    # scale_pos_weight to avoid double-counting the correction.
-    params.pop('scale_pos_weight', None)
-    # Pin base_score to the neutral 0.5 (XGBoost >= 2.0 otherwise derives the
-    # intercept from the weighted label mean; pinning keeps runs reproducible and
-    # avoids the "base_score must be in (0,1)" edge case on skewed weights).
+    params.pop('scale_pos_weight', None)    # global instance weight handles imbalance
     params.setdefault('base_score', 0.5)
     max_bin = int(params.get('max_bin', 2))
 
-    # Single global neg/pos weight (replaces per-chunk dynamic instance weighting,
-    # which only made sense when each tree trained on one chunk in isolation).
-    pos_weight = global_pos_weight(train_files, y_all, CHUNK_SIZE)
-    print(f"Target trees (Optuna): {total_trees} | global pos weight (neg/pos): {pos_weight:.3f}")
-    print(f"Streaming {len(train_files)} chunks into an ExtMemQuantileDMatrix (max_bin={max_bin})...")
+    es_rounds = int(config['xgboost_params'].get('early_stopping_rounds', 50))
+    max_rounds = int(config['training'].get('max_boost_rounds', 5000))
+    use_extmem = bool(config['training'].get('external_memory', True))
+    print(f"early_stopping_rounds={es_rounds} | max_boost_rounds={max_rounds} | "
+          f"external_memory={use_extmem}")
 
-    # External memory: the full train matrix is too large to hold in-core (the
-    # ~109 GB sparse matrix peaks >400 GB as a plain QuantileDMatrix, OOM-killing
-    # a 384 GB node). Spill quantised pages to fast scratch instead; RAM then
-    # stays bounded to ~one page + histograms. Cache lives next to the model and
-    # is removed after training.
-    cache_dir = MODELS_DIR / "_xgb_cache_train"
+    fit_files, val_files = _es_val_split(train_files)
+    cache_dir = MODELS_DIR / "_xgb_cache"
     shutil.rmtree(cache_dir, ignore_errors=True)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_prefix = str(cache_dir / "cache")
-    dtrain = None
+    model = None
+    dfit = dval = dall = None
     try:
-        dtrain = build_quantile_dmatrix(train_files, y_all, CHUNK_SIZE,
-                                        max_bin=max_bin, pos_weight=pos_weight,
-                                        cache_prefix=cache_prefix)
-        print(f"  ✓ DMatrix built: {dtrain.num_row():,} rows × {dtrain.num_col():,} features")
+        # ---- Phase 1: find the right tree count by early stopping --------------
+        pw_fit = global_pos_weight(fit_files, y_all, CHUNK_SIZE)
+        dfit = _build_dmatrix(fit_files, y_all, max_bin, pw_fit, cache_dir, "fit", use_extmem)
+        dval = _build_dmatrix(val_files, y_all, max_bin, None, cache_dir, "val", use_extmem, ref=dfit)
+        print(f"  ES split: fit {dfit.num_row():,} rows / val {dval.num_row():,} rows "
+              f"× {dfit.num_col():,} features")
+        es_model = xgb.train(params, dfit, num_boost_round=max_rounds,
+                             evals=[(dval, "val")], early_stopping_rounds=es_rounds,
+                             verbose_eval=False)
+        best_n = max(1, int(es_model.best_iteration) + 1)
+        print(f"  ✓ Early stopping: best tree count = {best_n} "
+              f"(val {params.get('eval_metric', 'auc')} = {es_model.best_score:.4f})")
+        dfit = dval = es_model = None
+        gc.collect()
 
-        model = xgb.train(params, dtrain, num_boost_round=total_trees)
+        # ---- Phase 2: retrain on ALL training rows with that tree count --------
+        pw_all = global_pos_weight(train_files, y_all, CHUNK_SIZE)
+        dall = _build_dmatrix(train_files, y_all, max_bin, pw_all, cache_dir, "all", use_extmem)
+        print(f"  Retraining on full train set: {dall.num_row():,} rows × "
+              f"{dall.num_col():,} features | global pos weight {pw_all:.3f}")
+        model = xgb.train(params, dall, num_boost_round=best_n)
         print(f"  ✓ Trained {model.num_boosted_rounds()} trees over the full training set.")
     finally:
-        dtrain = None              # release the DMatrix so its cache files unlock
+        dfit = dval = dall = None      # release DMatrices so cache files unlock
         gc.collect()
         shutil.rmtree(cache_dir, ignore_errors=True)
 

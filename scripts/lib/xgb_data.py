@@ -103,7 +103,7 @@ def global_pos_weight(files, y_all, chunk_size, row_mask=None):
 
 
 def build_quantile_dmatrix(files, y_all, chunk_size, *, max_bin=2,
-                           row_mask=None, pos_weight=None, cache_prefix=None):
+                           row_mask=None, pos_weight=None, cache_prefix=None, ref=None):
     """Stream the given chunks into a single quantised DMatrix.
 
     With ``cache_prefix`` set, builds an ``ExtMemQuantileDMatrix`` that spills
@@ -111,9 +111,12 @@ def build_quantile_dmatrix(files, y_all, chunk_size, *, max_bin=2,
     need far more RAM in-core than the node has (the ~109 GB matrix peaked >400 GB
     as a plain in-core QuantileDMatrix). Without it, builds an in-core
     ``QuantileDMatrix`` (fine for small subsets, e.g. HPO).
+
+    ``ref`` must be the training DMatrix when building an *evaluation* matrix:
+    XGBoost requires eval QuantileDMatrices to reuse the training quantiles.
     """
     it = ChunkDMatrixIter(files, y_all, chunk_size, row_mask=row_mask,
                           pos_weight=pos_weight, cache_prefix=cache_prefix)
     if cache_prefix is not None:
-        return xgb.ExtMemQuantileDMatrix(it, max_bin=max_bin)
-    return xgb.QuantileDMatrix(it, max_bin=max_bin)
+        return xgb.ExtMemQuantileDMatrix(it, max_bin=max_bin, ref=ref)
+    return xgb.QuantileDMatrix(it, max_bin=max_bin, ref=ref)

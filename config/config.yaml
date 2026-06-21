@@ -160,6 +160,17 @@ training:
   # more concurrent trials (e.g. 1 -> one trial per core); higher = fewer, fatter
   # trials. Allocated cores come from SLURM_CPUS_PER_TASK (else os.cpu_count()).
   optuna_threads_per_trial: 2
+  # Final training (05_model_training.py): tree count is found by early stopping
+  # on a held-out slice of the FULL training set (the HPO-subset n_estimators is
+  # too small for full-data training -> underfitting). max_boost_rounds is the
+  # early-stopping ceiling; the model then retrains on all train rows with the
+  # discovered count.
+  max_boost_rounds: 5000
+  # Build the train DMatrix in external memory (pages spilled to scratch) so the
+  # full 50.8M-feature matrix fits a 384 GB node. Set to false once min_support
+  # has shrunk the matrix enough to hold in RAM (in-core is much faster and uses
+  # cores fully -> no low-efficiency warning).
+  external_memory: true
 
 # ----------------------------------------------------------------------------
 # XGBOOST MODEL CONFIGURATION
