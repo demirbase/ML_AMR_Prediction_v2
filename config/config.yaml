@@ -151,6 +151,15 @@ preprocessing:
   encoding: "binary"  # Binary (presence/absence) or frequency-basedß
   # Binary is preferred for assembled genomes
 
+  # Feature representation consumed DOWNSTREAM (03b/04/05/06/07/07b). This is the
+  # single switch for the unitig pivot (ROADMAP §0 M12):
+  #   "kmer"   -> resolve_path('matrix_dir') = …/{antibiotic}/matrix      (03, raw k-mers)
+  #   "unitig" -> resolve_path('matrix_dir') = …/{antibiotic}/<unitig.out_subdir> (03u)
+  # Flipping this makes the WHOLE HPO/train/eval chain run on unitigs with NO
+  # per-script change (resolve_path redirects the matrix dir). The raw-k-mer
+  # baseline under …/matrix is preserved either way (03u writes a separate dir).
+  feature_repr: "kmer"   # kmer | unitig
+
 # ----------------------------------------------------------------------------
 # UNITIG REPRESENTATION (ROADMAP §0.1 M12 — replaces raw k-mers downstream)
 # ----------------------------------------------------------------------------

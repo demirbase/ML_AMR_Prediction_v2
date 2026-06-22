@@ -74,6 +74,25 @@ def test_resolve_path_organism_antibiotic():
     assert p.as_posix().endswith("data/processed/ecoli/gentamicin/matrix")
 
 
+def test_resolve_path_feature_repr_switch():
+    # The unitig pivot switch (ROADMAP §0 M12): feature_repr redirects ONLY the
+    # matrix_dir key, leaving every other path untouched. Use a synthetic config
+    # so the test is independent of the repo config.yaml's current value.
+    base = load_config()
+    cfg_kmer = {**base, "preprocessing": {**base.get("preprocessing", {}), "feature_repr": "kmer"}}
+    cfg_unitig = {**base, "preprocessing": {**base.get("preprocessing", {}), "feature_repr": "unitig"},
+                  "unitig": {"out_subdir": "matrix_unitig"}}
+
+    p_kmer = resolve_path("matrix_dir", organism="ecoli", antibiotic="ampicillin", config=cfg_kmer)
+    p_unitig = resolve_path("matrix_dir", organism="ecoli", antibiotic="ampicillin", config=cfg_unitig)
+    assert p_kmer.name == "matrix"
+    assert p_unitig.name == "matrix_unitig"
+    assert p_unitig.parent == p_kmer.parent          # same {antibiotic} dir, only leaf differs
+    # Non-matrix keys must be unaffected by the switch.
+    assert resolve_path("models_dir", organism="ecoli", antibiotic="ampicillin",
+                        config=cfg_unitig).name == "ampicillin"
+
+
 def test_resolve_path_run_id():
     p = resolve_path("run_dir", organism="ecoli", antibiotic="gentamicin", run_id="RID123")
     assert p.name == "RID123"

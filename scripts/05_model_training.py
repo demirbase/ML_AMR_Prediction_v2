@@ -398,7 +398,7 @@ def final_test(model, test_files, y_all, optimal_threshold):
     y_prob_all = np.array(y_prob_all)
     
     # Threshold application without peeking at test results (No Data Leakage)
-    print(f"\nApplying Unbiased Treshold: {optimal_threshold:.4f} (from Training Distribution)")
+    print(f"\nApplying Unbiased Threshold: {optimal_threshold:.4f} (from Training Distribution)")
     
     y_pred_all = (y_prob_all >= optimal_threshold).astype(int)
     

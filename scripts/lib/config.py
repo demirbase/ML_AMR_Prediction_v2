@@ -117,7 +117,20 @@ def resolve_path(key: str, organism: str | None = None, antibiotic: str | None =
             f"antibiotic={antibiotic}, run_id={run_id})."
         )
 
-    return PROJECT_ROOT / resolved
+    result = PROJECT_ROOT / resolved
+
+    # Feature-representation switch (ROADMAP §0 M12 — single point, no per-script
+    # change). When preprocessing.feature_repr == 'unitig', the matrix directory
+    # transparently redirects to the unitig matrix produced by 03u
+    # (sibling 'unitig.out_subdir', default 'matrix_unitig'), so 03b/04/05/06/07/07b
+    # all consume unitigs. Default ('kmer') leaves the raw-k-mer path untouched.
+    if key == "matrix_dir":
+        feat = (cfg.get("preprocessing", {}) or {}).get("feature_repr", "kmer")
+        if feat == "unitig":
+            sub = (cfg.get("unitig", {}) or {}).get("out_subdir", "matrix_unitig")
+            result = result.parent / sub
+
+    return result
 
 
 def resolve_tool(config_key: str, command_name: str, config: dict[str, Any] | None = None,
