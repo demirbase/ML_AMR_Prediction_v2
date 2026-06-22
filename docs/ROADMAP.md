@@ -41,6 +41,54 @@ Mevcut analizlerde yeterince vurgulanmamış: Gentamicin Rank 4 ve 5'teki k-mer'
 
 ---
 
+## 0. METODOLOJİK REVİZYON — Literatür Taraması Kararları (Haziran 2026)
+
+> İki turluk sistematik literatür taraması (Bölüm A–F + uygulama "nasıl" turu) sonucu kesinleşen, pipeline'ı ve tez çerçevesini bağlayan kararlar. **Bu bölüm aşağıdaki §1–§6'nın önüne geçer; çelişki olursa burası geçerlidir.** Kaynaklar: Yu/Barquist 2024 (PLOS Biol, popülasyon-yapısı confounding), Jaillard 2018 (DBGWAS/unitig), Lees 2018/2019 (pyseer, PopPUNK), Meinshausen-Bühlmann 2010 + Shah-Samworth 2013 (stability selection/CPSS), Lundberg 2020 (TreeSHAP), Chklovski 2023 (CheckM2), Alcock 2023 (CARD/ARO), Bortolaia 2020 (ResFinder), Feldgarden 2021 (AMRFinderPlus), Nguyen 2018/2019 (XGBoost AMR).
+
+### 0.1 MUST-HAVE mimari değişiklikler (yayın öncesi zorunlu)
+1. **Soya-duyarlı çapraz doğrulama — rastgele/chunk CV TAMAMEN TERK.** **PopPUNK** küme etiketleri (5470 genom ~1-2h) → **`GroupKFold`** (5–10 fold, stratified-group; <10 izolatlı ST'ler elenir/"diğer"e; ST131 gibi baskın kladlar downsample veya PopPUNK alt-kümelemesi). Doğruladığı: **raporlanan genelleme-AUC + feature stability** (final model yine TÜM veride eğitilir). Neden: random CV, AUC'yi **%20–30 şişirir**; model gerçek mekanizma yerine soyu ezberler (Yu 2024). **En büyük reviewer-blocker.**
+2. **⭐ Unitig temsiline geçiş — ham k-mer TERK.** `bcalm2` + `unitig-caller` → ikili unitig varlık/yokluk matrisi; **downstream XGBoost aynı kalır** (satır=izolat, sütun=unitig 0/1). ~10M k-mer → **~730k unitig**, ~212GB→**~18GB** RAM, ~7h→**~50dk**. Faydalar: boyut indirgeme + yorumlanabilirlik (uzun, BLAST-eşlenebilir) + GWAS-standart + min_support baskısını azaltır. KMC yalnız QC/spektrum (02/02b) için kalır; matris girdisi unitig olur. **Bu, önceki min_support/hız/GPU sancılarını kökten çözer.**
+3. **Stabilite: 5-seed → CPSS (Complementary Pairs Stability Selection, B=100, %50 alt-örnek, yerine koymadan).** Aşamalı (staged) seçim: (a) sıfır-varyans + frekans filtresi → (b) univariate **Chi²/Mutual Information** ile aday sete in (≈ binlerce) → (c) adaylarda CPSS B=100 → (d) seçim frekansı eşiği **π≥0.6** (M&B/Shah-Samworth PFER sınırı; 0.6 teorik olarak doğrulandı). 5-seed istatistiksel garanti vermez.
+4. **Feature importance: Gain → SHAP (TreeSHAP), yalnız son kısıtlı (aday) model üzerinde.** Tam matriste asla; saniyeler sürer.
+5. **Dış doğrulama (MUST).** BV-BRC'den **zamansal (son ~2 yıl) veya coğrafi hold-out** (ikisi de hakemlerce kabul). **AMRFinderPlus** (tercih — SNP+edinilmiş) + ResFinder ile head-to-head. Metrikler: **balanced accuracy, sensitivity, specificity, Cohen's Kappa, McNemar**; FDA bandı ME≤%3, VME≤%1.5–7.5.
+6. **pyseer LMM + Bonferroni** — bir k-mer/unitig'in mekanizmayla ilişkili olduğu iddiası için popülasyon-yapısı düzeltmeli p-değeri (SHAP üstü k-mer'leri çapraz-kontrol).
+
+### 0.2 Eklenecek doğrulamalar / bileşenler
+- **Permütasyon/anlamlılık: MDA (Mean Decrease in Accuracy)** — modeli bir kez eğit, test feature'ını karıştır, doğruluk düşüşünü ölç (yüzlerce yeniden-eğitim YOK). Alternatif: donmuş-HP + early-stop ile etiket permütasyonu. Eşik p<0.05 / **BH-FDR Q<0.05**.
+- **Discriminativeness'a BH-FDR:** |Δprev|≥0.10 + Fisher exact **+ Benjamini-Hochberg Q<0.05** (step 10).
+- **Genom QC (hibrit):** BV-BRC metadata ön-filtre (EvalG/EvalCon — savunulabilir) **+ yerel CheckM2** (completeness ≥95–99%, contamination ≤5%, sıkı ≤2–3%) **+ QUAST** (N50 ≥50kb, contig üst sınırı). CheckM1 değil **CheckM2** (~saatler / 5470 genom).
+- **ARO/CARD ontoloji eşlemesi (KB):** unitig→CARD BLAST → ARO accession → `aro_index.tsv` + `card.json` parse → 5'li şema (**ARO ID, gen adı, gen ailesi, direnç mekanizması, ilaç sınıfı**). `kb_schema`'ya alanlar.
+- **Reifikasyon dili (S10):** "neden olur / belirler / tetikler" YOK → "ilişkilidir / yüksek tahmin gücü / istatistiksel sinyal". SHAP ≠ nedensellik (Takefuji 2025).
+
+### 0.3 Doğrulananlar (değişiklik YOK — literatür bizi destekledi)
+- **k=21** (hesaplama yönetilebilir + BLAST-eşlenebilir); **ikili presence/absence + max_bin=2** (topluluk standardı, count'tan üstünlük yok); **sınıf-ağırlık (neg/pos), SMOTE YOK**, 0.5 threshold raporla + PR-eğrisi tartış; **BV-BRC + EUCAST/CLSI + Intermediate çıkar** (standart); **4373 genom yeterli** (modern bant 1000–5000+).
+- **AUC ~0.93 literatürle UYUMLU** (per-antibiyotik raporla): ciprofloxacin 0.83–0.99, gentamisin 0.89–0.99, ampisilin volatil 0.51–0.98, TMP-SMX 0.90–0.96, tetrasiklin 0.88–0.98, sefotaksim 0.72–0.81.
+
+### 0.4 Özgünlük çerçevesi (B1 — KRİTİK)
+**"İlk ML-AMR veritabanı" İDDİA ETME** (BV-BRC zaten XGBoost ile "AMR Regions" sunuyor). Yeni çerçeve: *"istatistiksel hata-sınırlı (PFER/M&B-CPSS), soy-farkında doğrulanmış, k-mer/unitig çözünürlüklü, şeffaf + FAIR ilk AÇIK AMR biyobelirteç bilgi tabanı."* Farklılaştırıcılar: **CPSS stability selection + lineage-aware validation + ARO ontolojisi + açık (Docker/DOI/API) altyapı.** Bu çerçevede özgünlük güveni **Yüksek**; "ilk DB" çerçevesinde **Orta-Düşük**.
+
+### 0.5 Showcase antibiyotik + hedef dergi
+- **Showcase:** ciprofloxacin (gyrA/parC **SNP** — step 11 pozitif kontrol) + β-laktam (**edinilmiş gen** pozitif kontrol). Merkeze "**test edilebilir yeni biyolojik keşif**" koy (Database Oxford şartı).
+- **Hedef dergi: Database (Oxford)** veya **Briefings in Bioinformatics** (NAR Database Issue 6 ayda gerçekçi değil). FAIR minimum: Zenodo DOI, REST API, Docker/Conda <30dk kurulum, 2-yıl erişim garantisi, ARO eşlemesi.
+
+### 0.6 Pipeline'a etki — değişecek/eklenecek scriptler
+- **00a/00:** BV-BRC QC metadata + yıl/coğrafya alanlarını çek (external hold-out + QC için).
+- **YENİ unitig adımı (02c/03 yerine):** `bcalm2` + `unitig-caller` → unitig matrisi. KMC 02/02b QC'de kalır.
+- **YENİ lineage adımı:** PopPUNK küme etiketleri → GroupKFold; 04/05/07b'nin chunk-level split'i bununla değişir.
+- **07b:** CPSS (B=100) + Chi² aday filtresi + SHAP (5-seed yerine).
+- **07:** SHAP importance (Gain yerine).
+- **10:** BH-FDR ekle.
+- **YENİ:** pyseer LMM; MDA permütasyon; external validation + AMRFinderPlus/ResFinder concordance; CheckM2/QUAST QC.
+- **09 / KB:** ARO eşleme alanları; `populate_database.py` ARO + provenance + lineage + CPSS skorları.
+
+### 0.7 Major reviewer saldırı noktaları (savunma hazır olmalı)
+1. *Soy sızıntısı:* "model ST131 k-mer'lerini ezberledi" → lineage-aware GroupKFold + pyseer LMM ile çözülür.
+2. *Mükerrerlik:* "BV-BRC zaten yapıyor" → PFER-sınırlı CPSS + şeffaflık + ARO ile farklılaş.
+3. *Feature kararsızlığı:* "5 seed gürültü" → CPSS B=100 + SHAP.
+4. *Agresif filtreleme:* "%1 nadir plazmidi siler" → mutlak ≥10 + unitig collapse (oransal eşik değil).
+
+---
+
 ## 1. Knowledge Base Mimarisi
 
 DOCX'teki veri modeli temelden sağlam; 8 tablo yapısı kabul edilebilir. Aşağıda bileşen bazında kısa değerlendirme ve önemli eklemeler sunuluyor.
@@ -80,6 +128,8 @@ DOCX'teki üç tier (confirmed/candidate/weak) bilimsel olarak doğru. **Bir kom
 Bu formül; stabil, yüksek homoloji ve düşük E-value'ya sahip k-mer'leri doğal olarak üste taşır. Tek sayı ile KB sıralaması yapmayı kolaylaştırır. Bu, tez Tables bölümüne koyulacak "Tablo 2: Top-20 KB Entries by Composite Score" için kullanışlı.
 
 ### 1.5 Feature Stability Sistemi
+
+> **⚠ REVİZE (bkz. §0.1):** 5-seed repeated holdout istatistiksel olarak yetersiz bulundu. Yerine **CPSS (Complementary Pairs Stability Selection, B=100, %50 alt-örnek, π≥0.6)** + aşamalı Chi²/MI aday filtresi + SHAP kullanılacak (Meinshausen-Bühlmann 2010 / Shah-Samworth 2013 PFER sınırları). Aşağıdaki "güçlendirme" notu tarihsel bağlam için bırakıldı.
 
 5-seed selection frequency yaklaşımı doğru metodoloji (Mahé & Tournoud 2018 referanslı). **Bir güçlendirme:** Bağımsız seed'lerin yanı sıra **5-fold CV ile fold bazlı stability** hesaplamak metodolojik açıdan daha güçlü bir kombinasyon:
 
@@ -148,9 +198,14 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | # | Gereklilik | Mevcut Durum | Tahmini Süre |
 |---|---|---|---|
 | M1 | **P-01 fix: Data leakage** — Youden's J test setten kaldır, sadece train/val üzerinden hesapla | Aktif bug | 2 saat |
-| M2 | **5-fold stratified CV veya 5-seed repeated holdout** — ROC-AUC güvenilirliği | Yok | 1-2 hafta |
+| M2 | **Soya-duyarlı çapraz doğrulama (§0.1)** — PopPUNK küme etiketleri + GroupKFold. *(REVİZE: rastgele/5-seed CV artık YETERSİZ; lineage-aware ZORUNLU.)* | Yok | 1-2 hafta |
 | M3 | **E-value confidence tier sistemi** — Mevcut BLAST sonuçlarını confirmed/candidate/weak olarak yeniden sınıflandır | Yok | 3 gün |
-| M4 | **Feature stability analizi (07b)** — 5 seed, selection frequency | Yok | 1 hafta |
+| M4 | **Feature stability (07b) — CPSS, B=100, %50 alt-örnek, π≥0.6 + SHAP (§0.1)** *(REVİZE: 5-seed yerine Meinshausen-Bühlmann/Shah-Samworth)* | Yok | 1 hafta |
+| M12 | **Unitig temsiline geçiş (§0.1)** — bcalm2 + unitig-caller (ham k-mer yerine) | Yok | 1 hafta |
+| M13 | **Dış doğrulama (§0.1)** — zamansal/coğrafi hold-out + AMRFinderPlus/ResFinder concordance (Kappa, McNemar, bACC) | Yok | 1 hafta |
+| M14 | **pyseer LMM + Bonferroni (§0.1)** — popülasyon-yapısı düzeltmeli k-mer/unitig anlamlılığı | Yok | 3 gün |
+| M15 | **Genom QC (§0.2)** — BV-BRC metadata ön-filtre + yerel CheckM2 + QUAST | Eksik (IQR-only) | 3 gün |
+| M16 | **ARO/CARD ontoloji eşlemesi (§0.2)** — KB'de ARO ID + gen ailesi + mekanizma + ilaç sınıfı | Yok | 3 gün |
 | M5 | **Reproducibility fix** — Ampicillin ve ciprofloxacin matrislerini Zenodo'ya yükle veya yeniden üretim pipeline'ını belgele | Eksik | 3 gün |
 | M6 | **CARD version kaydı** — CARD hangi versiyonu? config.yaml ve Methods bölümüne | Kayıt yok | 2 saat |
 | M7 | **Known mechanism recovery rate tablosu** — Confirmed tier k-mer'lerin kaçı bilinen ARG? | Yok | 2 gün |
