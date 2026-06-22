@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Step 07b — Feature stability via 5-seed repeated holdout (out-of-core).
+Step 07b — Feature stability + generalisation CV (out-of-core).
 
-Quantifies how reproducible the top k-mer features are across resampling and
-gives a variance estimate for ROC-AUC (ROADMAP §1.5 / §4; presentation slides).
+Quantifies how reproducible the top k-mer/unitig features are across resampling
+AND gives an honest generalisation ROC-AUC mean±std (ROADMAP §0.1 M2 / §1.5).
 
-DESIGN (agreed):
-    SEEDS = [42, 123, 777, 1024, 2025]
-    For each seed:
-        - stratified 80/20 split at the GENOME (sample) level
+DESIGN:
+    Splits come from build_cv_splits():
+      • PREFERRED — lineage-aware StratifiedGroupKFold (PopPUNK labels from 02c):
+        an entire lineage stays on one side, so the AUC is NOT inflated by
+        lineage leakage and stability is measured across lineage-disjoint folds.
+      • FALLBACK — legacy 5-seed repeated holdout when no lineage file exists.
+    For each split:
+        - sample-level train/test masks (lineage-grouped or stratified holdout)
         - train XGBoost with the FIXED hyperparameters from step 04
           (config/experiments/{organism}/config_{antibiotic}.yaml) — HPO is done
           ONCE and held fixed across seeds; it never sees a seed's test split.
@@ -186,9 +190,46 @@ def mean_pairwise_jaccard(sets):
     return float(np.mean(vals)) if vals else float('nan')
 
 
+def build_cv_splits(y_all, n_total, genomes_csv, lineage_csv, n_splits, seed=42):
+    """Build the resampling splits as sample-level (train_mask, test_mask) pairs.
+
+    Lineage-aware by default (ROADMAP §0.1 M2): when PopPUNK labels exist
+    (02c -> poppunk_clusters.csv), use **StratifiedGroupKFold** so an entire
+    lineage stays on one side — the reported AUC mean±std is then an HONEST
+    generalisation estimate (no lineage leakage) and the per-feature selection
+    frequency is measured across lineage-disjoint folds. Falls back to the
+    legacy 5-seed repeated holdout when no lineage file is present (e.g. the
+    synthetic integration test), preserving prior behaviour.
+
+    Returns (splits, method_label, split_labels).
+    """
+    if lineage_csv.exists() and genomes_csv.exists():
+        try:
+            from lib.lineage import load_lineage, group_kfold_masks
+            groups = load_lineage(genomes_csv, lineage_csv)
+            n_clusters = len(set(groups.tolist()))
+            if len(groups) == n_total and n_clusters >= n_splits:
+                masks = group_kfold_masks(y_all, groups, n_splits=n_splits,
+                                          stratified=True, seed=seed)
+                return masks, f"lineage_group_kfold_{n_splits}fold", list(range(len(masks)))
+            print(f"  ⚠ lineage labels unusable (aligned {len(groups)} vs {n_total} rows, "
+                  f"{n_clusters} clusters < {n_splits} folds); using 5-seed holdout.")
+        except Exception as e:
+            print(f"  ⚠ lineage CV unavailable ({e}); using 5-seed holdout.")
+
+    masks = []
+    for s in SEEDS:
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=s)
+        tr_idx, te_idx = next(sss.split(np.zeros(n_total), y_all))
+        tr = np.zeros(n_total, dtype=bool); tr[tr_idx] = True
+        te = np.zeros(n_total, dtype=bool); te[te_idx] = True
+        masks.append((tr, te))
+    return masks, "repeated_holdout_5seed", list(SEEDS)
+
+
 def main():
     print("=" * 80)
-    print(f"FEATURE STABILITY — 5-SEED REPEATED HOLDOUT: {TARGET_ANTIBIOTIC.upper()} ({ORGANISM})")
+    print(f"FEATURE STABILITY & GENERALISATION CV: {TARGET_ANTIBIOTIC.upper()} ({ORGANISM})")
     print("=" * 80)
 
     params, total_trees = load_fixed_params()
@@ -214,35 +255,42 @@ def main():
     use_extmem = bool(config['training'].get('external_memory', True))
     print(f"  external_memory={use_extmem}")
 
-    # Seeds run sequentially; each seed's full-data boosting already saturates the
-    # allocated cores (one DMatrix over all train rows), so there is no need to
-    # parallelise across seeds.
-    seed_rows, seed_sets, gain_accum = [], [], {}
-    for seed in SEEDS:
-        print(f"\n--- SEED {seed} ---")
-        try:
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=seed)
-            train_idx, test_idx = next(sss.split(np.zeros(n_total), y_all))
-            train_mask = np.zeros(n_total, dtype=bool); train_mask[train_idx] = True
-            test_mask = np.zeros(n_total, dtype=bool); test_mask[test_idx] = True
+    # Resampling scheme: lineage-aware StratifiedGroupKFold when PopPUNK labels
+    # exist (honest, no lineage leakage), else the legacy 5-seed holdout.
+    genomes_csv = MATRIX_DIR / f"genomes_{TARGET_ANTIBIOTIC}.csv"
+    try:
+        lineage_dir = resolve_path('lineage_dir', organism=ORGANISM, config=config)
+    except KeyError:
+        lineage_dir = resolve_path('data_dir', config=config) / "processed" / ORGANISM / "lineage"
+    n_splits = int(config.get('lineage', {}).get('n_splits', 5))
+    splits, cv_method, split_labels = build_cv_splits(
+        y_all, n_total, genomes_csv, lineage_dir / "poppunk_clusters.csv", n_splits)
+    print(f"  CV scheme: {cv_method} ({len(splits)} splits)")
 
-            cache_dir = MODELS_DIR / f"_xgb_cache_seed{seed}"
+    # Splits run sequentially; each split's full-data boosting already saturates
+    # the allocated cores (one DMatrix over all train rows). The 'seed' column in
+    # the summary is kept for backward compatibility (it holds the fold id here).
+    seed_rows, seed_sets, gain_accum = [], [], {}
+    for label, (train_mask, test_mask) in zip(split_labels, splits):
+        print(f"\n--- SPLIT {label} ---")
+        try:
+            cache_dir = MODELS_DIR / f"_xgb_cache_split{label}"
             model = train_one_seed(params, total_trees, chunk_files, y_all,
                                    train_mask, max_bin, cache_dir, use_extmem)
             auc, _, _ = eval_one_seed(model, offsets, y_all, test_mask)
             idx_set, idx_gain = top_feature_indices(model)
 
-            seed_rows.append({'seed': seed, 'roc_auc': auc, 'n_top_features': len(idx_set)})
+            seed_rows.append({'seed': label, 'roc_auc': auc, 'n_top_features': len(idx_set)})
             seed_sets.append(idx_set)
             for idx, g in idx_gain.items():
                 gain_accum.setdefault(idx, []).append(g)
 
-            seed_dir = MODELS_DIR / f"seed{seed}"
-            seed_dir.mkdir(parents=True, exist_ok=True)
-            model.save_model(str(seed_dir / f"xgboost_{TARGET_ANTIBIOTIC}_seed{seed}.json"))
+            split_dir = MODELS_DIR / f"split{label}"
+            split_dir.mkdir(parents=True, exist_ok=True)
+            model.save_model(str(split_dir / f"xgboost_{TARGET_ANTIBIOTIC}_split{label}.json"))
             print(f"  ROC-AUC: {auc:.4f} | top features: {len(idx_set)}")
         except Exception as e:
-            print(f"  ✗ seed {seed} failed: {e}")
+            print(f"  ✗ split {label} failed: {e}")
 
     if not seed_rows:
         print("\nERROR: no seed completed; nothing to aggregate.")
@@ -290,9 +338,9 @@ def main():
     stab.to_csv(stab_path, index=False)
 
     print("\n" + "=" * 80)
-    print("REPEATED-HOLDOUT SUMMARY")
+    print(f"CROSS-VALIDATION SUMMARY ({cv_method})")
     print("=" * 80)
-    print(f"  ROC-AUC: {auc_mean:.4f} ± {auc_std:.4f}  (seeds: {[f'{a:.3f}' for a in aucs]})")
+    print(f"  ROC-AUC: {auc_mean:.4f} ± {auc_std:.4f}  (splits: {[f'{a:.3f}' for a in aucs]})")
     print(f"  Mean pairwise Jaccard (top-{TOP_N} sets): {jaccard:.4f}")
     print(f"  Stable k-mers (freq ≥ 0.6): {int(stab['stable'].sum()) if len(stab) else 0}")
     print(f"  Saved: {summary_path.name}, {stab_path.name}")
