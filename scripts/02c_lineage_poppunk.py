@@ -124,7 +124,13 @@ def main():
     print("=" * 80)
 
     genomes_dir = resolve_path("raw_genomes_dir", organism=organism, config=config)
-    lineage_dir = resolve_path("lineage_dir", organism=organism, config=config)
+    # lineage_dir from config when present; else derive from data_dir so this runs
+    # on configs that predate the 'lineage_dir' key (e.g. a manually-tuned HPC
+    # config.yaml) without needing a config edit — same canonical location.
+    try:
+        lineage_dir = resolve_path("lineage_dir", organism=organism, config=config)
+    except KeyError:
+        lineage_dir = resolve_path("data_dir", config=config) / "processed" / organism / "lineage"
     lineage_dir.mkdir(parents=True, exist_ok=True)
 
     genome_ids = sorted(p.stem for p in genomes_dir.glob("*.fna"))
