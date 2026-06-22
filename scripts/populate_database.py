@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Populate the AMRK-DB knowledge base from pipeline outputs (M8).
+
+Reads the per-antibiotic artefacts produced by the pipeline and loads them into
+a single SQLite knowledge base (schema: scripts/lib/kb_schema.py). Idempotent —
+re-running an antibiotic refreshes its rows. One DB can hold many antibiotics, so
+this is the substrate for the cross-antibiotic analysis (S1/H3) and the API (S8).
+
+Inputs (globbed under results/models/runs; any missing input is skipped with a
+note, so the KB can be built from a partial pipeline):
+  runs/.../run_metadata.json               -> pipeline_runs
+  models/.../manifest.json + 06 metrics    -> models
+  results/.../10_repeated_holdout_summary  -> models (07b 5-seed AUC mean/std)
+  results/.../07_kb_candidates_{ab}.csv     \\
+  results/.../10_kmer_background_frequency   } -> kmers, kmer_model_scores,
+  results/.../11_variant_snp_check           /    blast_annotations,
+                                                  kmer_background_frequency,
+                                                  variant_snp_check, validation_evidence
+
+Usage:
+  python scripts/populate_database.py --organism ecoli --antibiotic ampicillin
+  python scripts/populate_database.py            # organism/antibiotic from config
+"""
+
+import argparse
+import datetime
+import glob
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from lib.config import load_config, resolve_path
+from lib.kb_schema import KB_SCHEMA_VERSION, create_schema
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+def _find(root, filename):
+    """Return the most recent file named `filename` anywhere under `root`."""
+    hits = sorted(Path(root).rglob(filename), key=lambda p: p.stat().st_mtime)
+    return hits[-1] if hits else None
+
+
+def _read_json(path):
+    if path and Path(path).exists():
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def _read_csv(path):
+    if path and Path(path).exists():
+        try:
+            return pd.read_csv(path, encoding="utf-8")
+        except Exception as e:
+            print(f"  ⚠ could not read {path}: {e}")
+    return None
+
+
+def _f(x):
+    """float-or-None (handles NaN / blanks)."""
+    try:
+        v = float(x)
+        return None if v != v else v  # drop NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _i(x):
+    v = _f(x)
+    return int(v) if v is not None else None
+
+
+def _b(x):
+    return 1 if str(x).strip().lower() in ("1", "true", "yes") else 0
+
+
+# ---------------------------------------------------------------------------
+# Per-table loaders
+# ---------------------------------------------------------------------------
+def kmer_id(conn, sequence, k):
+    """INSERT-OR-IGNORE a k-mer and return its id (dedup on sequence)."""
+    conn.execute("INSERT OR IGNORE INTO kmers(sequence, k) VALUES (?,?)",
+                 (sequence, k))
+    row = conn.execute("SELECT kmer_id FROM kmers WHERE sequence=?",
+                       (sequence,)).fetchone()
+    return row[0]
+
+
+def populate_run(conn, organism, antibiotic, run_meta, card_version, min_support):
+    """Insert/replace the pipeline_runs row; return run_id."""
+    rm = run_meta or {}
+    run_id = rm.get("run_id") or f"{organism}__{antibiotic}__unknown"
+    versions = rm.get("versions", {}) if isinstance(rm.get("versions"), dict) else {}
+    conn.execute(
+        """INSERT OR REPLACE INTO pipeline_runs
+           (run_id, organism, antibiotic, git_commit, git_dirty, card_version,
+            kmc_version, xgboost_version, random_seed, config_hash, min_support,
+            n_genomes, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (run_id, organism, antibiotic, rm.get("git_commit"), _i(rm.get("git_dirty")),
+         card_version, versions.get("kmc"), versions.get("xgboost"),
+         _i(rm.get("seed")), rm.get("data_fingerprint") or rm.get("config_hash"),
+         _i(min_support), _i(rm.get("n_genomes")),
+         rm.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
+    )
+    return run_id
+
+
+def populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout):
+    """Insert/replace the models row; return model_id."""
+    conn.execute("INSERT OR IGNORE INTO antibiotics(antibiotic, drug_class) VALUES (?,?)",
+                 (antibiotic, drug_class))
+    m = (metrics or {}).get("metrics", metrics or {})
+    ci = m.get("roc_auc_ci") or [None, None]
+    auc_mean = auc_std = None
+    if holdout is not None and "seed" in holdout.columns:
+        idx = holdout.set_index("seed")["roc_auc"]
+        auc_mean = _f(idx.get("MEAN"))
+        auc_std = _f(idx.get("STD"))
+    man = manifest or {}
+    conn.execute(
+        """INSERT OR REPLACE INTO models
+           (run_id, antibiotic, n_trees, operating_threshold, roc_auc,
+            roc_auc_ci_low, roc_auc_ci_high, pr_auc, mcc, balanced_accuracy,
+            accuracy, auc_mean_seeds, auc_std_seeds)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (run_id, antibiotic, _i(man.get("n_trees")),
+         _f((metrics or {}).get("operating_threshold") or man.get("threshold")),
+         _f(m.get("roc_auc")), _f(ci[0]), _f(ci[1]), _f(m.get("pr_auc")),
+         _f(m.get("mcc")), _f(m.get("balanced_accuracy")), _f(m.get("accuracy")),
+         auc_mean, auc_std),
+    )
+    return conn.execute("SELECT model_id FROM models WHERE run_id=? AND antibiotic=?",
+                        (run_id, antibiotic)).fetchone()[0]
+
+
+def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
+    """Load per-k-mer scores + BLAST + background-frequency from the candidate
+    table (10's output is a superset of 09's; falls back to 09)."""
+    if cand_df is None or cand_df.empty:
+        print("  ⚠ no candidate table (09/10) — skipping k-mer rows.")
+        return 0
+    has_bg = "discriminative" in cand_df.columns
+    n = 0
+    for _, r in cand_df.iterrows():
+        seq = str(r.get("kmer", "")).strip()
+        if not seq:
+            continue
+        kid = kmer_id(conn, seq, k)
+        conn.execute(
+            """INSERT OR REPLACE INTO kmer_model_scores
+               (kmer_id, model_id, gain, in_gain_topn, selection_frequency,
+                stable, composite_score)
+               VALUES (?,?,?,?,?,?,?)""",
+            (kid, model_id, _f(r.get("gain_score")), _b(r.get("in_gain_topN", 1)),
+             _f(r.get("selection_frequency")), _b(r.get("stable")),
+             _f(r.get("composite_score"))),
+        )
+        # CARD BLAST annotation (best hit recorded in the candidate row)
+        if str(r.get("card_gene", "")).strip():
+            conn.execute(
+                """INSERT INTO blast_annotations
+                   (kmer_id, model_id, source_db, gene_symbol, identity_pct,
+                    evalue, tier) VALUES (?,?,?,?,?,?,?)""",
+                (kid, model_id, "card", str(r.get("card_gene")),
+                 _f(r.get("card_identity")), _f(r.get("card_evalue")),
+                 str(r.get("confidence_tier", "none"))),
+            )
+            conn.execute(
+                """INSERT INTO validation_evidence
+                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   VALUES (?,?,?,?,?)""",
+                (kid, "blast", f"CARD {card_version}", _f(r.get("card_evalue")), run_id),
+            )
+        # Background frequency / discriminativeness (only present in 10's output)
+        if has_bg:
+            conn.execute(
+                """INSERT OR REPLACE INTO kmer_background_frequency
+                   (kmer_id, model_id, prevalence_resistant, prevalence_susceptible,
+                    prevalence_overall, delta_prevalence, odds_ratio, fisher_p,
+                    discriminative) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (kid, model_id, _f(r.get("prevalence_resistant")),
+                 _f(r.get("prevalence_susceptible")), _f(r.get("prevalence_overall")),
+                 _f(r.get("delta_prevalence")), _f(r.get("odds_ratio")),
+                 _f(r.get("fisher_p")), _b(r.get("discriminative"))),
+            )
+            conn.execute(
+                """INSERT INTO validation_evidence
+                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   VALUES (?,?,?,?,?)""",
+                (kid, "background_frequency", "R-vs-S Fisher exact",
+                 _f(r.get("fisher_p")), run_id),
+            )
+        n += 1
+    return n
+
+
+def populate_snp(conn, model_id, run_id, k, snp_df):
+    """Load CARD variant-model SNP allele calls (step 11)."""
+    if snp_df is None or snp_df.empty:
+        return 0
+    n = 0
+    for _, r in snp_df.iterrows():
+        seq = str(r.get("kmer", r.get("kmer_qseqid", ""))).strip()
+        if not seq:
+            continue
+        kid = kmer_id(conn, seq, k)
+        conn.execute(
+            """INSERT OR REPLACE INTO variant_snp_check
+               (kmer_id, model_id, card_model, snp, allele_class)
+               VALUES (?,?,?,?,?)""",
+            (kid, model_id, str(r.get("variant_gene", "")), str(r.get("snp", "")),
+             str(r.get("allele_class", ""))),
+        )
+        conn.execute(
+            """INSERT INTO validation_evidence
+               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               VALUES (?,?,?,?,?)""",
+            (kid, "snp", "CARD variant model", None, run_id),
+        )
+        n += 1
+    return n
+
+
+def update_metadata(conn, card_version):
+    n_kmers = conn.execute("SELECT COUNT(*) FROM kmers").fetchone()[0]
+    n_models = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+    conn.execute(
+        """INSERT OR REPLACE INTO kb_metadata
+           (id, kb_schema_version, card_version, zenodo_doi, license, created_at,
+            n_kmers, n_models)
+           VALUES (1,?,?,?,?,?,?,?)""",
+        (KB_SCHEMA_VERSION, card_version, None, "CC-BY-4.0",
+         datetime.datetime.now(datetime.timezone.utc).isoformat(), n_kmers, n_models),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    config = load_config()
+    ap = argparse.ArgumentParser(description="Populate the AMRK-DB knowledge base.")
+    ap.add_argument("--organism", default=config.get("project", {}).get("organism", "ecoli"))
+    ap.add_argument("--antibiotic", default=config["project"]["target_antibiotic"])
+    ap.add_argument("--db", default=None, help="SQLite path (default: results/{org}/kb/amrk.db)")
+    args = ap.parse_args()
+    organism, antibiotic = args.organism, args.antibiotic
+
+    k_length = int(config["preprocessing"]["k_length"])
+    card_version = (config.get("blast", {}) or {}).get("card_version")  # may be None
+    drug_class = None  # filled from the antibiotics registry if available later
+
+    # Resolve roots (organism/antibiotic-scoped) and glob the artefacts.
+    models_dir = resolve_path("models_dir", organism=organism, antibiotic=antibiotic, config=config)
+    results_root = PROJECT_ROOT / "results" / organism / antibiotic
+    runs_root = PROJECT_ROOT / "runs" / organism / antibiotic
+
+    run_meta = _read_json(_find(runs_root, "run_metadata.json"))
+    manifest = _read_json(models_dir / "manifest.json")
+    metrics = _read_json(_find(results_root, f"09_metrics_{antibiotic}.json"))
+    holdout = _read_csv(_find(results_root, f"10_repeated_holdout_summary_{antibiotic}.csv"))
+    # 10's output is the richest per-k-mer table; fall back to 09's candidates.
+    cand = _read_csv(_find(results_root, f"10_kmer_background_frequency_{antibiotic}.csv"))
+    if cand is None:
+        cand = _read_csv(_find(results_root, f"07_kb_candidates_{antibiotic}.csv"))
+    snp = _read_csv(_find(results_root, f"11_variant_snp_check_{antibiotic}.csv"))
+
+    # Adaptive min_support actually used (from pipeline_runs if present, else config)
+    min_support = (run_meta or {}).get("min_support")
+
+    db_path = Path(args.db) if args.db else (PROJECT_ROOT / "results" / organism / "kb" / "amrk.db")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 70)
+    print(f"POPULATE AMRK-DB  ({organism} / {antibiotic})  ->  {db_path}")
+    print("=" * 70)
+    print(f"  run_metadata : {'yes' if run_meta else 'MISSING'}")
+    print(f"  manifest/06  : {'yes' if manifest else 'MISSING'} / {'yes' if metrics else 'MISSING'}")
+    print(f"  07b holdout  : {'yes' if holdout is not None else 'MISSING'}")
+    print(f"  candidates   : {'10 (with background)' if (cand is not None and 'discriminative' in cand.columns) else ('09' if cand is not None else 'MISSING')}")
+    print(f"  11 SNP       : {'yes' if snp is not None else 'absent (ok)'}")
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    create_schema(conn)
+    try:
+        run_id = populate_run(conn, organism, antibiotic, run_meta, card_version, min_support)
+        model_id = populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout)
+        n_k = populate_candidates(conn, model_id, run_id, k_length, cand, card_version)
+        n_s = populate_snp(conn, model_id, run_id, k_length, snp)
+        update_metadata(conn, card_version)
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} | SNP rows: {n_s}")
+    print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"\nFATAL ERROR: {e}")
+        traceback.print_exc()
+        sys.exit(1)

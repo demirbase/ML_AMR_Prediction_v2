@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Knowledge-base layer (M8, the thesis contribution): `lib/kb_schema.py` (SQLite
+  DDL, 11 tables per ROADMAP §1.1, stdlib only — no new dependency) +
+  `populate_database.py` (loads pipeline outputs — run_metadata, manifest, 06
+  metrics, 07b holdout, 09/10 candidates+background, 11 SNP — into one queryable
+  `results/{org}/kb/amrk.db`; idempotent, multi-antibiotic, graceful on missing
+  inputs). `KB_SCHEMA_VERSION=0.1.0`. FastAPI (S8) to follow.
 - `lib/xgb_data.py` — `ChunkDMatrixIter` (streaming `xgb.DataIter`) +
   `build_quantile_dmatrix` / `global_pos_weight`: build a single in-core
   `QuantileDMatrix` from on-disk chunks without materialising the full sparse
