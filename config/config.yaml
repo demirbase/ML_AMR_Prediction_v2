@@ -128,9 +128,20 @@ provenance:
 preprocessing:
   # K-mer counting configuration
   k_length: 21  # K-mer length
-  min_support: 5  # Minimum genomes a k-mer must appear in to be retained
-  # Rationale: Filters out rare k-mers (likely errors or strain-specific)
-  
+  # Minimum-support (rare-k-mer) filter — DATA-ADAPTIVE so it scales with dataset
+  # size across antibiotics/organisms (a fixed count would drop almost everything
+  # on a small dataset and under-filter on a large one). 03 derives the effective
+  # value as:
+  #     min_support = max(min_support_floor, ceil(min_prevalence * n_genomes))
+  # Biology: a k-mer below ~1% prevalence cannot reach step-10's discriminativeness
+  # threshold (|Δprev| >= 0.10 needs ~10% prevalence), so the 1% floor drops only
+  # the rare / lineage-specific / sequencing-error tail and keeps every k-mer that
+  # could individually be a real marker. Large sets get aggressive de-confounding
+  # (faster training); small sets fall back to the absolute floor (keep markers).
+  min_support: null        # explicit override (int) — null = auto-derive (below)
+  min_support_floor: 5     # absolute noise floor (drop k-mers in < this many genomes)
+  min_prevalence: 0.01     # fraction of genomes; auto min_support scales with data size
+
   # Computational resources
   kmc_mem: 16  # Memory allocation for KMC (GB)
   threads: 10  # Number of CPU threads to use

@@ -72,7 +72,12 @@ from lib.config import resolve_path, resolve_tool
 TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
 ORGANISM          = config.get('project', {}).get('organism', 'ecoli')
 K_LENGTH          = config['preprocessing']['k_length']   # Must match 02_kmer_extraction.py
-MIN_SUPPORT       = config['preprocessing']['min_support']
+# Data-adaptive minimum support (see config comments). MIN_SUPPORT is an optional
+# hard override; when null the effective value is derived from the genome count
+# at runtime via resolve_min_support().
+MIN_SUPPORT       = config['preprocessing'].get('min_support', None)
+MIN_SUPPORT_FLOOR = int(config['preprocessing'].get('min_support_floor', 5))
+MIN_PREVALENCE    = float(config['preprocessing'].get('min_prevalence', 0.0))
 CHUNK_SIZE        = config['preprocessing']['chunk_size']
 KMC_MEMORY_GB     = config['preprocessing']['kmc_mem']
 THREADS           = config['preprocessing']['threads']
@@ -148,7 +153,11 @@ def create_feature_matrix():
     print("FEATURE MATRIX CONSTRUCTION - CHUNKED PROCESSING")
     print("=" * 80)
     print(f"Target antibiotic: {TARGET_ANTIBIOTIC}")
-    print(f"Minimum support: {MIN_SUPPORT} genomes")
+    if MIN_SUPPORT is not None:
+        print(f"Minimum support: {MIN_SUPPORT} genomes (config override)")
+    else:
+        print(f"Minimum support: adaptive = max({MIN_SUPPORT_FLOOR}, "
+              f"ceil({MIN_PREVALENCE} x n_genomes)) — resolved after QC")
     print(f"Chunk size: {CHUNK_SIZE} genomes")
     print("=" * 80)
 
@@ -280,7 +289,21 @@ def create_feature_matrix():
             # Filter out zero-variance features (core genome k-mers present in 100% of samples)
             # If a k-mer is in all genomes, its frequency is len(valid_genomes). We set max allowed to len - 1.
             max_support = len(valid_genomes) - 1
-            
+
+            # Data-adaptive minimum support: scale with the genome count so the
+            # same config works across antibiotics/organisms of very different
+            # sizes (see config comments). Explicit MIN_SUPPORT overrides.
+            if MIN_SUPPORT is not None:
+                eff_min_support = int(MIN_SUPPORT)
+                _ms_src = "config override"
+            else:
+                from math import ceil
+                eff_min_support = max(MIN_SUPPORT_FLOOR,
+                                      ceil(MIN_PREVALENCE * len(valid_genomes)))
+                _ms_src = (f"adaptive: max(floor={MIN_SUPPORT_FLOOR}, "
+                           f"ceil({MIN_PREVALENCE}*{len(valid_genomes)}))")
+            eff_min_support = min(eff_min_support, max(1, max_support))  # never exceed max
+
             # Run KMC on ALL genomes to identify k-mers meeting minimum support.
             # K-mer length uses K_LENGTH from config (consistent with 02_kmer_extraction.py).
             #
@@ -297,12 +320,13 @@ def create_feature_matrix():
             # -ci{MIN_SUPPORT} filters rare k-mers (occurrence count < MIN_SUPPORT).
             kmc_cmd = (
                 f"{KMC_BIN} -k{K_LENGTH} -m{KMC_MEMORY_GB} -t{THREADS} "
-                f"-ci{MIN_SUPPORT} -cx{max_support} -fm @{global_genome_list} "
+                f"-ci{eff_min_support} -cx{max_support} -fm @{global_genome_list} "
                 f"{global_db} {TEMP_DIR}"
             )
-            
+
             print("  Running KMC to extract global k-mer vocabulary...")
-            print(f"  Filtering parameters: min_support={MIN_SUPPORT} (noise), max_support={max_support} (zero-variance core)")
+            print(f"  Filtering parameters: min_support={eff_min_support} ({_ms_src}), "
+                  f"max_support={max_support} (zero-variance core)")
             run_command(kmc_cmd)
             
             # Export k-mer database to text format (k-mer sequence + count)

@@ -26,6 +26,12 @@ All notable changes to this project are documented here. The format is based on
   (M7), novel-candidate fraction (H4); confidence tiers moved to `config.yaml`.
 
 ### Changed
+- Feature filter (step 03): `min_support` is now **data-adaptive** —
+  `max(min_support_floor=5, ceil(min_prevalence=0.01 * n_genomes))` — so it scales
+  with dataset size across antibiotics/organisms (small sets fall back to the floor
+  and keep all markers; large sets get de-confounding + faster training). An
+  explicit integer `preprocessing.min_support` still overrides. (config knobs:
+  `min_support`, `min_support_floor`, `min_prevalence`.)
 - Training regime (steps 05 and 07b): replaced the epoch-based 1-tree-per-chunk
   incremental warm-start with **standard full-data gradient boosting** over a
   streaming **`ExtMemQuantileDMatrix`** (external memory). Every tree now sees

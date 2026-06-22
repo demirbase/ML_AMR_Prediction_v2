@@ -115,11 +115,31 @@ compared to a dense matrix requiring $\mathcal{O}(n \cdot p)$ bytes. For our pro
 
 ### 2.4 Prevalence Filtering and Matrix Dimensionality Reduction
 
-Before model training, uninformative k-mers are removed by filtering features based on prevalence across genomes. A k-mer present in all genomes carries no discriminative signal (provides no variance), as does one present in none. Formally, for feature $j$:
+Before model training (step 03), uninformative k-mers are removed by filtering on
+prevalence across genomes. A k-mer present in (nearly) all genomes carries no
+discriminative signal, and one present in too few is rare noise / lineage-specific.
+For feature $j$ over $n$ genomes we keep:
 
-$$\text{keep}_j = \mathbf{1}\left[ \epsilon < \frac{\sum_{i=1}^{n} X_{ij}}{n} < 1 - \epsilon \right]$$
+$$\text{keep}_j = \mathbf{1}\left[\; s_{\min} \le \sum_{i=1}^{n} X_{ij} \le n-1 \;\right]$$
 
-where $\epsilon$ is a small threshold (e.g., $\epsilon = 0.001$). This reduces $p$ from tens of millions to a more manageable but still very large set of informative, discriminative features.
+The upper bound $n-1$ drops zero-variance core-genome k-mers. The lower bound
+$s_{\min}$ (minimum support) is **data-adaptive** rather than a fixed count, so the
+same configuration behaves sensibly across antibiotics/organisms of very different
+sizes:
+
+$$s_{\min} = \max\!\left(\, s_{\text{floor}},\; \lceil \rho \cdot n \rceil \,\right)$$
+
+with an absolute noise floor $s_{\text{floor}} = 5$ (removes singleton/sequencing-error
+k-mers regardless of $n$) and a prevalence fraction $\rho = 0.01$ (1%). Thus a large
+dataset (e.g. $n=4373$ → $s_{\min}=44$) gets aggressive de-confounding of the rare,
+often lineage-specific tail, while a small one ($n \le 500 → s_{\min}=5$) falls back to
+the floor and keeps all real markers. The 1% floor is deliberately far below the
+$\sim$10%-prevalence a k-mer needs to reach the discriminativeness criterion of the
+background-frequency analysis ($|\Delta\text{prev}| \ge 0.10$), so no individually
+informative marker is discarded — only the noise/confounder tail. An explicit
+`preprocessing.min_support` integer overrides the formula when a fixed value is
+desired. This reduces $p$ from tens of millions to a smaller, more informative set
+while preserving discriminative features.
 
 ---
 
