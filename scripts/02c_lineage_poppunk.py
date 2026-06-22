@@ -78,27 +78,41 @@ def normalize_clusters(clusters_csv, genome_ids, *,
     return pd.DataFrame(rows)
 
 
-def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: int):
-    """create-db -> fit-model; returns the path to PopPUNK's raw clusters CSV."""
-    db_dir = work_dir / "db"
-    fit_dir = work_dir / "fit"
-    # PopPUNK refuses to overwrite silently; clear stale dirs for a clean re-run.
-    for d in (db_dir, fit_dir):
-        shutil.rmtree(d, ignore_errors=True)
+def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: int,
+                *, refine: bool = True, reuse_db: bool = False):
+    """create-db -> fit-model [-> refine]; returns the raw clusters CSV path.
 
-    run_command(f"{poppunk} --create-db --r-files {refs_path} "
-                f"--output {db_dir} --threads {int(threads)}")
-    run_command(f"{poppunk} --fit-model {model} --ref-db {db_dir} "
-                f"--output {fit_dir} --threads {int(threads)}")
+    Uses the canonical single-dir PopPUNK pattern (--output == --ref-db, with
+    --overwrite so a batch job never blocks on a prompt). ``refine`` chains a
+    boundary-refinement step after the initial ``model`` fit — REQUIRED for
+    strain-level resolution: bgmm/dbscan alone collapse E. coli into one giant
+    cluster (~94 %), useless for GroupKFold. ``reuse_db`` skips the expensive
+    re-sketching when the database (created on a previous run) is still present.
+    """
+    db = work_dir / "db"
+    has_sketch = db.exists() and any(db.glob("*.h5"))
+    if reuse_db and has_sketch:
+        print("  ✓ Reusing existing PopPUNK sketch database (skipping --create-db).")
+    else:
+        shutil.rmtree(db, ignore_errors=True)
+        run_command(f"{poppunk} --create-db --r-files {refs_path} "
+                    f"--output {db} --threads {int(threads)}")
 
-    clusters = fit_dir / f"{fit_dir.name}_clusters.csv"   # = fit/fit_clusters.csv
+    run_command(f"{poppunk} --fit-model {model} --ref-db {db} --output {db} "
+                f"--overwrite --threads {int(threads)}")
+    if refine:
+        print("  Refining model boundary for strain-level resolution (bgmm/dbscan "
+              "alone under-cluster)...")
+        run_command(f"{poppunk} --fit-model refine --ref-db {db} --output {db} "
+                    f"--overwrite --threads {int(threads)}")
+
+    clusters = db / f"{db.name}_clusters.csv"   # = db/db_clusters.csv
     if not clusters.exists():
-        found = list(fit_dir.glob("*_clusters.csv"))
+        found = [p for p in db.glob("*_clusters.csv")
+                 if not p.name.endswith("_unword_clusters.csv")]
         if not found:
-            sys.exit(f"ERROR: PopPUNK produced no clusters CSV in {fit_dir}")
-        # Avoid the *_unword_clusters.csv variant (different schema).
-        clusters = next((p for p in found if not p.name.endswith("_unword_clusters.csv")),
-                        found[0])
+            sys.exit(f"ERROR: PopPUNK produced no clusters CSV in {db}")
+        clusters = found[0]
     return clusters
 
 
@@ -112,11 +126,20 @@ def main():
     ap.add_argument("--organism", default=default_org)
     ap.add_argument("--threads", type=int, default=default_threads)
     ap.add_argument("--model", default=lin_cfg.get("model", "bgmm"),
-                    help="PopPUNK --fit-model (bgmm | dbscan). Default from config lineage.model.")
+                    help="PopPUNK initial --fit-model (bgmm | dbscan). Default from config lineage.model.")
+    ap.add_argument("--refine", dest="refine", action="store_true", default=None,
+                    help="Chain a refine step for strain-level resolution (default: "
+                         "config lineage.refine, else on).")
+    ap.add_argument("--no-refine", dest="refine", action="store_false",
+                    help="Use only the initial model (NOT recommended — under-clusters E. coli).")
+    ap.add_argument("--reuse-db", action="store_true",
+                    help="Reuse an existing PopPUNK sketch database from a prior run "
+                         "(skip the expensive --create-db re-sketching).")
     ap.add_argument("--clusters-csv", default=None,
                     help="Skip PopPUNK and normalize an existing raw clusters CSV "
                          "(debug/resume; e.g. a smoke's pp_fit_clusters.csv).")
     args = ap.parse_args()
+    refine = lin_cfg.get("refine", True) if args.refine is None else args.refine
 
     organism = args.organism
     print("=" * 80)
@@ -153,8 +176,10 @@ def main():
         work_dir.mkdir(parents=True, exist_ok=True)
         refs_path = work_dir / "refs.txt"
         write_refs(genome_ids, genomes_dir, refs_path)
-        print(f"  Running PopPUNK (model={args.model}, threads={args.threads})...")
-        raw_clusters = run_poppunk(poppunk, refs_path, work_dir, args.model, args.threads)
+        print(f"  Running PopPUNK (model={args.model}, refine={refine}, "
+              f"reuse_db={args.reuse_db}, threads={args.threads})...")
+        raw_clusters = run_poppunk(poppunk, refs_path, work_dir, args.model, args.threads,
+                                   refine=refine, reuse_db=args.reuse_db)
 
     print(f"  Normalizing clusters (un-mangling '.'→'_') from: {raw_clusters.name}")
     out_df = normalize_clusters(raw_clusters, genome_ids)

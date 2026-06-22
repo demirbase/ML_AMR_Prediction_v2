@@ -192,7 +192,9 @@ unitig:
 # with a lineage cluster; lib/lineage.py then builds GroupKFold folds so an entire
 # lineage stays on one side of train/test (no lineage leakage — ROADMAP §0.1).
 lineage:
-  model: "bgmm"          # PopPUNK --fit-model: bgmm | dbscan (single-step). refine = future.
+  model: "bgmm"          # PopPUNK initial --fit-model: bgmm | dbscan
+  refine: true           # chain PopPUNK refine for strain-level resolution (REQUIRED:
+                         # bgmm/dbscan alone collapse E. coli into one ~94% mega-cluster)
   threads: null          # null -> preprocessing.threads
   # ── consumed by the CV step (lib/lineage, 06/07b wiring) ──
   n_splits: 5            # StratifiedGroupKFold folds (ROADMAP §0.1: 5-10)
