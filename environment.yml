@@ -46,9 +46,18 @@ dependencies:
   - certifi>=2021.10.8   # CA bundle for BV-BRC HTTPS (step 00a)
 
   # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
-  - kmc>=3.2
+  - kmc>=3.2          # k-mer counting (02/02b QC + raw-k-mer 03 baseline)
   - blast>=2.12
   - nextflow>=22.10
+
+  # ── Unitig representation (ROADMAP §0.1 M12 — replaces raw k-mers) ─────────
+  # bcalm builds the compacted de Bruijn graph (unitigs); unitig-caller (pyseer
+  # ecosystem) calls per-sample unitig presence/absence -> binary matrix input
+  # for the same downstream XGBoost. KMC above is kept for QC/spectra only.
+  # NOTE: adding these REQUIRES rebuilding the Apptainer container on TRUBA
+  # (`apptainer build --fakeroot amr.sif amr.def`; amr.def pulls this file).
+  - bcalm>=2.2
+  - unitig-caller>=1.2
 
   # ── Dev / tests ───────────────────────────────────────────────────────────
   - pytest>=7.0
