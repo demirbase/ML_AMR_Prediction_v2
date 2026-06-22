@@ -44,6 +44,9 @@ dependencies:
   - pyyaml>=5.4
   - tqdm>=4.62
   - certifi>=2021.10.8   # CA bundle for BV-BRC HTTPS (step 00a)
+  # PopPUNK imports the legacy `pkg_resources`, which setuptools REMOVED in
+  # v81 (2025). Pin below that so the module exists in the container.
+  - setuptools<81
 
   # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
   - kmc>=3.2          # k-mer counting (02/02b QC + raw-k-mer 03 baseline)
@@ -65,6 +68,10 @@ dependencies:
   # the reported AUC is not inflated by lineage leakage (lib/lineage.py).
   # NOTE: adding this REQUIRES rebuilding the Apptainer container on TRUBA.
   - poppunk>=2.6
+  # PopPUNK 2.7.x still imports the legacy `pkg_resources`, which setuptools
+  # removed in v81 -> pin below that so the module stays importable
+  # (ModuleNotFoundError: No module named 'pkg_resources' otherwise).
+  - setuptools<81
 
   # ── Dev / tests ───────────────────────────────────────────────────────────
   - pytest>=7.0
