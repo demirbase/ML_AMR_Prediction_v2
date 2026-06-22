@@ -56,8 +56,8 @@ def test_load_lineage_aligns_to_genome_order(tmp_path):
     genomes = tmp_path / "genomes_testdrug.csv"
     pd.DataFrame({"Genome ID": ["562.3", "562.1", "562.2"]}).to_csv(genomes, index=False)
     clusters = tmp_path / "poppunk_clusters.csv"
-    # PopPUNK-style columns (Taxon, Cluster); deliberately different row order.
-    pd.DataFrame({"Taxon": ["562.1", "562.2", "562.3"],
+    # Canonical 02c output columns (Genome ID, Cluster); different row order.
+    pd.DataFrame({"Genome ID": ["562.1", "562.2", "562.3"],
                   "Cluster": [7, 7, 42]}).to_csv(clusters, index=False)
 
     groups = lineage.load_lineage(genomes, clusters)
@@ -69,7 +69,7 @@ def test_load_lineage_missing_genome_raises(tmp_path):
     genomes = tmp_path / "g.csv"
     pd.DataFrame({"Genome ID": ["a", "b", "c"]}).to_csv(genomes, index=False)
     clusters = tmp_path / "c.csv"
-    pd.DataFrame({"Taxon": ["a", "b"], "Cluster": [1, 1]}).to_csv(clusters, index=False)
+    pd.DataFrame({"Genome ID": ["a", "b"], "Cluster": [1, 1]}).to_csv(clusters, index=False)
     with pytest.raises(ValueError):
         lineage.load_lineage(genomes, clusters)
     # ...but allow_missing pools the gap

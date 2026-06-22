@@ -35,15 +35,17 @@ import pandas as pd
 
 def load_lineage(genomes_csv: str | Path, clusters_csv: str | Path, *,
                  genome_col: str = "Genome ID",
-                 clusters_genome_col: str = "Taxon",
+                 clusters_genome_col: str = "Genome ID",
                  cluster_col: str = "Cluster",
                  allow_missing: bool = False,
                  missing_label: str = "UNCLUSTERED") -> np.ndarray:
     """Return per-genome lineage labels aligned to ``genomes_csv`` row order.
 
     ``genomes_csv`` is the pipeline's ``genomes_{ab}.csv`` (column ``genome_col``),
-    which fixes the row order of the matrix; ``clusters_csv`` is PopPUNK's cluster
-    table (columns ``clusters_genome_col`` -> ``cluster_col``, default Taxon/Cluster).
+    which fixes the row order of the matrix; ``clusters_csv`` is the CANONICAL
+    lineage table written by 02c (``poppunk_clusters.csv``: ``Genome ID,Cluster``,
+    already un-mangled — PopPUNK rewrites '.'→'_' in its raw Taxon column, which
+    02c reverses, so here both files key on the same ``Genome ID``).
 
     Every genome in ``genomes_csv`` must have a cluster unless ``allow_missing`` —
     a missing genome means PopPUNK never saw it (re-run clustering). With

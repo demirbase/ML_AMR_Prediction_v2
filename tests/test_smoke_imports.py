@@ -20,6 +20,7 @@ PIPELINE_SCRIPTS = [
     "02_kmer_extraction.py",
     "02p_kmer_parallel.py",
     "02b_global_qc_analysis.py",
+    "02c_lineage_poppunk.py",
     "03_matrix_construction.py",
     "03u_unitig_matrix.py",
     "03b_matrix_validation_qc.py",

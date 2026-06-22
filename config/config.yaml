@@ -97,6 +97,9 @@ paths_organism:
   raw_genomes_dir:  "data/raw/{organism}/genomes"
   metadata_file:    "data/external/{organism}/metadata/amr_phenotypes.csv"
   kmc_outputs_dir:  "data/interim/{organism}/kmc_outputs"
+  # PopPUNK lineage labels (02c) — organism-level, antibiotic-independent (one
+  # clustering reused by every antibiotic's lineage-aware CV).
+  lineage_dir:      "data/processed/{organism}/lineage"
 
   # ── Organism + antibiotic-scoped ───────────────────────────────────────────
   matrix_dir:           "data/processed/{organism}/{antibiotic}/matrix"
@@ -181,6 +184,19 @@ unitig:
   min_support: 10
   # unitig-caller thread count. null -> fall back to preprocessing.threads.
   threads: null
+
+# ----------------------------------------------------------------------------
+# LINEAGE-AWARE CV (ROADMAP §0.1 M2 — PopPUNK clusters + GroupKFold)
+# ----------------------------------------------------------------------------
+# 02c runs PopPUNK once per organism (antibiotic-independent) to label each genome
+# with a lineage cluster; lib/lineage.py then builds GroupKFold folds so an entire
+# lineage stays on one side of train/test (no lineage leakage — ROADMAP §0.1).
+lineage:
+  model: "bgmm"          # PopPUNK --fit-model: bgmm | dbscan (single-step). refine = future.
+  threads: null          # null -> preprocessing.threads
+  # ── consumed by the CV step (lib/lineage, 06/07b wiring) ──
+  n_splits: 5            # StratifiedGroupKFold folds (ROADMAP §0.1: 5-10)
+  min_cluster_size: 10   # pool clusters smaller than this (collapse_rare_clusters); 0/1 = keep all
 
 # ----------------------------------------------------------------------------
 # MACHINE LEARNING TRAINING PARAMETERS
