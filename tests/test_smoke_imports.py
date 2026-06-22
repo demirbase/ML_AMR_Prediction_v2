@@ -21,6 +21,7 @@ PIPELINE_SCRIPTS = [
     "02p_kmer_parallel.py",
     "02b_global_qc_analysis.py",
     "03_matrix_construction.py",
+    "03u_unitig_matrix.py",
     "03b_matrix_validation_qc.py",
     "04_optimization.py",
     "05_model_training.py",

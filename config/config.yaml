@@ -152,6 +152,28 @@ preprocessing:
   # Binary is preferred for assembled genomes
 
 # ----------------------------------------------------------------------------
+# UNITIG REPRESENTATION (ROADMAP §0.1 M12 — replaces raw k-mers downstream)
+# ----------------------------------------------------------------------------
+# Consumed by 03u_unitig_matrix.py. unitig-caller (Bifrost backend) builds the
+# population compacted de Bruijn graph and emits a genome×unitig presence/absence
+# matrix in the SAME chunked .npz contract as 03 (features.txt / y_{ab}.csv /
+# genomes_{ab}.csv / X_{ab}_part_*.npz), so 03b/04/05/06/07/07b read it unchanged.
+# KMC (02/02b) is kept for QC/spectra only. Output is written to a SEPARATE
+# sibling dir (out_subdir) so the raw-k-mer 'matrix' baseline is never overwritten.
+unitig:
+  # Sibling of data/processed/{organism}/{antibiotic}/matrix. Keep distinct from
+  # "matrix" so the raw-k-mer baseline (for the thesis unitig-vs-k-mer table) stays.
+  out_subdir: "matrix_unitig"
+  # ABSOLUTE minimum genome count to keep a unitig (ROADMAP §0.7 risk-4: use an
+  # absolute floor, NOT a proportional one, so a rare-but-real plasmid unitig is
+  # not dropped). Zero-variance core (present in every genome) is always dropped.
+  # NOTE: this is tuned for the full ~4000-genome run; lower it (e.g. --min-support
+  # 1) for tiny datasets/smoke tests via the CLI flag.
+  min_support: 10
+  # unitig-caller thread count. null -> fall back to preprocessing.threads.
+  threads: null
+
+# ----------------------------------------------------------------------------
 # MACHINE LEARNING TRAINING PARAMETERS
 # ----------------------------------------------------------------------------
 training:

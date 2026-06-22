@@ -102,7 +102,8 @@ Paths are resolved through `scripts/lib/config.py:resolve_path()` from the
 | :--- | :--- | :--- |
 | 01 | `01_data_validation.py` / `01b_…` | Validate metadata, class balance, EDA plots |
 | 02 | `02_kmer_extraction.py` / `02b_…` | KMC k-mer counting + global QC |
-| 03 | `03_matrix_construction.py` / `03b_…` | Sparse binary matrices + matrix QC |
+| 03 | `03_matrix_construction.py` / `03b_…` | Sparse binary k-mer matrices + matrix QC |
+| 03u | `03u_unitig_matrix.py` | Unitig (unitig-caller) presence/absence matrix — same chunk contract, `matrix_unitig/` (ROADMAP §0 M12) |
 | 04 | `04_optimization.py` | Optuna Bayesian HPO → `config_{antibiotic}.yaml` + run metadata |
 | 05 | `05_model_training.py` | Full-data XGBoost boosting over a streaming `QuantileDMatrix` → model + `manifest.json` |
 | 06 | `06_evaluation.py` | Metrics, ROC/PR, calibration, bootstrap CIs |
