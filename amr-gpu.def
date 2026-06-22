@@ -1,0 +1,35 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+# GPU-enabled build of the AMR pipeline container.
+# Identical to the CPU build (environment.yml) except XGBoost is replaced with
+# the CUDA-enabled PyPI wheel: conda-forge ships a CPU-only libxgboost
+# (build_info USE_CUDA=False), which cannot use a GPU. The PyPI wheel is built
+# with CUDA; the NVIDIA driver is injected at run time via `apptainer exec --nv`.
+#
+# Build (on a node/host with internet + fakeroot, e.g. an interactive debug node):
+#   export APPTAINER_TMPDIR=/tmp/apptmp APPTAINER_CACHEDIR=/tmp/apcache
+#   mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+#   apptainer build --fakeroot amr-gpu.sif amr-gpu.def
+#
+# Run with GPU:
+#   apptainer exec --nv amr-gpu.sif python scripts/05_model_training.py --organism ecoli
+# and set config xgboost_params.device: cuda + SLURM --gres=gpu:1.
+
+%files
+    environment.yml /opt/environment.yml
+
+%post
+    mamba env create -f /opt/environment.yml -p /opt/amr-env
+    # Swap the conda CPU-only xgboost for the CUDA-enabled PyPI wheel (pinned to
+    # match the version the pipeline was developed/tested against).
+    /opt/amr-env/bin/pip install --no-cache-dir --force-reinstall "xgboost==3.2.0"
+    mamba clean -a -y
+
+%environment
+    export PATH=/opt/amr-env/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+%runscript
+    exec python "$@"
