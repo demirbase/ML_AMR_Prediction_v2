@@ -59,5 +59,12 @@ dependencies:
   - bcalm>=2.2
   - unitig-caller>=1.2
 
+  # ── Lineage / population structure (ROADMAP §0.1 M2 — lineage-aware CV) ────
+  # PopPUNK clusters genomes into lineages (organism-level, antibiotic-independent)
+  # so train/test folds can keep an entire lineage on one side (GroupKFold) and
+  # the reported AUC is not inflated by lineage leakage (lib/lineage.py).
+  # NOTE: adding this REQUIRES rebuilding the Apptainer container on TRUBA.
+  - poppunk>=2.6
+
   # ── Dev / tests ───────────────────────────────────────────────────────────
   - pytest>=7.0
