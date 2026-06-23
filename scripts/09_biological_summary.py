@@ -20,6 +20,7 @@ try/except so the script never crashes from network errors.
 # ============================================================================
 # LIBRARY IMPORTS
 # ============================================================================
+import os
 import sys
 import re
 import time
@@ -120,8 +121,11 @@ def read_blast_tsv(path):
 def configure_entrez(config):
     """Configure NCBI Entrez identity from config; warn (don't crash) if unset."""
     ncbi_cfg = config.get('ncbi', {}) or {}
-    email = (ncbi_cfg.get('entrez_email') or "").strip()
-    api_key = (ncbi_cfg.get('api_key') or "").strip()
+    # AMR_ENTREZ_EMAIL / AMR_ENTREZ_API_KEY env overrides let HPC set the Entrez
+    # identity without editing config.yaml (which carries manual HPC tuning that
+    # must not be overwritten). Env wins over config; both fall back gracefully.
+    email = (os.environ.get('AMR_ENTREZ_EMAIL') or ncbi_cfg.get('entrez_email') or "").strip()
+    api_key = (os.environ.get('AMR_ENTREZ_API_KEY') or ncbi_cfg.get('api_key') or "").strip()
 
     if not email:
         print("WARNING: ncbi.entrez_email is not set in config.yaml.")

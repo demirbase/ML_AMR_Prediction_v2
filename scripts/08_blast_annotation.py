@@ -74,6 +74,7 @@ TOP_N             = config['analysis']['top_n_features']
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
 from lib.config import resolve_path
+from lib.registry import get_organism
 
 # Resolve BLAST parameters from config
 blast_cfg   = config.get('blast', {})
@@ -87,6 +88,26 @@ THREADS     = blast_cfg.get('threads',   8)
 # 'blastn' for longer. Picking by feature type was wrong — unitigs can be short
 # (~30-50 bp), where 'blastn' finds nothing. blast.task overrides the auto choice.
 BLAST_TASK_OVERRIDE = blast_cfg.get('task')
+
+# NCBI remote pass parameters — DECOUPLED from the local CARD pass. The public
+# NCBI BLAST server kills 'blastn-short' + word_size 7 over nt with SIGXCPU, so
+# the remote pass uses 'blastn' + word_size 11 (sufficient for the high-identity
+# genomic-context hits we want) and restricts the search to the study organism.
+NCBI_TASK       = blast_cfg.get('ncbi_task',       'blastn')
+NCBI_WORD_SIZE  = blast_cfg.get('ncbi_word_size',  11)
+MAX_TARGET_SEQS = blast_cfg.get('max_target_seqs', 50)
+
+
+def organism_entrez_query(organism_id):
+    """Build an NCBI entrez_query that restricts the remote search to the study
+    organism, using the registry ``display_name`` (scientific name) — never
+    hardcoded, so it auto-adjusts per organism. Returns '' (no restriction) if
+    the organism is unknown or has no display_name."""
+    try:
+        name = (get_organism(organism_id).get('display_name') or "").strip()
+    except Exception:
+        return ""
+    return f"{name}[organism]" if name else ""
 
 
 def choose_blast_task(fasta_path, override=None, short_max=50):
@@ -243,19 +264,28 @@ def main() -> None:
     # blastn-short needs a small word_size (7) to seed short queries; the config
     # word_size (11+) truncated/missed full-length hits on ~30-50 bp unitigs.
     word_size = 7 if blast_task == "blastn-short" else WORD_SIZE
+    # NCBI remote pass: organism-restricted entrez_query (registry display_name).
+    entrez_query = organism_entrez_query(ORGANISM)
     cmd = [
         "nextflow", "run", str(PIPELINE_PATH),
-        "--fasta",      str(FASTA_INPUT),
-        "--card_db",    str(CARD_DB),
-        "--outdir",     str(EXPLAINABILITY_DIR),
-        "--antibiotic", TARGET_ANTIBIOTIC,
-        "--threads",    str(THREADS),
-        "--evalue",     str(EVALUE),
-        "--word_size",  str(word_size),
-        "--task",       str(blast_task),
+        "--fasta",           str(FASTA_INPUT),
+        "--card_db",         str(CARD_DB),
+        "--outdir",          str(EXPLAINABILITY_DIR),
+        "--antibiotic",      TARGET_ANTIBIOTIC,
+        "--threads",         str(THREADS),
+        "--evalue",          str(EVALUE),
+        "--word_size",       str(word_size),     # CARD (local) pass
+        "--task",            str(blast_task),    # CARD (local) pass
+        "--ncbi_task",       str(NCBI_TASK),     # NCBI (remote) pass — decoupled
+        "--ncbi_word_size",  str(NCBI_WORD_SIZE),
+        "--max_target_seqs", str(MAX_TARGET_SEQS),
+        "--entrez_query",    entrez_query,
     ]
-    print(f"  BLAST task: {blast_task} | word_size: {word_size} "
+    print(f"  CARD task: {blast_task} | word_size: {word_size} "
           f"(auto from median query length; override=blast.task)")
+    print(f"  NCBI task: {NCBI_TASK} | word_size: {NCBI_WORD_SIZE} | "
+          f"max_target_seqs: {MAX_TARGET_SEQS} | "
+          f"entrez_query: {entrez_query or '(none)'}")
 
     print(f"  Command: {' '.join(cmd)}\n")
 
