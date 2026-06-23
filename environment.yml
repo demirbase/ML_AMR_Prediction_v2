@@ -32,6 +32,10 @@ dependencies:
   - xgboost>=1.5
   - optuna>=2.10
   - joblib>=1.0
+  # SHAP (TreeSHAP) feature importance on the restricted candidate model
+  # (ROADMAP §0.1 M4 — Gain -> SHAP; only on the candidate set, never the full
+  # 4.9M-feature matrix). Rebuild amr.sif when the M4/CPSS work lands.
+  - shap>=0.44
 
   # ── Visualisation ─────────────────────────────────────────────────────────
   - matplotlib>=3.4

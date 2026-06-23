@@ -1,0 +1,42 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+# ============================================================================
+# amr-tools.sif — Block-2 validation / QC container (ROADMAP §0 M13/M14/M15)
+# ============================================================================
+# Separate from the core amr.sif so the audited pipeline env stays stable and
+# these heavier, independent tools don't risk a dependency-solve conflict.
+# Mirrors amr.def/amr-gpu.def: condaforge/miniforge3 + an env file via %files.
+#
+# Build (on a debug node with internet + fakeroot; build sandbox can't bind /arf):
+#   unset APPTAINER_BINDPATH
+#   export APPTAINER_TMPDIR=/tmp/apptmp APPTAINER_CACHEDIR=/tmp/apcache
+#   mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+#   cd $AMR_HOME
+#   apptainer build --fakeroot $AMR_WORK/containers/amr-tools.sif amr-tools.def
+#
+# DATABASES (download ONCE onto scratch after build; NOT baked into the image):
+#   export APPTAINER_BINDPATH=/arf
+#   apptainer exec $AMR_WORK/containers/amr-tools.sif \
+#       checkm2 database --download --path $AMR_WORK/data/external/checkm2_db
+#   apptainer exec $AMR_WORK/containers/amr-tools.sif amrfinder -u      # AMRFinderPlus DB
+#   # ResFinder DB: git clone https://bitbucket.org/genomicepidemiology/resfinder_db \
+#   #   into $AMR_WORK/data/external/resfinder_db
+#
+# If the combined env fails to solve, split per tool (separate .yml/.sif) and
+# relax/pin versions — same approach as setuptools<81 for PopPUNK.
+
+%files
+    environment-tools.yml /opt/environment-tools.yml
+
+%post
+    mamba env create -f /opt/environment-tools.yml -p /opt/amr-tools-env
+    mamba clean -a -y
+
+%environment
+    export PATH=/opt/amr-tools-env/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+%runscript
+    exec "$@"

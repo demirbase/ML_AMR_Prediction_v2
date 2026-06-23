@@ -1,0 +1,38 @@
+# ============================================================================
+# Block-2 validation / QC tools  (ROADMAP §0 MUST-haves M13 / M14 / M15)
+# ============================================================================
+# A SEPARATE conda env / Apptainer container (amr-tools.sif) from the core
+# pipeline (environment.yml / amr.sif). Kept separate on purpose:
+#   - these tools are independent of the core ML pipeline (they run as their own
+#     steps), so they should not destabilise the audited core environment;
+#   - they pull heavy, opinionated dependency trees (CheckM2 ML stack, kma,
+#     diamond, ...) that risk a solve conflict if merged into amr.sif.
+#
+# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH` first):
+#   apptainer build --fakeroot $AMR_WORK/containers/amr-tools.sif amr-tools.def
+#
+# DATABASES are NOT baked into the image (large, versioned separately). Download
+# once onto scratch AFTER building (see amr-tools.def header for commands):
+#   CheckM2 DIAMOND DB (~1.4 GB), AMRFinderPlus DB, ResFinder DB.
+#
+# If the combined solve CONFLICTS (likely candidates: checkm2's ML stack vs the
+# rest), split into per-tool envs/containers — exactly how we handle conflicts
+# elsewhere (cf. setuptools<81 for PopPUNK). Pin/relax versions then.
+# ============================================================================
+name: amr-tools
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.9,<3.12          # CheckM2/AMRFinderPlus are happier below 3.12
+
+  # ── M14: population-structure-aware association (unitig/k-mer significance) ──
+  - pyseer>=1.3                 # LMM + Bonferroni over unitigs (uses PopPUNK distances)
+
+  # ── M15: genome quality control ─────────────────────────────────────────────
+  - checkm2>=1.0                # completeness / contamination (needs DIAMOND DB)
+  - quast>=5.2                  # N50, contig count, assembly stats
+
+  # ── M13: external concordance (head-to-head reference callers) ──────────────
+  - ncbi-amrfinderplus>=3.12    # AMRFinderPlus (acquired genes + point mutations)
+  - resfinder>=4.4              # ResFinder (CGE; pulls kma)
