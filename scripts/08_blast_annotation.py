@@ -82,13 +82,27 @@ CARD_DB     = CARD_DB_DIR / blast_cfg.get('card_db_name', 'card')
 EVALUE      = blast_cfg.get('evalue',    10)
 WORD_SIZE   = blast_cfg.get('word_size', 11)
 THREADS     = blast_cfg.get('threads',   8)
-# BLAST task depends on the QUERY length: unitigs (07 on the unitig matrix) are
-# long, variable-length sequences -> 'blastn'; raw k-mers are <30 bp -> the
-# short-read-tuned 'blastn-short'. Auto-selected from the feature representation
-# (env AMR_FEATURE_REPR or config preprocessing.feature_repr); blast.task overrides.
-_FEATURE_REPR = (os.environ.get('AMR_FEATURE_REPR')
-                 or config.get('preprocessing', {}).get('feature_repr', 'kmer'))
-BLAST_TASK  = blast_cfg.get('task') or ('blastn' if _FEATURE_REPR == 'unitig' else 'blastn-short')
+# BLAST task is chosen from the ACTUAL query length (see choose_blast_task): the
+# 'blastn-short' params are tuned for queries <50 bp (k-mers AND short unitigs),
+# 'blastn' for longer. Picking by feature type was wrong — unitigs can be short
+# (~30-50 bp), where 'blastn' finds nothing. blast.task overrides the auto choice.
+BLAST_TASK_OVERRIDE = blast_cfg.get('task')
+
+
+def choose_blast_task(fasta_path, override=None, short_max=50):
+    """Pick the BLAST task from the longest query in the FASTA: 'blastn-short' if
+    every query is short (< short_max bp), else 'blastn'. ``override`` (config
+    blast.task) wins when set."""
+    if override:
+        return override
+    max_len = 0
+    try:
+        for line in open(fasta_path, encoding='utf-8'):
+            if not line.startswith('>'):
+                max_len = max(max_len, len(line.strip()))
+    except OSError:
+        return 'blastn-short'
+    return 'blastn-short' if (max_len and max_len < short_max) else 'blastn'
 
 # Resolve I/O paths (organism-aware)
 EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
@@ -218,6 +232,7 @@ def main() -> None:
     print("\n[STEP 4/4] Launching Nextflow pipeline (CARD + NCBI in parallel)...")
     print("=" * 80)
 
+    blast_task = choose_blast_task(FASTA_INPUT, BLAST_TASK_OVERRIDE)
     cmd = [
         "nextflow", "run", str(PIPELINE_PATH),
         "--fasta",      str(FASTA_INPUT),
@@ -227,9 +242,9 @@ def main() -> None:
         "--threads",    str(THREADS),
         "--evalue",     str(EVALUE),
         "--word_size",  str(WORD_SIZE),
-        "--task",       str(BLAST_TASK),
+        "--task",       str(blast_task),
     ]
-    print(f"  BLAST task: {BLAST_TASK} (feature_repr={_FEATURE_REPR})")
+    print(f"  BLAST task: {blast_task} (auto from max query length; override=blast.task)")
 
     print(f"  Command: {' '.join(cmd)}\n")
 

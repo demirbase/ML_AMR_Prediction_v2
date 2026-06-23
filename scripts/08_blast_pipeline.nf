@@ -35,9 +35,9 @@ params.outdir     = "results/${params.antibiotic}/05_explainability"
 params.threads    = 8
 params.evalue     = 10
 params.word_size  = 11
-// BLAST task: 'blastn-short' for k-mer queries (<30 bp), 'blastn' for unitigs
-// (long, variable-length). 08_blast_annotation.py sets this from the feature
-// representation (unitig -> blastn). word_size 11 is sensitive for both.
+// BLAST task: 'blastn-short' for short queries (<50 bp — k-mers AND short
+// unitigs), 'blastn' for longer. 08_blast_annotation.py sets this from the
+// ACTUAL longest query in the FASTA. word_size 11 is sensitive for both.
 params.task       = "blastn-short"
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,9 @@ params.task       = "blastn-short"
 // qlen (query length) is emitted before stitle so 09 can compute coverage as
 // alignment_length / query_length — correct for variable-length unitig queries
 // (k=21 is wrong for unitigs). stitle stays last (free-text, tab-safe).
-def OUTFMT = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen stitle"
+// NOTE: a params assignment (not a top-level `def`) — newer Nextflow's strict
+// parser rejects top-level statements mixed with process declarations.
+params.outfmt = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen stitle"
 
 // ---------------------------------------------------------------------------
 // PROCESS 1: Local BLAST against CARD database
@@ -69,7 +71,7 @@ process CARD_BLAST {
         -db          ${params.card_db} \\
         -task        ${params.task} \\
         -dust        no \\
-        -outfmt      "${OUTFMT}" \\
+        -outfmt      "${params.outfmt}" \\
         -evalue      ${params.evalue} \\
         -word_size   ${params.word_size} \\
         -num_threads ${params.threads} \\
@@ -99,7 +101,7 @@ process NCBI_REMOTE_BLAST {
         -remote \\
         -task      ${params.task} \\
         -dust      no \\
-        -outfmt    "${OUTFMT}" \\
+        -outfmt    "${params.outfmt}" \\
         -evalue    ${params.evalue} \\
         -word_size ${params.word_size} \\
         -out       04_ncbi_blast_results_${params.antibiotic}.tsv
