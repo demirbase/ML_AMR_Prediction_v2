@@ -70,6 +70,20 @@ def get_target(args: Any = None, config: dict[str, Any] | None = None) -> tuple[
     return organism, antibiotic
 
 
+def env_bool(name: str, default: bool) -> bool:
+    """Read a boolean from environment variable ``name`` (``1/true/yes/on`` =>
+    True, ``0/false/no/off`` => False), falling back to ``default`` when unset.
+
+    Lets an HPC job flip a config boolean (e.g. ``AMR_EXTERNAL_MEMORY=false`` to
+    train the small unitig matrix IN-CORE — much faster than spilling to scratch)
+    without editing a manually-tuned config.yaml.
+    """
+    v = os.environ.get(name)
+    if v is None:
+        return bool(default)
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
 def resolve_path(key: str, organism: str | None = None, antibiotic: str | None = None,
                  run_id: str | None = None, config: dict[str, Any] | None = None) -> Path:
     """

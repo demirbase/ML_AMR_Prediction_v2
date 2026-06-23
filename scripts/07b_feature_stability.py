@@ -51,7 +51,7 @@ from scipy.sparse import load_npz
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedShuffleSplit
 
-from lib.config import load_config, resolve_path
+from lib.config import load_config, resolve_path, env_bool
 from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 
 SEEDS = [42, 123, 777, 1024, 2025]
@@ -252,7 +252,7 @@ def main():
     print(f"  Samples: {n_total} | chunks: {len(offsets)} | trees/seed: {total_trees} | top-N: {TOP_N}")
 
     max_bin = int(params.get('max_bin', 2))
-    use_extmem = bool(config['training'].get('external_memory', True))
+    use_extmem = env_bool('AMR_EXTERNAL_MEMORY', config['training'].get('external_memory', True))
     print(f"  external_memory={use_extmem}")
 
     # Resampling scheme: lineage-aware StratifiedGroupKFold when PopPUNK labels

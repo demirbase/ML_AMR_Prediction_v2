@@ -50,7 +50,7 @@ from utils import get_y_chunk
 from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 # MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
 from lib import run_metadata as rm
-from lib.config import resolve_path
+from lib.config import resolve_path, env_bool
 
 
 # ============================================================================
@@ -283,7 +283,7 @@ def final_training(best_params, train_files, y_all):
 
     es_rounds = int(config['xgboost_params'].get('early_stopping_rounds', 50))
     max_rounds = int(config['training'].get('max_boost_rounds', 5000))
-    use_extmem = bool(config['training'].get('external_memory', True))
+    use_extmem = env_bool('AMR_EXTERNAL_MEMORY', config['training'].get('external_memory', True))
     max_train_chunks = config['training'].get('max_train_chunks', None)
     print(f"early_stopping_rounds={es_rounds} | max_boost_rounds={max_rounds} | "
           f"external_memory={use_extmem}")
