@@ -1,0 +1,20 @@
+# ============================================================================
+# CheckM2 — genome completeness/contamination QC (ROADMAP §0.2 M15)
+# ============================================================================
+# Its OWN env/container (amr-checkm2.sif): CheckM2 pins python <3.9, which
+# conflicts with pyseer/AMRFinderPlus/ResFinder (>=3.9) — so it can't share the
+# amr-tools env. No python pin here; conda resolves CheckM2's required ~3.8.
+#
+# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH`):
+#   apptainer build --fakeroot $AMR_WORK/containers/amr-checkm2.sif amr-checkm2.def
+#
+# DIAMOND DB (~1.4 GB, NOT baked in) — download once onto scratch after build:
+#   apptainer exec $AMR_WORK/containers/amr-checkm2.sif \
+#       checkm2 database --download --path $AMR_WORK/data/external/checkm2_db
+# ============================================================================
+name: amr-checkm2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - checkm2>=1.0                # completeness / contamination (needs DIAMOND DB)

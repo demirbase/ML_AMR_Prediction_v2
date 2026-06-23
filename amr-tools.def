@@ -15,16 +15,17 @@ From: condaforge/miniforge3:latest
 #   cd $AMR_HOME
 #   apptainer build --fakeroot $AMR_WORK/containers/amr-tools.sif amr-tools.def
 #
+# NOTE: CheckM2 is NOT here — it pins python <3.9 and conflicts with these
+# (>=3.9), so it has its own container (amr-checkm2.def / environment-checkm2.yml).
+#
 # DATABASES (download ONCE onto scratch after build; NOT baked into the image):
 #   export APPTAINER_BINDPATH=/arf
-#   apptainer exec $AMR_WORK/containers/amr-tools.sif \
-#       checkm2 database --download --path $AMR_WORK/data/external/checkm2_db
 #   apptainer exec $AMR_WORK/containers/amr-tools.sif amrfinder -u      # AMRFinderPlus DB
 #   # ResFinder DB: git clone https://bitbucket.org/genomicepidemiology/resfinder_db \
 #   #   into $AMR_WORK/data/external/resfinder_db
 #
-# If the combined env fails to solve, split per tool (separate .yml/.sif) and
-# relax/pin versions — same approach as setuptools<81 for PopPUNK.
+# If this 4-tool env still fails to solve, split further per tool — same
+# approach as setuptools<81 for PopPUNK.
 
 %files
     environment-tools.yml /opt/environment-tools.yml

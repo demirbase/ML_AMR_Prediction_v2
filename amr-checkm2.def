@@ -1,0 +1,35 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+# ============================================================================
+# amr-checkm2.sif — CheckM2 genome QC (ROADMAP §0.2 M15)
+# ============================================================================
+# Separate from amr-tools.sif because CheckM2 pins python <3.9, incompatible
+# with pyseer/AMRFinderPlus/ResFinder (>=3.9). See environment-checkm2.yml.
+#
+# Build (debug node, internet + fakeroot; build sandbox can't bind /arf):
+#   unset APPTAINER_BINDPATH
+#   export APPTAINER_TMPDIR=/tmp/apptmp APPTAINER_CACHEDIR=/tmp/apcache
+#   mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+#   cd $AMR_HOME
+#   apptainer build --fakeroot $AMR_WORK/containers/amr-checkm2.sif amr-checkm2.def
+#
+# DIAMOND DB (~1.4 GB, NOT baked in) — download once after build:
+#   export APPTAINER_BINDPATH=/arf
+#   apptainer exec $AMR_WORK/containers/amr-checkm2.sif \
+#       checkm2 database --download --path $AMR_WORK/data/external/checkm2_db
+
+%files
+    environment-checkm2.yml /opt/environment-checkm2.yml
+
+%post
+    mamba env create -f /opt/environment-checkm2.yml -p /opt/amr-checkm2-env
+    mamba clean -a -y
+
+%environment
+    export PATH=/opt/amr-checkm2-env/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+%runscript
+    exec "$@"

@@ -24,13 +24,14 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python>=3.9,<3.12          # CheckM2/AMRFinderPlus are happier below 3.12
+  # No python pin: let conda pick a version all four tools accept. CheckM2 is
+  # intentionally NOT here — it pins python <3.9, which conflicts with the rest,
+  # so it lives in its own container (environment-checkm2.yml / amr-checkm2.def).
 
   # ── M14: population-structure-aware association (unitig/k-mer significance) ──
   - pyseer>=1.3                 # LMM + Bonferroni over unitigs (uses PopPUNK distances)
 
-  # ── M15: genome quality control ─────────────────────────────────────────────
-  - checkm2>=1.0                # completeness / contamination (needs DIAMOND DB)
+  # ── M15: genome quality control (assembly stats) ────────────────────────────
   - quast>=5.2                  # N50, contig count, assembly stats
 
   # ── M13: external concordance (head-to-head reference callers) ──────────────
