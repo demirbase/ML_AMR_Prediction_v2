@@ -35,6 +35,10 @@ params.outdir     = "results/${params.antibiotic}/05_explainability"
 params.threads    = 8
 params.evalue     = 10
 params.word_size  = 11
+// BLAST task: 'blastn-short' for k-mer queries (<30 bp), 'blastn' for unitigs
+// (long, variable-length). 08_blast_annotation.py sets this from the feature
+// representation (unitig -> blastn). word_size 11 is sensitive for both.
+params.task       = "blastn-short"
 
 // ---------------------------------------------------------------------------
 // Shared BLAST output format: standard tabular + extra annotation fields
@@ -60,7 +64,7 @@ process CARD_BLAST {
     blastn \\
         -query       ${fasta} \\
         -db          ${params.card_db} \\
-        -task        blastn-short \\
+        -task        ${params.task} \\
         -dust        no \\
         -outfmt      "${OUTFMT}" \\
         -evalue      ${params.evalue} \\
@@ -90,7 +94,7 @@ process NCBI_REMOTE_BLAST {
         -query     ${fasta} \\
         -db        nt \\
         -remote \\
-        -task      blastn-short \\
+        -task      ${params.task} \\
         -dust      no \\
         -outfmt    "${OUTFMT}" \\
         -evalue    ${params.evalue} \\

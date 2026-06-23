@@ -82,6 +82,13 @@ CARD_DB     = CARD_DB_DIR / blast_cfg.get('card_db_name', 'card')
 EVALUE      = blast_cfg.get('evalue',    10)
 WORD_SIZE   = blast_cfg.get('word_size', 11)
 THREADS     = blast_cfg.get('threads',   8)
+# BLAST task depends on the QUERY length: unitigs (07 on the unitig matrix) are
+# long, variable-length sequences -> 'blastn'; raw k-mers are <30 bp -> the
+# short-read-tuned 'blastn-short'. Auto-selected from the feature representation
+# (env AMR_FEATURE_REPR or config preprocessing.feature_repr); blast.task overrides.
+_FEATURE_REPR = (os.environ.get('AMR_FEATURE_REPR')
+                 or config.get('preprocessing', {}).get('feature_repr', 'kmer'))
+BLAST_TASK  = blast_cfg.get('task') or ('blastn' if _FEATURE_REPR == 'unitig' else 'blastn-short')
 
 # Resolve I/O paths (organism-aware)
 EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
@@ -220,7 +227,9 @@ def main() -> None:
         "--threads",    str(THREADS),
         "--evalue",     str(EVALUE),
         "--word_size",  str(WORD_SIZE),
+        "--task",       str(BLAST_TASK),
     ]
+    print(f"  BLAST task: {BLAST_TASK} (feature_repr={_FEATURE_REPR})")
 
     print(f"  Command: {' '.join(cmd)}\n")
 

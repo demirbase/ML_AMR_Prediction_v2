@@ -322,6 +322,9 @@ blast:
   evalue:       10                        # E-value threshold for reporting hits
   word_size:    11                        # Seed word size (11 is standard for short seqs)
   threads:      8                         # CPU threads for local BLAST only
+  # BLAST -task: null = auto from feature_repr (unitig -> 'blastn' for long queries,
+  # k-mer -> 'blastn-short' for <30 bp). Set explicitly to override.
+  task:         null
 
   # ── CARD variant/SNP data (step 11 — k-mer-centric SNP allele check) ──────
   # NOT shipped with the repo (the bundled card.fna is the homolog model only).
