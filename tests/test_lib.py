@@ -92,6 +92,19 @@ def test_resolve_path_feature_repr_switch():
     assert resolve_path("models_dir", organism="ecoli", antibiotic="ampicillin",
                         config=cfg_unitig).name == "ampicillin"
 
+    # AMR_FEATURE_REPR env overrides config (HPC convenience).
+    import os
+    prev = os.environ.get("AMR_FEATURE_REPR")
+    try:
+        os.environ["AMR_FEATURE_REPR"] = "unitig"
+        assert resolve_path("matrix_dir", organism="ecoli", antibiotic="ampicillin",
+                            config=cfg_kmer).name == "matrix_unitig"
+    finally:
+        if prev is None:
+            os.environ.pop("AMR_FEATURE_REPR", None)
+        else:
+            os.environ["AMR_FEATURE_REPR"] = prev
+
 
 def test_resolve_path_run_id():
     p = resolve_path("run_dir", organism="ecoli", antibiotic="gentamicin", run_id="RID123")

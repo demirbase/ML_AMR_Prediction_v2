@@ -125,7 +125,10 @@ def resolve_path(key: str, organism: str | None = None, antibiotic: str | None =
     # (sibling 'unitig.out_subdir', default 'matrix_unitig'), so 03b/04/05/06/07/07b
     # all consume unitigs. Default ('kmer') leaves the raw-k-mer path untouched.
     if key == "matrix_dir":
-        feat = (cfg.get("preprocessing", {}) or {}).get("feature_repr", "kmer")
+        # AMR_FEATURE_REPR env overrides config (lets an HPC job switch to the
+        # unitig matrix without editing a manually-tuned config.yaml).
+        feat = os.environ.get("AMR_FEATURE_REPR") or \
+            (cfg.get("preprocessing", {}) or {}).get("feature_repr", "kmer")
         if feat == "unitig":
             sub = (cfg.get("unitig", {}) or {}).get("out_subdir", "matrix_unitig")
             result = result.parent / sub
