@@ -116,6 +116,25 @@ def test_kmer_background_frequency(load_script):
     assert u["enriched_in"] == "equal"
 
 
+@pytest.mark.unit
+def test_benjamini_hochberg(load_script):
+    import numpy as np
+    m = load_script("10_kmer_background_frequency.py")
+    # Known BH example: p=[0.01,0.02,0.03,0.04,0.05], m=5
+    # q_i = min over k>=i of (p_k * 5 / k): largest stays 0.05, others adjust up.
+    q = m.benjamini_hochberg([0.01, 0.02, 0.03, 0.04, 0.05])
+    assert np.all(np.isfinite(q))
+    assert np.all(q >= np.array([0.01, 0.02, 0.03, 0.04, 0.05]) - 1e-12)  # q >= p
+    assert np.all(np.diff(q) >= -1e-12)                                   # monotone non-decreasing
+    assert q[-1] == pytest.approx(0.05, abs=1e-9)
+    assert q[0] == pytest.approx(0.05, abs=1e-9)                          # 0.01*5/1
+    # NaN passes through; finite values still corrected
+    q2 = m.benjamini_hochberg([0.01, np.nan, 0.04])
+    assert np.isnan(q2[1]) and np.all(np.isfinite(q2[[0, 2]]))
+    # all q-values clipped to <= 1
+    assert np.all(m.benjamini_hochberg([0.9, 0.95, 0.99]) <= 1.0)
+
+
 # ---------------------------------------------------------------------------
 # 11_variant_snp_check — SNP parsing / codon mapping / allele classification
 # ---------------------------------------------------------------------------

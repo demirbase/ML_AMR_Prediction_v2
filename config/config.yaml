@@ -334,6 +334,9 @@ blast:
   #   tar xjf card-data.tar.bz2          # -> card.json + *_variant_model.fasta
   card_variant_fasta: "data/external/card/nucleotide_fasta_protein_variant_model.fasta"
   card_json:          "data/external/card/card.json"
+  # CARD ARO ontology index (M16): maps ARO accession -> gene family / drug class /
+  # resistance mechanism for the KB. null = auto (aro_index.tsv next to card.json).
+  aro_index:          null
 
 # ----------------------------------------------------------------------------
 # NCBI ENTREZ PARAMETERS (Step 09 — biological summary)

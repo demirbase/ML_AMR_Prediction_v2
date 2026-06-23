@@ -67,19 +67,20 @@ def load_tiers(config):
     return tiers, report_max, weak_min_ident, weak_min_cov, k_length, stability_threshold
 
 
-def classify_confidence(pident, evalue, length, k_length, tiers):
+def classify_confidence(pident, evalue, length, query_length, tiers):
     """
     Grade a BLAST hit into confirmed / candidate / weak (best-first) or 'none'.
 
-    For a short k-mer query the primary, database-size-independent criteria are
-    IDENTITY and COVERAGE (alignment length / k). E-value is only a loose
-    secondary gate, because it scales with database size and is not comparable
-    between CARD (small) and NCBI nt (huge).
+    The primary, database-size-independent criteria are IDENTITY and COVERAGE
+    (alignment length / QUERY length). ``query_length`` is k for a k-mer query
+    and the unitig length for a unitig query (08 emits `qlen`); using a fixed k
+    for unitigs would make coverage meaningless (always >1). E-value is only a
+    loose secondary gate (scales with DB size; not comparable CARD vs NCBI nt).
     """
     try:
         pident = float(pident)
         evalue = float(evalue)
-        coverage = float(length) / float(k_length) if k_length else 0.0
+        coverage = float(length) / float(query_length) if query_length else 0.0
     except (TypeError, ValueError, ZeroDivisionError):
         return "none"
     for tier in ("confirmed", "candidate", "weak"):
@@ -89,6 +90,31 @@ def classify_confidence(pident, evalue, length, k_length, tiers):
                 and evalue <= float(t["max_evalue"])):
             return tier
     return "none"
+
+
+# BLAST outfmt-6 columns. 08 now emits `qlen` (query length) before `stitle`;
+# older outputs lack it (handled by read_blast_tsv -> qlen = NaN -> k_length).
+TSV_COLS = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore', 'qlen', 'stitle']
+
+
+def read_blast_tsv(path):
+    """Read a BLAST outfmt-6 TSV, tolerating presence/absence of the `qlen`
+    column (forward/backward compatible). Always returns a frame with all
+    TSV_COLS; a missing `qlen` is filled NaN so callers fall back to k_length.
+    """
+    df = pd.read_csv(path, sep='\t', header=None)
+    ncol = df.shape[1]
+    if ncol == len(TSV_COLS):
+        df.columns = TSV_COLS
+    elif ncol == len(TSV_COLS) - 1:                     # legacy: no qlen
+        df.columns = [c for c in TSV_COLS if c != 'qlen']
+        df['qlen'] = float('nan')
+    else:                                               # best effort
+        df.columns = (TSV_COLS + [f'extra{i}' for i in range(ncol)])[:ncol]
+        if 'qlen' not in df.columns:
+            df['qlen'] = float('nan')
+    return df
 
 
 def configure_entrez(config):
@@ -138,6 +164,52 @@ def extract_card_gene(sseqid):
     if '|' in sseqid:
         return sseqid.split('|')[-1].strip()
     return sseqid
+
+
+def aro_from_sseqid(sseqid):
+    """Extract the ARO accession digits from a CARD sseqid (ROADMAP §0.2 M16).
+
+    'gb|NG_068181.1|+|100-925|ARO:3006096|OXA-909' -> '3006096'; '' if absent.
+    """
+    mobj = re.search(r'ARO:(\d+)', str(sseqid))
+    return mobj.group(1) if mobj else ''
+
+
+def load_aro_index(path):
+    """Load CARD's aro_index.tsv -> {aro_accession_digits: {gene_family,
+    drug_class, resistance_mechanism, short_name}} for the ARO ontology mapping
+    (ROADMAP §0.2 M16). Returns {} if the file is absent (full CARD download only),
+    so the KB simply gets empty ARO fields rather than failing. Column names are
+    resolved case-insensitively because they drift slightly between CARD versions.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path, sep='\t', dtype=str).fillna('')
+
+    def col(*names):
+        for n in names:
+            for c in df.columns:
+                if c.strip().lower() == n.lower():
+                    return c
+        return None
+
+    aro_c = col('ARO Accession')
+    if aro_c is None:
+        return {}
+    fam_c, drug_c = col('AMR Gene Family'), col('Drug Class')
+    mech_c, name_c = col('Resistance Mechanism'), col('CARD Short Name', 'ARO Name')
+    out = {}
+    for _, r in df.iterrows():
+        acc = str(r[aro_c]).replace('ARO:', '').strip()
+        if acc:
+            out[acc] = {
+                'gene_family': r[fam_c] if fam_c else '',
+                'drug_class': r[drug_c] if drug_c else '',
+                'resistance_mechanism': r[mech_c] if mech_c else '',
+                'short_name': r[name_c] if name_c else '',
+            }
+    return out
 
 
 # ============================================================================
@@ -268,6 +340,7 @@ def best_card_hit(df_card, q_id):
         'identity': float(row['pident']),
         'evalue': float(row['evalue']),
         'tier': row.get('Confidence', 'none'),
+        'sseqid': row.get('sseqid', ''),
     }
 
 
@@ -286,11 +359,16 @@ def composite_score(selection_frequency, identity_pct, evalue):
     return sf * max(0.0, math.log10(1.0 / ev)) * (idp / 100.0)
 
 
-def build_kb_candidates(df_features, df_card, stability_threshold):
+def build_kb_candidates(df_features, df_card, stability_threshold, aro_index=None):
     """
     Join the candidate k-mers (07: gain top-N ∪ stable) with their best CARD hit
     and compute the composite score. Returns (DataFrame, metrics dict).
+
+    When ``aro_index`` is provided (CARD aro_index.tsv), each CARD hit is mapped to
+    its ARO ontology (ROADMAP §0.2 M16): accession + gene family + drug class +
+    resistance mechanism — the 5-field schema for the KB.
     """
+    aro_index = aro_index or {}
     rows = []
     for _, feat in df_features.iterrows():
         rank = int(feat['Rank'])
@@ -305,6 +383,8 @@ def build_kb_candidates(df_features, df_card, stability_threshold):
         is_stable = bool(feat.get('stable', False))
 
         hit = best_card_hit(df_card, q_id)
+        aro_acc = aro_from_sseqid(hit['sseqid']) if hit else ''
+        aro = aro_index.get(aro_acc, {})
         rows.append({
             'rank': rank,
             'kmer': feat.get('Kmer_Sequence', ''),
@@ -319,10 +399,17 @@ def build_kb_candidates(df_features, df_card, stability_threshold):
             'confidence_tier': hit['tier'] if hit else 'none',
             'has_card_hit': hit is not None,
             'composite_score': composite_score(sel_freq, hit['identity'], hit['evalue']) if hit else float('nan'),
+            # ARO ontology (M16): empty when no hit / no aro_index.tsv present.
+            'aro_accession': f"ARO:{aro_acc}" if aro_acc else '',
+            'aro_gene_family': aro.get('gene_family', ''),
+            'aro_drug_class': aro.get('drug_class', ''),
+            'aro_resistance_mechanism': aro.get('resistance_mechanism', ''),
         })
     cols = ['rank', 'kmer', 'feature_id', 'gain_score', 'in_gain_topN',
             'selection_frequency', 'stable', 'card_gene', 'card_identity',
-            'card_evalue', 'confidence_tier', 'has_card_hit', 'composite_score']
+            'card_evalue', 'confidence_tier', 'has_card_hit', 'composite_score',
+            'aro_accession', 'aro_gene_family', 'aro_drug_class',
+            'aro_resistance_mechanism']
     kb = pd.DataFrame(rows, columns=cols)
     if not kb.empty:
         kb = kb.sort_values(['composite_score', 'gain_score'],
@@ -394,31 +481,31 @@ def main():
     # ------------------------------------------------------------------
     # TSV column schema shared by both BLAST result files
     # ------------------------------------------------------------------
-    tsv_cols = [
-        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
-        'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore', 'stitle',
-    ]
+    tsv_cols = TSV_COLS
 
     # ------------------------------------------------------------------
     # Load & filter CARD results  (gene names extracted offline from sseqid)
     # ------------------------------------------------------------------
     if card_file.exists() and card_file.stat().st_size > 0:
         print(f"Reading {card_file}...")
-        df_card = pd.read_csv(card_file, sep='\t', header=None, names=tsv_cols)
+        df_card = read_blast_tsv(card_file)
         df_card['pident'] = pd.to_numeric(df_card['pident'], errors='coerce')
         df_card['evalue'] = pd.to_numeric(df_card['evalue'], errors='coerce')
         df_card['length'] = pd.to_numeric(df_card['length'], errors='coerce')
+        df_card['qlen']   = pd.to_numeric(df_card['qlen'], errors='coerce')
+        # Effective query length: the real qlen for unitigs, else k_length (k-mers).
+        df_card['qlen_eff'] = df_card['qlen'].where(df_card['qlen'] > 0, k_length)
         # Keep everything down to the weak tier (identity + coverage floors,
         # E ≤ report_max_evalue) and grade each hit. Weak hits are kept and
         # FLAGGED rather than dropped, for transparency (ROADMAP Risk-4 / §1.4).
         df_card = df_card[
             (df_card['pident'] >= weak_min_ident)
-            & (df_card['length'] >= weak_min_cov * k_length)
+            & (df_card['length'] >= weak_min_cov * df_card['qlen_eff'])
             & (df_card['evalue'] <= report_max_evalue)
         ].copy()
         df_card['Gene_Match'] = df_card['sseqid'].apply(extract_card_gene)
         df_card['Confidence'] = df_card.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], k_length, tiers), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], r['qlen_eff'], tiers), axis=1)
     else:
         print(f"Warning: {card_file} is missing or empty.")
         df_card = pd.DataFrame(columns=tsv_cols + ['Gene_Match'])
@@ -430,19 +517,21 @@ def main():
     # ------------------------------------------------------------------
     if ncbi_file.exists() and ncbi_file.stat().st_size > 0:
         print(f"Reading {ncbi_file}...")
-        df_ncbi = pd.read_csv(ncbi_file, sep='\t', header=None, names=tsv_cols)
+        df_ncbi = read_blast_tsv(ncbi_file)
         df_ncbi['pident'] = pd.to_numeric(df_ncbi['pident'], errors='coerce')
         df_ncbi['evalue'] = pd.to_numeric(df_ncbi['evalue'], errors='coerce')
         df_ncbi['length'] = pd.to_numeric(df_ncbi['length'], errors='coerce')
+        df_ncbi['qlen']   = pd.to_numeric(df_ncbi['qlen'], errors='coerce')
+        df_ncbi['qlen_eff'] = df_ncbi['qlen'].where(df_ncbi['qlen'] > 0, k_length)
         df_ncbi['sstart'] = pd.to_numeric(df_ncbi['sstart'], errors='coerce').fillna(0).astype(int)
         df_ncbi['send']   = pd.to_numeric(df_ncbi['send'],   errors='coerce').fillna(0).astype(int)
         df_ncbi = df_ncbi[
             (df_ncbi['pident'] >= weak_min_ident)
-            & (df_ncbi['length'] >= weak_min_cov * k_length)
+            & (df_ncbi['length'] >= weak_min_cov * df_ncbi['qlen_eff'])
             & (df_ncbi['evalue'] <= report_max_evalue)
         ].copy()
         df_ncbi['Confidence'] = df_ncbi.apply(
-            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], k_length, tiers), axis=1)
+            lambda r: classify_confidence(r['pident'], r['evalue'], r['length'], r['qlen_eff'], tiers), axis=1)
     else:
         print(f"Warning: {ncbi_file} is missing or empty.")
         df_ncbi = pd.DataFrame(columns=tsv_cols + ['Confidence'])
@@ -450,7 +539,23 @@ def main():
     # ------------------------------------------------------------------
     # KB-candidate table + quantitative validation (M7 / composite / H4)
     # ------------------------------------------------------------------
-    kb, metrics = build_kb_candidates(df_features, df_card, stability_threshold)
+    # ARO ontology mapping (M16): aro_index.tsv ships in the full CARD download
+    # next to card.json; absent -> empty mapping (KB just gets blank ARO fields).
+    aro_index_path = config.get('blast', {}).get('aro_index')
+    if aro_index_path:
+        aro_index_path = PROJECT_ROOT / aro_index_path
+    else:
+        card_json = config.get('blast', {}).get('card_json', 'data/external/card/card.json')
+        aro_index_path = PROJECT_ROOT / Path(card_json).parent / 'aro_index.tsv'
+    aro_index = load_aro_index(aro_index_path)
+    if aro_index:
+        print(f"  ✓ ARO ontology: {len(aro_index)} accessions ({Path(aro_index_path).name})")
+    else:
+        print(f"  ⚠ ARO index not found ({aro_index_path}); KB ARO fields left blank "
+              f"(needs the full CARD download).")
+
+    kb, metrics = build_kb_candidates(df_features, df_card, stability_threshold,
+                                      aro_index=aro_index)
     kb_path = explain_dir / f"07_kb_candidates_{antibiotic}.csv"
     kb.to_csv(kb_path, index=False)
     metrics_path = explain_dir / f"08_validation_metrics_{antibiotic}.json"
@@ -487,18 +592,26 @@ def main():
         f.write("> Composite score = stability × log10(1/E-value) × (identity/100); "
                 "see `07_kb_candidates` for the ranked table.\n\n")
         f.write("**Methodological notes:**\n")
-        f.write("- A high Gain/stability score is a statistical signal, not proof of "
-                "biological causation. Confidence tiers separate statistical correlation "
-                "from homology-based validation; weak hits are reported, not claimed as findings.\n")
+        # Reification-safe framing (ROADMAP §0.2 S10 / Takefuji 2025): the model
+        # reports statistical association, NOT causation.
+        f.write("- **Reification caveat:** a high Gain/stability score means a feature is "
+                "*statistically associated with / predictive of* resistance — it does **not** "
+                "*cause / determine / confer* resistance. This catalogue is a stability-filtered "
+                "signal list, not a causal claim; confidence tiers explicitly separate the "
+                "**statistical** layer from the **homology-based biological** layer, and weak hits "
+                "are reported transparently, not claimed as findings.\n")
         f.write("- CARD hits use the **homolog model** (gene presence). A hit indicates the "
-                "k-mer lies in a known ARG region, **not** that a resistance-conferring SNP is "
+                "feature lies in a known ARG region, **not** that a resistance-conferring SNP is "
                 "present — SNP/variant mechanisms (e.g. gyrA/parC fluoroquinolone mutations) are "
                 "not confirmed here and need CARD's variant model / RGI.\n")
-        f.write("- Tiers grade on **identity + coverage** (alignment length / k); E-value is a "
-                "loose secondary gate only, as it is not comparable between CARD and NCBI nt "
-                "(different database sizes).\n\n")
+        if aro_index:
+            f.write("- CARD hits are mapped to the **ARO ontology** (accession + gene family + "
+                    "drug class + resistance mechanism) in `07_kb_candidates` (M16).\n")
+        f.write("- Tiers grade on **identity + coverage** (alignment length / query length); "
+                "E-value is a loose secondary gate only, as it is not comparable between CARD and "
+                "NCBI nt (different database sizes).\n\n")
 
-        f.write(f"**Confidence tiers** (k-mer length k = {k_length}; checked best-first):\n")
+        f.write("**Confidence tiers** (coverage = alignment length / query length; checked best-first):\n")
         for tier in ("confirmed", "candidate", "weak"):
             t = tiers.get(tier, {})
             f.write(f"- `{tier}` — identity ≥ {float(t.get('min_identity', 0)):g}%, "

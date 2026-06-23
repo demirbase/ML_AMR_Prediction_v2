@@ -15,6 +15,8 @@ the out-of-core matrix once and computes:
     prevalence_overall
     odds_ratio + Fisher's exact p (2×2 present/absent × R/S)
     discriminative flag      (|Δprevalence| >= min_delta AND fisher_p < alpha)
+    fisher_q + discriminative_fdr   (Benjamini-Hochberg FDR over the candidate
+                                     set; q < alpha — ROADMAP §0.2)
 
 This distinguishes a genuine resistance marker from a ubiquitous / lineage
 (conserved) sequence and feeds the KB `kmer_background_frequency` record. A
@@ -41,7 +43,29 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Discriminativeness thresholds (citeable in Methods)
 MIN_PREVALENCE_DELTA = 0.10   # |prev_R - prev_S| must be at least this
-FISHER_ALPHA = 0.05           # Fisher's exact significance
+FISHER_ALPHA = 0.05           # Fisher's exact significance (raw p AND BH-FDR q)
+
+
+def benjamini_hochberg(pvals):
+    """Benjamini-Hochberg FDR-adjusted q-values (ROADMAP §0.2 — multiple-testing
+    correction over the candidate set). NaN p-values pass through as NaN and are
+    excluded from the ranking. Returns an array aligned to ``pvals``.
+    """
+    p = np.asarray(pvals, dtype=float)
+    q = np.full(p.shape, np.nan)
+    finite = np.where(np.isfinite(p))[0]
+    if finite.size == 0:
+        return q
+    pf = p[finite]
+    order = np.argsort(pf)
+    ranked = pf[order]
+    m = pf.size
+    adj = ranked * m / np.arange(1, m + 1)
+    adj = np.minimum.accumulate(adj[::-1])[::-1]   # enforce monotonicity
+    qf = np.empty(m)
+    qf[order] = np.clip(adj, 0, 1)
+    q[finite] = qf
+    return q
 
 
 def compute_kmer_stats(present_r, n_r, present_s, n_s,
@@ -162,6 +186,14 @@ def main():
         pr, ps = presence.get(int(r['feature_index']), (0, 0))
         stat_rows.append(compute_kmer_stats(pr, n_r, ps, n_s))
     stats = pd.DataFrame(stat_rows)
+    # BH-FDR across the candidate set (ROADMAP §0.2): adds fisher_q + an
+    # FDR-corrected discriminative flag (|Δprev| >= delta AND q < alpha). The raw
+    # 'discriminative' (per-test p) column is kept for backward compatibility.
+    stats['fisher_q'] = benjamini_hochberg(stats['fisher_p'].values)
+    _delta = (stats['prevalence_resistant'] - stats['prevalence_susceptible']).abs()
+    stats['discriminative_fdr'] = (
+        (_delta >= MIN_PREVALENCE_DELTA) & (stats['fisher_q'] < FISHER_ALPHA)
+    ).fillna(False).astype(bool)
     out = pd.concat([kb.reset_index(drop=True), stats], axis=1)
 
     out_path = explain_dir / f"10_kmer_background_frequency_{antibiotic}.csv"
@@ -170,6 +202,7 @@ def main():
     # ---- summary -----------------------------------------------------------
     stable = out[out['stable']] if 'stable' in out else out
     n_disc = int(out['discriminative'].sum())
+    n_disc_fdr = int(out['discriminative_fdr'].sum())
     n_stable_disc = int(stable['discriminative'].sum()) if len(stable) else 0
     # confirmed by BLAST but NOT discriminative -> likely wildtype/lineage
     if 'confidence_tier' in out:
@@ -179,6 +212,7 @@ def main():
 
     print(f"  Discriminative (|Δprev|≥{MIN_PREVALENCE_DELTA:g}, Fisher p<{FISHER_ALPHA:g}): "
           f"{n_disc}/{len(out)}  (stable: {n_stable_disc}/{len(stable)})")
+    print(f"  Discriminative after BH-FDR (q<{FISHER_ALPHA:g}): {n_disc_fdr}/{len(out)}")
     if len(conf_not_disc):
         print(f"  ⚠ {len(conf_not_disc)} CONFIRMED-by-BLAST k-mer(s) are NOT discriminative "
               f"(ubiquitous / likely wildtype or lineage signal):")

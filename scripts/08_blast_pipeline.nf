@@ -43,7 +43,10 @@ params.task       = "blastn-short"
 // ---------------------------------------------------------------------------
 // Shared BLAST output format: standard tabular + extra annotation fields
 // ---------------------------------------------------------------------------
-def OUTFMT = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle"
+// qlen (query length) is emitted before stitle so 09 can compute coverage as
+// alignment_length / query_length — correct for variable-length unitig queries
+// (k=21 is wrong for unitigs). stitle stays last (free-text, tab-safe).
+def OUTFMT = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen stitle"
 
 // ---------------------------------------------------------------------------
 // PROCESS 1: Local BLAST against CARD database
