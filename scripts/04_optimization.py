@@ -90,6 +90,12 @@ OPTUNA_FRACTION = float(config['training'].get('optuna_fraction', 0.25))
 
 RANDOM_SEED = config['training']['random_seed']
 N_TRIALS = config['training']['n_trials']
+# Optuna early stopping: stop once this many COMPLETED trials pass without
+# improving the best value (TPE usually converges well before n_trials). null/0
+# disables it (run all n_trials). Env AMR_OPTUNA_PATIENCE overrides config.
+OPTUNA_PATIENCE = os.environ.get('AMR_OPTUNA_PATIENCE',
+                                 config['training'].get('optuna_patience'))
+OPTUNA_PATIENCE = int(OPTUNA_PATIENCE) if OPTUNA_PATIENCE not in (None, '') else 0
 VAL_SPLIT = config['training']['validation_fraction']
 EARLY_STOPPING_ROUNDS = config['xgboost_params']['early_stopping_rounds']
 
@@ -763,7 +769,9 @@ def main():
     
     print("\n[STEP 4/5] Running Optuna hyperparameter optimization...")
     print("=" * 80)
-    print(f"Starting {N_TRIALS} trials")
+    print(f"Starting {N_TRIALS} trials"
+          + (f" (early stop after {OPTUNA_PATIENCE} no-improvement)" if OPTUNA_PATIENCE > 0
+             else " (no early stopping)"))
     print(f"Parallelism: {OPTUNA_N_JOBS} concurrent trials × {THREADS_PER_TRIAL} threads "
           f"(allocated cores: {TOTAL_CORES})")
     print("=" * 80)
@@ -778,12 +786,33 @@ def main():
         sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED),
     )
     
+    # Early-stopping callback: stop dispatching new trials once OPTUNA_PATIENCE
+    # completed trials pass without improving the best value (TPE typically
+    # converges well before n_trials). With n_jobs>1, study.stop() lets in-flight
+    # trials finish but launches no more. OPTUNA_PATIENCE<=0 disables it.
+    _es = {'best': None, 'since': 0}
+
+    def _early_stop_cb(study_, trial_):
+        if OPTUNA_PATIENCE <= 0 or trial_.state != optuna.trial.TrialState.COMPLETE \
+                or trial_.value is None:
+            return
+        best = study_.best_value
+        if _es['best'] is None or best > _es['best'] + 1e-9:
+            _es['best'], _es['since'] = best, 0
+        else:
+            _es['since'] += 1
+            if _es['since'] >= OPTUNA_PATIENCE:
+                print(f"\n  ⏹ HPO early stop: best {best:.4f} not improved for "
+                      f"{OPTUNA_PATIENCE} trials ({len(study_.trials)} run); stopping.")
+                study_.stop()
+
     # Run optimization with Graceful Shutdown (Fault Tolerance)
     try:
         study.optimize(
             lambda trial: objective(trial, dtrain_opt, dval_opt, BASE_PARAMS, colsample_range),
             n_trials=N_TRIALS,
             n_jobs=OPTUNA_N_JOBS,   # run trials concurrently to use all cores
+            callbacks=[_early_stop_cb],
             show_progress_bar=False
         )
     except KeyboardInterrupt:

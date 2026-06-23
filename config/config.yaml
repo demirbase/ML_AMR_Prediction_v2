@@ -220,7 +220,12 @@ training:
   validation_fraction: 0.2  # Fraction of training data for early stopping validation
   
   # Hyperparameter optimization
-  n_trials: 30  # Number of Optuna optimization trials
+  n_trials: 30  # Number of Optuna optimization trials (upper bound)
+  # Early-stopping for HPO: stop once this many COMPLETED trials pass without
+  # improving the best score (TPE usually converges early; e.g. the unitig run's
+  # best was found by trial ~20). 0/null = run all n_trials. Env override:
+  # AMR_OPTUNA_PATIENCE.
+  optuna_patience: 15
   optuna_fraction: 0.2  # Fraction of training chunks loaded into RAM during Bayesian opt (20%)
   optimization_metric: "auc"  # Metric to optimize (auc, accuracy, f1)
   # Parallel HPO (04_optimization.py): run several trials CONCURRENTLY, each
