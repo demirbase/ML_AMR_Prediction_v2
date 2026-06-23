@@ -182,6 +182,13 @@ unitig:
   # NOTE: this is tuned for the full ~4000-genome run; lower it (e.g. --min-support
   # 1) for tiny datasets/smoke tests via the CLI flag.
   min_support: 10
+  # Organism-level store (03u --build-db): run unitig-caller ONCE over all the
+  # organism's assemblies, then each antibiotic SUBSETS the store (no re-run).
+  # db_min_support is the store's absolute floor; keep it <= every antibiotic's
+  # min_support so nothing a per-antibiotic filter would keep is pre-dropped
+  # (2 = drop only singletons, always safe since they can never reach support>=2
+  # in any subset).
+  db_min_support: 2
   # unitig-caller thread count. null -> fall back to preprocessing.threads.
   threads: null
 

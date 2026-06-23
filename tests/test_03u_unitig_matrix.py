@@ -14,7 +14,23 @@ exact dense matrix.
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.sparse import load_npz, vstack
+from scipy.sparse import csr_matrix, load_npz, save_npz, vstack
+
+
+def _write_store(tmp_path, store_genomes, unitig_seqs, presence):
+    """presence[col] = iterable of store-row indices where unitig `col` is present."""
+    dense = np.zeros((len(store_genomes), len(unitig_seqs)), dtype=np.int8)
+    for col, rows in enumerate(presence):
+        for r in rows:
+            dense[r, col] = 1
+    store = tmp_path / "unitig_all"
+    store.mkdir()
+    save_npz(store / "X_all_part_0.npz", csr_matrix(dense))
+    pd.DataFrame({"Genome ID": store_genomes}).to_csv(store / "genomes_all.csv", index=False)
+    with open(store / "features.txt", "w", encoding="utf-8") as f:
+        for s in unitig_seqs:
+            f.write(f"{s}\t1\n")
+    return store
 
 
 def _write_rtab(path, header_samples, rows):
@@ -118,3 +134,40 @@ def test_rejects_sample_not_in_genome_set(mod, tmp_path):
     with pytest.raises(SystemExit):
         mod.rtab_to_chunks(rtab, ["g0", "g1"], [1, 0], out_dir,
                            antibiotic="testdrug", chunk_size=10, min_support=1)
+
+
+def test_subset_store_to_antibiotic(mod, tmp_path):
+    # Organism store: 5 genomes × 4 unitigs.
+    store_genomes = ["g0", "g1", "g2", "g3", "g4"]
+    seqs = ["U0", "U1", "U2", "U3"]
+    presence = [
+        {0, 1, 2},        # U0 in g0,g1,g2
+        {0, 3},           # U1 in g0,g3
+        {1, 2, 3, 4},     # U2 in g1,g2,g3,g4
+        {0, 2, 3},        # U3 in g0,g2,g3
+    ]
+    store = _write_store(tmp_path, store_genomes, seqs, presence)
+
+    out_dir = tmp_path / "matrix_unitig"
+    out_dir.mkdir()
+    # Antibiotic subset (different order) g2,g0,g3 ; min_support=2, n_sel=3 -> max_support=2
+    valid_genomes = ["g2", "g0", "g3"]
+    valid_labels = [1, 0, 1]
+    n_unitigs, n_chunks = mod.subset_store_to_antibiotic(
+        store, out_dir, "testdrug", valid_genomes, valid_labels,
+        chunk_size=2, min_support=2)
+
+    # Support over the subset: U0=2, U1=2, U2=2, U3=3(==n_sel -> zero-variance core, dropped)
+    assert n_unitigs == 3
+    feats = [ln.split("\t")[0] for ln in (out_dir / "features.txt").read_text().splitlines()]
+    assert feats == ["U0", "U1", "U2"]
+
+    dense = _reconstruct(out_dir, "testdrug", n_chunks)
+    expected = np.array([
+        [1, 0, 1],   # g2: U0 yes, U1 no,  U2 yes
+        [1, 1, 0],   # g0: U0 yes, U1 yes, U2 no
+        [0, 1, 1],   # g3: U0 no,  U1 yes, U2 yes
+    ], dtype=np.int8)
+    assert np.array_equal(dense, expected)
+    assert pd.read_csv(out_dir / "y_testdrug.csv")["label"].tolist() == valid_labels
+    assert pd.read_csv(out_dir / "genomes_testdrug.csv")["Genome ID"].tolist() == valid_genomes

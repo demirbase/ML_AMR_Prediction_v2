@@ -27,6 +27,15 @@ Output goes to a SEPARATE sibling dir (default 'matrix_unitig') so the working
 raw-k-mer 'matrix' (the baseline) is never overwritten.
 
 KMC (02/02b) stays for QC/spectra only; this step needs the raw .fna assemblies.
+
+Two modes (unitigs are sequence features, independent of antibiotic):
+  • --build-db : ORGANISM-LEVEL — run unitig-caller ONCE over ALL the organism's
+    assemblies and write a reusable store (processed/{organism}/unitig_all/).
+  • default    : PER-ANTIBIOTIC — if the store exists, just SUBSET it (select the
+    antibiotic's genome rows + re-filter min_support; NO unitig-caller re-run);
+    otherwise fall back to calling unitig-caller on the antibiotic subset.
+This makes the 2nd..Nth antibiotic/organism near-instant instead of a fresh
+multi-hour unitig-caller run each time.
 """
 
 import argparse
@@ -37,7 +46,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
-from scipy.sparse import csc_matrix, save_npz
+from scipy.sparse import csc_matrix, load_npz, save_npz, vstack
 
 from utils import run_command
 
@@ -262,6 +271,81 @@ def rtab_to_chunks(rtab, valid_genomes, valid_labels, out_dir, antibiotic,
     return n_unitigs_kept, num_chunks
 
 
+def store_dir_for(organism, config):
+    """Organism-level unitig store (one unitig-caller run, reused by every
+    antibiotic). Derived from data_dir so no extra config key is required."""
+    return resolve_path("data_dir", config=config) / "processed" / organism / "unitig_all"
+
+
+def subset_store_to_antibiotic(store_dir, out_dir, antibiotic, valid_genomes,
+                               valid_labels, chunk_size, min_support):
+    """Build matrix_unitig for one antibiotic by SUBSETTING the organism-level
+    store (no unitig-caller re-run). Selects the antibiotic's genome rows from the
+    store, re-applies the absolute min_support + zero-variance-core filter over the
+    SUBSET (so support is genome-count within this antibiotic), re-indexes unitigs,
+    and writes the same chunk contract as rtab_to_chunks.
+    """
+    store_genomes = pd.read_csv(store_dir / "genomes_all.csv",
+                                encoding="utf-8")["Genome ID"].astype(str).tolist()
+    g2row = {g: i for i, g in enumerate(store_genomes)}
+    missing = [g for g in valid_genomes if g not in g2row]
+    if missing:
+        sys.exit(f"ERROR: {len(missing)} antibiotic genome(s) not in the unitig store "
+                 f"(e.g. {missing[:3]}). Rebuild the store with --build-db.")
+    sel_rows = [g2row[g] for g in valid_genomes]   # store row indices, in valid_genomes order
+
+    chunks = sorted(store_dir.glob("X_all_part_*.npz"),
+                    key=lambda p: int(p.stem.split("_")[-1]))
+    if not chunks:
+        sys.exit(f"ERROR: no store chunks (X_all_part_*.npz) in {store_dir}")
+    print(f"  Loading organism store ({len(store_genomes)} genomes, {len(chunks)} chunks)...")
+    X_all = vstack([load_npz(f) for f in chunks]).tocsr()
+    X_sub = X_all[sel_rows]                          # (n_sel × n_unitigs_store), valid_genomes order
+    del X_all
+    gc.collect()
+
+    n_sel = len(valid_genomes)
+    max_support = n_sel - 1
+    support = np.asarray(X_sub.sum(axis=0)).ravel()
+    keep = np.where((support >= min_support) & (support <= max_support))[0]
+    if keep.size == 0:
+        sys.exit(f"ERROR: no unitigs pass support in the {antibiotic} subset "
+                 f"(min_support={min_support}, n={n_sel}). Lower --min-support?")
+    X_kept = X_sub[:, keep].tocsr()
+    if X_kept.nnz and X_kept.data.max() > 1:
+        np.clip(X_kept.data, 0, 1, out=X_kept.data)
+    del X_sub
+    gc.collect()
+    print(f"  ✓ Kept {keep.size:,} / {len(support):,} store unitigs for {antibiotic} "
+          f"(min_support={min_support}, max_support={max_support}).")
+
+    # features.txt: keep the store's unitig sequences at the surviving column indices.
+    all_feats = [ln.split("\t")[0] for ln in
+                 (store_dir / "features.txt").read_text(encoding="utf-8").splitlines()]
+    with open(out_dir / "features.txt", "w", encoding="utf-8") as f:
+        for ci in keep:
+            f.write(f"{all_feats[ci]}\t1\n")
+
+    pd.DataFrame(valid_labels, columns=["label"]).to_csv(
+        out_dir / f"y_{antibiotic}.csv", index=False, encoding="utf-8")
+    pd.DataFrame(valid_genomes, columns=["Genome ID"]).to_csv(
+        out_dir / f"genomes_{antibiotic}.csv", index=False, encoding="utf-8")
+
+    num_chunks = (n_sel + chunk_size - 1) // chunk_size
+    print(f"  Writing {num_chunks} chunk(s)...")
+    for c in range(num_chunks):
+        start, end = c * chunk_size, min((c + 1) * chunk_size, n_sel)
+        chunk = X_kept[start:end]
+        out_npz = out_dir / f"X_{antibiotic}_part_{c}.npz"
+        save_npz(out_npz, chunk)
+        sparsity = (1 - chunk.nnz / (chunk.shape[0] * chunk.shape[1])) * 100 \
+            if chunk.shape[1] else 0.0
+        print(f"    ✓ {out_npz.name}  shape={chunk.shape}  sparsity={sparsity:.2f}%")
+        del chunk
+        gc.collect()
+    return int(keep.size), num_chunks
+
+
 def main():
     config = _load_config()
     unitig_cfg = config.get("unitig", {}) or {}
@@ -292,41 +376,93 @@ def main():
     ap.add_argument("--rtab", default=None,
                     help="Use an existing unitigs rtab instead of running "
                          "unitig-caller (debug/resume).")
+    ap.add_argument("--build-db", action="store_true",
+                    help="ORGANISM-LEVEL mode: run unitig-caller ONCE over ALL of the "
+                         "organism's assemblies and write a reusable store "
+                         "(processed/{organism}/unitig_all/). Then per-antibiotic runs "
+                         "just subset this store — no unitig-caller re-run.")
+    ap.add_argument("--db-min-support", type=int,
+                    default=int(unitig_cfg.get("db_min_support", 2)),
+                    help="Absolute support floor for the organism store (--build-db). "
+                         "Keep <= every antibiotic's --min-support so nothing a "
+                         "per-antibiotic filter would keep is pre-dropped (default 2: "
+                         "drops only singletons, always safe).")
     args = ap.parse_args()
 
     organism, antibiotic = args.organism, args.antibiotic
+    raw_genomes_dir = resolve_path("raw_genomes_dir", organism=organism, config=config)
+    store_dir = store_dir_for(organism, config)
+
+    # ----- ORGANISM-LEVEL store build (once, reused by every antibiotic) ---------
+    if args.build_db:
+        print("=" * 80)
+        print(f"UNITIG STORE BUILD (organism-level) — {organism}")
+        print("=" * 80)
+        store_dir.mkdir(parents=True, exist_ok=True)
+        all_genomes = sorted(p.stem for p in raw_genomes_dir.glob("*.fna"))
+        if not all_genomes:
+            sys.exit(f"ERROR: no .fna assemblies in {raw_genomes_dir}")
+        print(f"  Genomes: {len(all_genomes)} | db_min_support: {args.db_min_support}")
+        if args.rtab:
+            rtab = Path(args.rtab)
+            if not rtab.exists():
+                sys.exit(f"ERROR: --rtab path not found: {rtab}")
+            print(f"  ✓ Using provided rtab: {rtab}")
+        else:
+            rtab = run_unitig_caller(all_genomes, raw_genomes_dir, store_dir,
+                                     args.threads, config)
+        # Reuse rtab_to_chunks with name 'all' + dummy labels: writes features.txt,
+        # genomes_all.csv, X_all_part_*.npz (y_all.csv is a harmless dummy).
+        n_unitigs, num_chunks = rtab_to_chunks(
+            rtab, all_genomes, [0] * len(all_genomes), store_dir, "all",
+            args.chunk_size, args.db_min_support)
+        print("\n" + "=" * 80)
+        print("UNITIG STORE BUILD COMPLETE")
+        print(f"  Store: {store_dir} | unitigs: {n_unitigs:,} | "
+              f"genomes: {len(all_genomes)} | chunks: {num_chunks}")
+        print("  Per-antibiotic: run 03u normally — it will SUBSET this store.")
+        print("=" * 80)
+        return
+
+    # ----- PER-ANTIBIOTIC matrix --------------------------------------------------
+    matrix_dir = resolve_path("matrix_dir", organism=organism, antibiotic=antibiotic,
+                              config=config)
+    out_dir = matrix_dir.parent / args.out_subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
     print("=" * 80)
     print("UNITIG FEATURE MATRIX CONSTRUCTION")
     print("=" * 80)
     print(f"Organism: {organism} | Antibiotic: {antibiotic}")
     print(f"min_support: {args.min_support} (absolute) | chunk_size: {args.chunk_size}")
-    print("=" * 80)
-
-    raw_genomes_dir = resolve_path("raw_genomes_dir", organism=organism, config=config)
-    matrix_dir = resolve_path("matrix_dir", organism=organism, antibiotic=antibiotic,
-                              config=config)
-    out_dir = matrix_dir.parent / args.out_subdir
-    out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output dir: {out_dir}")
+    print("=" * 80)
 
     print("\n[1/3] Selecting genomes...")
     valid_genomes, valid_labels = select_genomes(config, organism, antibiotic)
 
-    print("\n[2/3] Calling unitigs...")
-    if args.rtab:
-        rtab = Path(args.rtab)
-        if not rtab.exists():
-            sys.exit(f"ERROR: --rtab path not found: {rtab}")
-        print(f"  ✓ Using provided rtab: {rtab}")
+    store_ready = (store_dir / "genomes_all.csv").exists() and not args.rtab
+    if store_ready:
+        # Fast path: subset the organism store (no unitig-caller re-run).
+        print(f"\n[2/3] Subsetting organism store: {store_dir}")
+        print("[3/3] Building genome×unitig matrix from store...")
+        n_unitigs, num_chunks = subset_store_to_antibiotic(
+            store_dir, out_dir, antibiotic, valid_genomes, valid_labels,
+            args.chunk_size, args.min_support)
     else:
-        rtab = run_unitig_caller(valid_genomes, raw_genomes_dir, out_dir,
-                                 args.threads, config)
-
-    print("\n[3/3] Building genome×unitig matrix...")
-    n_unitigs, num_chunks = rtab_to_chunks(
-        rtab, valid_genomes, valid_labels, out_dir, antibiotic,
-        args.chunk_size, args.min_support,
-    )
+        # Fallback: call unitig-caller on just this antibiotic's genomes.
+        print("\n[2/3] Calling unitigs (no organism store; per-antibiotic run)...")
+        if args.rtab:
+            rtab = Path(args.rtab)
+            if not rtab.exists():
+                sys.exit(f"ERROR: --rtab path not found: {rtab}")
+            print(f"  ✓ Using provided rtab: {rtab}")
+        else:
+            rtab = run_unitig_caller(valid_genomes, raw_genomes_dir, out_dir,
+                                     args.threads, config)
+        print("\n[3/3] Building genome×unitig matrix...")
+        n_unitigs, num_chunks = rtab_to_chunks(
+            rtab, valid_genomes, valid_labels, out_dir, antibiotic,
+            args.chunk_size, args.min_support)
 
     print("\n" + "=" * 80)
     print("UNITIG MATRIX CONSTRUCTION COMPLETE")
