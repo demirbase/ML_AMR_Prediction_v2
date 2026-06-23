@@ -100,13 +100,20 @@ MAX_TARGET_SEQS = blast_cfg.get('max_target_seqs', 50)
 
 def organism_entrez_query(organism_id):
     """Build an NCBI entrez_query that restricts the remote search to the study
-    organism, using the registry ``display_name`` (scientific name) — never
-    hardcoded, so it auto-adjusts per organism. Returns '' (no restriction) if
-    the organism is unknown or has no display_name."""
+    organism, derived from the registry (never hardcoded, so it auto-adjusts per
+    organism). Prefer a TAXID filter ``txid<N>[Organism:exp]`` because it has NO
+    spaces: a scientific-name filter like ``Escherichia coli[organism]`` breaks
+    the Nextflow CLI launcher, which word-splits the value on its space. ':exp'
+    explodes the taxon to include all descendant strains. Returns '' (no
+    restriction) if the organism is unknown or has neither taxid nor name."""
     try:
-        name = (get_organism(organism_id).get('display_name') or "").strip()
+        block = get_organism(organism_id)
     except Exception:
         return ""
+    taxid = block.get('taxid')
+    if taxid:
+        return f"txid{taxid}[Organism:exp]"
+    name = (block.get('display_name') or "").strip()
     return f"{name}[organism]" if name else ""
 
 
