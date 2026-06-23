@@ -90,19 +90,26 @@ BLAST_TASK_OVERRIDE = blast_cfg.get('task')
 
 
 def choose_blast_task(fasta_path, override=None, short_max=50):
-    """Pick the BLAST task from the longest query in the FASTA: 'blastn-short' if
-    every query is short (< short_max bp), else 'blastn'. ``override`` (config
-    blast.task) wins when set."""
+    """Pick the BLAST task from the MEDIAN query length: 'blastn-short' when the
+    bulk of queries are short (median < short_max bp), else 'blastn'. Median (not
+    max) because a few long queries shouldn't force 'blastn' on a short-dominated
+    set — 'blastn-short' (with word_size 7) finds full-length hits even for the
+    longer ones, whereas 'blastn' misses the short ones. ``override`` wins."""
     if override:
         return override
-    max_len = 0
+    lens = []
     try:
         for line in open(fasta_path, encoding='utf-8'):
-            if not line.startswith('>'):
-                max_len = max(max_len, len(line.strip()))
+            s = line.strip()
+            if s and not s.startswith('>'):
+                lens.append(len(s))
     except OSError:
         return 'blastn-short'
-    return 'blastn-short' if (max_len and max_len < short_max) else 'blastn'
+    if not lens:
+        return 'blastn-short'
+    lens.sort()
+    median = lens[len(lens) // 2]
+    return 'blastn-short' if median < short_max else 'blastn'
 
 # Resolve I/O paths (organism-aware)
 EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
@@ -233,6 +240,9 @@ def main() -> None:
     print("=" * 80)
 
     blast_task = choose_blast_task(FASTA_INPUT, BLAST_TASK_OVERRIDE)
+    # blastn-short needs a small word_size (7) to seed short queries; the config
+    # word_size (11+) truncated/missed full-length hits on ~30-50 bp unitigs.
+    word_size = 7 if blast_task == "blastn-short" else WORD_SIZE
     cmd = [
         "nextflow", "run", str(PIPELINE_PATH),
         "--fasta",      str(FASTA_INPUT),
@@ -241,10 +251,11 @@ def main() -> None:
         "--antibiotic", TARGET_ANTIBIOTIC,
         "--threads",    str(THREADS),
         "--evalue",     str(EVALUE),
-        "--word_size",  str(WORD_SIZE),
+        "--word_size",  str(word_size),
         "--task",       str(blast_task),
     ]
-    print(f"  BLAST task: {blast_task} (auto from max query length; override=blast.task)")
+    print(f"  BLAST task: {blast_task} | word_size: {word_size} "
+          f"(auto from median query length; override=blast.task)")
 
     print(f"  Command: {' '.join(cmd)}\n")
 
