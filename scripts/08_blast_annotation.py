@@ -302,7 +302,14 @@ def main() -> None:
     # matching ('ignore' fails because the JVM sees 'ıgnore').
     # (os is already imported at module level.)
     nxf_env = os.environ.copy()
-    nxf_env['NXF_OPTS'] = nxf_env.get('NXF_OPTS', '') + ' -Duser.language=en -Duser.country=US'
+    # .strip() so a leading space doesn't become an empty token the Nextflow
+    # launcher reports as "Illegal option --" (benign but noisy).
+    nxf_env['NXF_OPTS'] = (nxf_env.get('NXF_OPTS', '') + ' -Duser.language=en -Duser.country=US').strip()
+    # Disable the ANSI console. Under nohup / no-tty (HPC background runs) the
+    # ANSI renderer does terminal ioctls and the backgrounded JVM gets SIGTTOU
+    # and STOPS (process state 'T') before it ever submits the BLAST processes.
+    # Plain logging keeps background/HPC runs unblocked. Respect a user override.
+    nxf_env.setdefault('NXF_ANSI_LOG', 'false')
 
     result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=nxf_env)
 
