@@ -173,7 +173,7 @@ python scripts/06_evaluation.py
 python scripts/07b_feature_stability.py   # 5-seed stability (run before 07)
 python scripts/07_explainability.py       # gain top-N ∪ stable set -> CSV + FASTA
 python scripts/08_blast_annotation.py     # needs BLAST+ / Nextflow / CARD DB
-python scripts/09_biological_summary.py   # tiered report; needs config ncbi.entrez_email
+python scripts/09_biological_summary.py   # tiered report; set ncbi.entrez_email or AMR_ENTREZ_EMAIL
 python scripts/10_kmer_background_frequency.py  # resistant-vs-susceptible discriminativeness
 python scripts/11_variant_snp_check.py    # CARD variant-model SNP allele check (optional)
 ```

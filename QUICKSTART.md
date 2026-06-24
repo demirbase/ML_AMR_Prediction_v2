@@ -71,7 +71,8 @@ project:
 
 Other tunables live here too: `preprocessing` (k_length=21, min_support,
 `chunk_size=200`), `training` (n_trials, test/validation fractions), `analysis`
-(top_n_features), `blast`, and `ncbi.entrez_email` (set this before step 09).
+(top_n_features), `blast`, and `ncbi.entrez_email` (set this before step 09, or
+`export AMR_ENTREZ_EMAIL=…`).
 
 > **Adding an organism:** add a block to `config/registry/organisms.yaml`
 > (`enabled: true`) — no code changes. Antibiotic name variants are normalised
@@ -200,4 +201,6 @@ on a new machine/HPC to confirm the tool chain works. See `tests/README.md`.
 | step 00a returns 0 rows on a dry run | increase `--max-genomes`, or run full (no cap), or use `--raw-csv` |
 | `base_score must be in (0,1)` | upgrade — fixed in step 04/05 (pinned `base_score=0.5`) |
 | step 04 `division by zero` / 0 train chunks | too few genomes for the split — acquire more, or lower `chunk_size` for tiny test sets |
-| step 09 NCBI rate-limit warning | set `config.yaml → ncbi.entrez_email` |
+| step 09 NCBI rate-limit warning | set `config.yaml → ncbi.entrez_email` or `export AMR_ENTREZ_EMAIL=…` |
+| step 08 NCBI remote BLAST `SIGXCPU` / empty output | the public NCBI server kills `blastn-short`/word7 over `nt`; the NCBI pass is decoupled to `blastn`/word11 + taxid `-entrez_query` (handled in `08_blast_annotation.py`) |
+| step 08 Nextflow stalls under `nohup` (process state `T`) | ANSI console + no tty → SIGTTOU; 08 sets `NXF_ANSI_LOG=false` automatically |
