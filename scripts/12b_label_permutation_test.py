@@ -10,19 +10,19 @@ the same ARG, so permuting one barely moves AUC). This test instead asks the
 **model-level** question — *is the whole model's skill real, or could a model
 this good arise by chance?* — via the classical permutation test (Ojala &
 Garriga 2010): shuffle the labels, retrain with the SAME frozen hyper-parameters
-(no retuning — ROADMAP's frozen-HP variant), evaluate on the same held-out
-split, and build the **null ROC-AUC distribution**. The real AUC's empirical
-p-value is ``(1 + #{null >= real}) / (N + 1)``.
+(no retuning), evaluate on the same held-out split, and build the **null ROC-AUC
+distribution**. The real AUC's empirical p-value is ``(1 + #{null>=real})/(N+1)``.
 
-Method
-------
-* Single fixed train/test split = the experiment config's chunk split (the exact
-  split 06 reports the headline AUC on), so the real AUC reproduces ~0.953.
-* Frozen params + tree count from ``config_{ab}.yaml`` (n_estimators = 8); reuse
-  07b's ``train_one_seed`` / ``eval_one_seed`` (same full-data boosting as 05).
-* Each permutation reshuffles the ENTIRE label vector (so train+test stay
-  consistently permuted) and retrains from scratch — this is the expensive,
-  fully-honest null (HPC job; see the SLURM snippet in HANDOFF §0.2).
+Key efficiency point
+--------------------
+The feature matrix is IDENTICAL across permutations — only the labels change. So
+we build ONE in-core ``DMatrix`` for train and one for test, then each
+permutation just resets ``set_label``/``set_weight`` and refits 8 trees. XGBoost
+caches the (label-independent) histogram index on the DMatrix after the first
+fit, so permutations 2..N are seconds each — no per-perm matrix rebuild (which
+made the naive version I/O-bound, ~17 min/perm, and tripped the HPC low-eff
+killer). max_bin=2 on binary features → identical binning to 05's QuantileDMatrix
+→ the real AUC reproduces the ~0.953 headline.
 
 Output (results/{org}/{ab}/05_explainability/)
     12b_label_permutation_summary_{ab}.json  — real_auc, null mean/std/max, empirical_p, significant
@@ -36,14 +36,14 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import xgboost as xgb
+from scipy.sparse import load_npz, vstack
+from sklearn.metrics import roc_auc_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from lib.config import env_bool  # noqa: E402
-
-# Reuse 07b's out-of-core training/eval (single source of truth for the boosting
-# regime) and 06's exact held-out split. Digit-leading names need importlib.
+# Reuse 07b's frozen-HP loader / split helpers and 06's exact held-out split.
 _s = importlib.import_module("07b_feature_stability")
 _ev = importlib.import_module("06_evaluation")
 
@@ -59,7 +59,7 @@ def build_chunk_split(chunk_files, test_filenames):
             test_mask[start:end] = True
     if not test_mask.any():
         raise RuntimeError("No chunk matched the config test_files — split empty.")
-    return offsets, n_total, ~test_mask, test_mask
+    return n_total, ~test_mask, test_mask
 
 
 def main():
@@ -71,8 +71,7 @@ def main():
     rng = np.random.default_rng(args.seed)
 
     organism, antibiotic = _s.ORGANISM, _s.TARGET_ANTIBIOTIC
-    matrix_dir, models_dir = _s.MATRIX_DIR, _s.MODELS_DIR
-    config = _s.config
+    matrix_dir, config = _s.MATRIX_DIR, _s.config
     out_dir = _s.resolve_path("dir_05_explainability", organism=organism,
                               antibiotic=antibiotic, config=config)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -90,32 +89,45 @@ def main():
         print(f"ERROR: no matrix chunks in {matrix_dir}"); sys.exit(1)
 
     test_filenames, _thr = _ev.load_test_files_from_config()
-    offsets, n_total, train_mask, test_mask = build_chunk_split(chunk_files, test_filenames)
-    params, total_trees = _s.load_fixed_params()
-    max_bin = int(params.get("max_bin", 2))
-    use_extmem = env_bool("AMR_EXTERNAL_MEMORY", config["training"].get("external_memory", True))
-    cache_dir = models_dir / "_xgb_cache_perm"
+    n_total, train_mask, test_mask = build_chunk_split(chunk_files, test_filenames)
 
+    params, total_trees = _s.load_fixed_params()
     print(f"  rows: total={n_total} train={int(train_mask.sum())} test={int(test_mask.sum())}")
-    print(f"  trees={total_trees} | max_bin={max_bin} | external_memory={use_extmem}\n")
+    print(f"  trees={total_trees} max_bin={params.get('max_bin')} "
+          f"tree_method={params.get('tree_method')}")
+
+    # Load the whole matrix once (in part order = y_all order), slice by mask.
+    print("  loading matrix (once)...", flush=True)
+    X_full = vstack([load_npz(f) for f in chunk_files], format="csr")
+    if X_full.shape[0] != n_total:
+        print(f"ERROR: matrix rows {X_full.shape[0]} != y rows {n_total}"); sys.exit(1)
+    X_train, X_test = X_full[train_mask], X_full[test_mask]
+    del X_full
+
+    # Build the two DMatrices ONCE; only labels/weights change per permutation.
+    dtrain = xgb.DMatrix(X_train)
+    dtest = xgb.DMatrix(X_test)
 
     def fit_eval(y_vec):
-        model = _s.train_one_seed(params, total_trees, chunk_files, y_vec,
-                                  train_mask, max_bin, cache_dir, use_extmem)
-        auc, _, _ = _s.eval_one_seed(model, offsets, y_vec, test_mask)
-        return auc
+        ytr, yte = y_vec[train_mask], y_vec[test_mask]
+        pos = int(ytr.sum()); pw = (len(ytr) - pos) / pos if pos else 1.0
+        dtrain.set_label(ytr)
+        dtrain.set_weight(np.where(ytr == 1, pw, 1.0))
+        model = xgb.train(params, dtrain, num_boost_round=total_trees)
+        if len(np.unique(yte)) < 2:
+            return np.nan
+        return roc_auc_score(yte, model.predict(dtest))
 
-    # Real model (same pipeline) — should reproduce the ~0.953 headline.
     real_auc = fit_eval(y_all)
-    print(f"  REAL test ROC-AUC = {real_auc:.4f}\n  running {N} label permutations...")
+    print(f"\n  REAL test ROC-AUC = {real_auc:.4f}\n  running {N} label permutations...",
+          flush=True)
 
     null = np.empty(N)
     for r in range(N):
-        y_perm = rng.permutation(y_all)            # shuffle ALL labels
-        null[r] = fit_eval(y_perm)
+        null[r] = fit_eval(rng.permutation(y_all))     # shuffle ALL labels
         if (r + 1) % 10 == 0 or r == 0:
             print(f"    perm {r+1:>3}/{N}  null_auc={null[r]:.4f}  "
-                  f"(running max={null[:r+1].max():.4f})")
+                  f"(running max={null[:r+1].max():.4f})", flush=True)
 
     n_ge = int(np.sum(null >= real_auc))
     p_emp = (1 + n_ge) / (N + 1)
@@ -125,11 +137,9 @@ def main():
         "real_roc_auc": float(real_auc),
         "null_auc_mean": float(null.mean()), "null_auc_std": float(null.std()),
         "null_auc_min": float(null.min()), "null_auc_max": float(null.max()),
-        "n_null_ge_real": n_ge,
-        "empirical_p": p_emp,
+        "n_null_ge_real": n_ge, "empirical_p": p_emp,
         "significant": bool(p_emp < 0.05),
-        "split_method": "experiment_config_chunk_split",
-        "n_trees": int(total_trees),
+        "split_method": "experiment_config_chunk_split", "n_trees": int(total_trees),
     }
     _s.pd.DataFrame({"permutation": np.arange(1, N + 1), "null_roc_auc": null}).to_csv(
         out_dir / f"12b_label_permutation_nulls_{antibiotic}.csv", index=False, encoding="utf-8")
