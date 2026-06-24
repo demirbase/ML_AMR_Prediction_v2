@@ -37,7 +37,6 @@ from pathlib import Path
 
 import numpy as np
 import xgboost as xgb
-from scipy.sparse import load_npz, vstack
 from sklearn.metrics import roc_auc_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -92,21 +91,24 @@ def main():
     n_total, train_mask, test_mask = build_chunk_split(chunk_files, test_filenames)
 
     params, total_trees = _s.load_fixed_params()
+    max_bin = int(params.get("max_bin", 2))
     print(f"  rows: total={n_total} train={int(train_mask.sum())} test={int(test_mask.sum())}")
-    print(f"  trees={total_trees} max_bin={params.get('max_bin')} "
-          f"tree_method={params.get('tree_method')}")
+    print(f"  trees={total_trees} max_bin={max_bin} tree_method={params.get('tree_method')}")
 
-    # Load the whole matrix once (in part order = y_all order), slice by mask.
-    print("  loading matrix (once)...", flush=True)
-    X_full = vstack([load_npz(f) for f in chunk_files], format="csr")
-    if X_full.shape[0] != n_total:
-        print(f"ERROR: matrix rows {X_full.shape[0]} != y rows {n_total}"); sys.exit(1)
-    X_train, X_test = X_full[train_mask], X_full[test_mask]
-    del X_full
-
-    # Build the two DMatrices ONCE; only labels/weights change per permutation.
-    dtrain = xgb.DMatrix(X_train)
+    # Build the TRAIN matrix ONCE as a compact in-core QuantileDMatrix (max_bin=2
+    # -> ~1 byte/nnz), streamed chunk-by-chunk so the raw ~4.9M-wide matrix is
+    # never fully materialised in RAM (a plain CSV/CSR copy OOM-killed a 120G
+    # node). QuantileDMatrix supports set_label/set_weight, so each permutation
+    # just swaps labels and refits — no rebuild. pos_weight is applied per-perm
+    # via set_weight, so build unweighted here.
+    print("  building train QuantileDMatrix (once, streamed)...", flush=True)
+    dtrain = _s.build_quantile_dmatrix(chunk_files, y_all, _s.CHUNK_SIZE,
+                                       max_bin=max_bin, row_mask=train_mask,
+                                       pos_weight=None)
+    # The held-out test set is one stratified split (small) — load it once.
+    X_test, _y_test_real, _ids = _ev.load_test_data(y_all, chunk_files, test_filenames)
     dtest = xgb.DMatrix(X_test)
+    assert dtest.num_row() == int(test_mask.sum()), "test row order/count mismatch"
 
     def fit_eval(y_vec):
         ytr, yte = y_vec[train_mask], y_vec[test_mask]
