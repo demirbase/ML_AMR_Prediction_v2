@@ -43,7 +43,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from scipy.sparse import vstack
 from sklearn.metrics import roc_auc_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -175,20 +174,31 @@ def main():
             rec.update(mda_auc_drop=0.0, perm_p=1.0, n_perm=0)
             rows.append(rec); continue
 
+        # Only column `fidx` varies between permutations; every other feature is
+        # fixed. So a genome's prediction depends solely on its feature-`fidx`
+        # value — precompute BOTH states once (pred1 = has the feature, pred0 =
+        # does not), then each permutation is a per-row pick. 2 model calls per
+        # candidate instead of R, and exact (not an approximation).
+        rows0 = np.where(col == 0)[0]   # currently absent -> force present for pred1
+        rows1 = np.where(col != 0)[0]   # currently present -> force absent for pred0
+        pred1 = baseline_pred.copy()
+        if rows0.size:
+            s = X_test[rows0].tolil()
+            for i in range(rows0.size):
+                s[i, fidx] = 1.0
+            pred1[rows0] = model.inplace_predict(s.tocsr())
+        pred0 = baseline_pred.copy()
+        if rows1.size:
+            s = X_test[rows1].tolil()
+            for i in range(rows1.size):
+                s[i, fidx] = 0.0
+            pred0[rows1] = model.inplace_predict(s.tocsr())
+
         perm_aucs = np.empty(R)
         for r in range(R):
-            new_ones = rng.choice(n_test, size=c_ones, replace=False)
-            changed = np.union1d(np.setdiff1d(ones, new_ones, assume_unique=True),
-                                 np.setdiff1d(new_ones, ones, assume_unique=True))
-            if changed.size == 0:
-                perm_aucs[r] = baseline_auc; continue
-            new_set = set(new_ones.tolist())
-            sub = X_test[changed].tolil()
-            for i, row_id in enumerate(changed):
-                sub[i, fidx] = 1.0 if int(row_id) in new_set else 0.0
-            pred = baseline_pred.copy()
-            pred[changed] = model.inplace_predict(sub.tocsr())
-            perm_aucs[r] = roc_auc_score(y_test, pred)
+            assign = np.zeros(n_test, dtype=bool)
+            assign[rng.choice(n_test, size=c_ones, replace=False)] = True
+            perm_aucs[r] = roc_auc_score(y_test, np.where(assign, pred1, pred0))
 
         mda = baseline_auc - float(perm_aucs.mean())
         p = (1 + int(np.sum(perm_aucs >= baseline_auc))) / (R + 1)
