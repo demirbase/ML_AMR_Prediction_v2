@@ -43,6 +43,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from scipy.sparse import csr_matrix
 from sklearn.metrics import roc_auc_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -179,20 +180,29 @@ def main():
         # value — precompute BOTH states once (pred1 = has the feature, pred0 =
         # does not), then each permutation is a per-row pick. 2 model calls per
         # candidate instead of R, and exact (not an approximation).
+        # Set column `fidx` with pure sparse arithmetic (no LIL — tolil on a
+        # ~n_test x 4.9M matrix is Python-slow and hit the node CPU ulimit).
+        # Binary/missing semantics preserved: present = stored 1; absent =
+        # *unstored* (matches training, where absence is an implicit/missing 0) —
+        # so force-absent removes the entry (eliminate_zeros), not a stored 0.
         rows0 = np.where(col == 0)[0]   # currently absent -> force present for pred1
         rows1 = np.where(col != 0)[0]   # currently present -> force absent for pred0
         pred1 = baseline_pred.copy()
         if rows0.size:
-            s = X_test[rows0].tolil()
-            for i in range(rows0.size):
-                s[i, fidx] = 1.0
-            pred1[rows0] = model.inplace_predict(s.tocsr())
+            sub = X_test[rows0]
+            e = csr_matrix((np.ones(rows0.size),
+                            (np.arange(rows0.size), np.full(rows0.size, fidx))),
+                           shape=sub.shape)
+            pred1[rows0] = model.inplace_predict(sub.maximum(e).tocsr())
         pred0 = baseline_pred.copy()
         if rows1.size:
-            s = X_test[rows1].tolil()
-            for i in range(rows1.size):
-                s[i, fidx] = 0.0
-            pred0[rows1] = model.inplace_predict(s.tocsr())
+            sub = X_test[rows1]
+            e = csr_matrix((np.ones(rows1.size),
+                            (np.arange(rows1.size), np.full(rows1.size, fidx))),
+                           shape=sub.shape)
+            m = sub - e
+            m.eliminate_zeros()
+            pred0[rows1] = model.inplace_predict(m.tocsr())
 
         perm_aucs = np.empty(R)
         for r in range(R):
