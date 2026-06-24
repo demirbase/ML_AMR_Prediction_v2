@@ -23,7 +23,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.1.0"
+KB_SCHEMA_VERSION = "0.2.0"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -101,7 +101,13 @@ CREATE TABLE IF NOT EXISTS blast_annotations (
     identity_pct    REAL,
     coverage        REAL,                    -- alignment length / k
     evalue          REAL,
-    tier            TEXT                     -- confirmed | candidate | weak | none
+    tier            TEXT,                    -- confirmed | candidate | weak | none
+    -- ARO/CARD ontology mapping (M16) — populated for CARD hits from 09's
+    -- aro_index/card.json lookup; NULL for NCBI hits or unmapped CARD hits.
+    aro_accession            TEXT,
+    aro_gene_family          TEXT,
+    aro_drug_class           TEXT,
+    aro_resistance_mechanism TEXT
 );
 
 -- Resistant-vs-susceptible prevalence / discriminativeness (step 10). --------

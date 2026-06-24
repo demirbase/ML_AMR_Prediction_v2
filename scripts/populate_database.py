@@ -27,6 +27,7 @@ import argparse
 import datetime
 import glob
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -80,6 +81,14 @@ def _i(x):
 
 def _b(x):
     return 1 if str(x).strip().lower() in ("1", "true", "yes") else 0
+
+
+def _s(x):
+    """clean-string-or-None (drops NaN / blanks / literal 'nan')."""
+    if x is None:
+        return None
+    s = str(x).strip()
+    return None if s == "" or s.lower() == "nan" else s
 
 
 # ---------------------------------------------------------------------------
@@ -169,10 +178,14 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
             conn.execute(
                 """INSERT INTO blast_annotations
                    (kmer_id, model_id, source_db, gene_symbol, identity_pct,
-                    evalue, tier) VALUES (?,?,?,?,?,?,?)""",
+                    evalue, tier, aro_accession, aro_gene_family, aro_drug_class,
+                    aro_resistance_mechanism)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (kid, model_id, "card", str(r.get("card_gene")),
                  _f(r.get("card_identity")), _f(r.get("card_evalue")),
-                 str(r.get("confidence_tier", "none"))),
+                 str(r.get("confidence_tier", "none")),
+                 _s(r.get("aro_accession")), _s(r.get("aro_gene_family")),
+                 _s(r.get("aro_drug_class")), _s(r.get("aro_resistance_mechanism"))),
             )
             conn.execute(
                 """INSERT INTO validation_evidence
@@ -256,7 +269,10 @@ def main():
     organism, antibiotic = args.organism, args.antibiotic
 
     k_length = int(config["preprocessing"]["k_length"])
-    card_version = (config.get("blast", {}) or {}).get("card_version")  # may be None
+    # CARD version (M6) — AMR_CARD_VERSION env override wins over config.yaml so
+    # HPC can record it without editing the (manually-tuned) config. May be None.
+    card_version = (os.environ.get("AMR_CARD_VERSION")
+                    or (config.get("blast", {}) or {}).get("card_version"))
     drug_class = None  # filled from the antibiotics registry if available later
 
     # Resolve roots (organism/antibiotic-scoped) and glob the artefacts.
