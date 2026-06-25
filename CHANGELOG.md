@@ -7,6 +7,33 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **M9 permutation significance tests.** `12_permutation_test.py` — MDA
+  (per-feature permutation importance): model fixed, permute each candidate
+  unitig's column in the held-out test set, measure ROC-AUC drop + BH-FDR
+  (ROADMAP §0.2). `12b_label_permutation_test.py` — label-permutation null
+  (ROADMAP §1.7): shuffle all labels, retrain frozen-HP 8 trees over a built-once
+  streamed `QuantileDMatrix` (swap labels via `set_label`/`set_weight`), build the
+  null ROC-AUC distribution + empirical p. Ampicillin: baseline AUC 0.9534; MDA
+  0/51 significant under Q<0.05 (expected — unitig redundancy); label-perm real
+  ≫ null (~0.50) → model highly significant.
+- **M16 ARO/CARD ontology in the KB.** `blast_annotations` gains
+  `aro_accession`, `aro_gene_family`, `aro_drug_class`, `aro_resistance_mechanism`
+  (kb_schema `0.1.0`→`0.2.0`); `populate_database.py` writes them for CARD hits.
+- **M6 CARD version recorded** — `AMR_CARD_VERSION` env override →
+  `kb_metadata.card_version` (e.g. `4.0.1`), no config.yaml edit on HPC.
+- `AMR_ENTREZ_EMAIL` / `AMR_ENTREZ_API_KEY` env overrides for step 09 Entrez.
+
+### Changed
+- **Step 08 NCBI remote BLAST decoupled from CARD.** The public NCBI server
+  SIGXCPU-kills `blastn-short`/word7 over `nt`; the remote pass now uses
+  `blastn`/word11 + a taxid `-entrez_query` (`txid<N>[Organism:exp]`, from the
+  registry — a scientific-name value breaks the Nextflow CLI launcher) +
+  `-max_target_seqs`; CARD local pass unchanged. Step 08 also sets
+  `NXF_ANSI_LOG=false` so backgrounded Nextflow doesn't stall (SIGTTOU).
+
+### KB schema
+- `KB_SCHEMA_VERSION` `0.1.0` → `0.2.0` (added ARO columns to `blast_annotations`).
+
 - Knowledge-base layer (M8, the thesis contribution): `lib/kb_schema.py` (SQLite
   DDL, 11 tables per ROADMAP §1.1, stdlib only — no new dependency) +
   `populate_database.py` (loads pipeline outputs — run_metadata, manifest, 06

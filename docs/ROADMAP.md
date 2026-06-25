@@ -198,19 +198,19 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | # | Gereklilik | Mevcut Durum | Tahmini Süre |
 |---|---|---|---|
 | M1 | **P-01 fix: Data leakage** — Youden's J test setten kaldır, sadece train/val üzerinden hesapla | Aktif bug | 2 saat |
-| M2 | **Soya-duyarlı çapraz doğrulama (§0.1)** — PopPUNK küme etiketleri + GroupKFold. *(REVİZE: rastgele/5-seed CV artık YETERSİZ; lineage-aware ZORUNLU.)* | Yok | 1-2 hafta |
+| M2 | **Soya-duyarlı çapraz doğrulama (§0.1)** — PopPUNK küme etiketleri + GroupKFold. *(REVİZE: rastgele/5-seed CV artık YETERSİZ; lineage-aware ZORUNLU.)* | ✅ DONE (2026-06-23) — 07b StratifiedGroupKFold, 324 PopPUNK kümesi, AUC 0.9505±0.01 | 1-2 hafta |
 | M3 | **E-value confidence tier sistemi** — Mevcut BLAST sonuçlarını confirmed/candidate/weak olarak yeniden sınıflandır | Yok | 3 gün |
 | M4 | **Feature stability (07b) — CPSS, B=100, %50 alt-örnek, π≥0.6 + SHAP (§0.1)** *(REVİZE: 5-seed yerine Meinshausen-Bühlmann/Shah-Samworth)* | Yok | 1 hafta |
-| M12 | **Unitig temsiline geçiş (§0.1)** — bcalm2 + unitig-caller (ham k-mer yerine) | Yok | 1 hafta |
+| M12 | **Unitig temsiline geçiş (§0.1)** — bcalm2 + unitig-caller (ham k-mer yerine) | ✅ DONE (2026-06-23) — 4.94M unitig matrisi, `03u_unitig_matrix.py` | 1 hafta |
 | M13 | **Dış doğrulama (§0.1)** — zamansal/coğrafi hold-out + AMRFinderPlus/ResFinder concordance (Kappa, McNemar, bACC) | Yok | 1 hafta |
 | M14 | **pyseer LMM + Bonferroni (§0.1)** — popülasyon-yapısı düzeltmeli k-mer/unitig anlamlılığı | Yok | 3 gün |
 | M15 | **Genom QC (§0.2)** — BV-BRC metadata ön-filtre + yerel CheckM2 + QUAST | Eksik (IQR-only) | 3 gün |
-| M16 | **ARO/CARD ontoloji eşlemesi (§0.2)** — KB'de ARO ID + gen ailesi + mekanizma + ilaç sınıfı | Yok | 3 gün |
+| M16 | **ARO/CARD ontoloji eşlemesi (§0.2)** — KB'de ARO ID + gen ailesi + mekanizma + ilaç sınıfı | ✅ DONE (2026-06-24) — 09 ARO mapping + `blast_annotations` ARO kolonları (kb_schema 0.2.0), 13/60 eşlendi | 3 gün |
 | M5 | **Reproducibility fix** — Ampicillin ve ciprofloxacin matrislerini Zenodo'ya yükle veya yeniden üretim pipeline'ını belgele | Eksik | 3 gün |
-| M6 | **CARD version kaydı** — CARD hangi versiyonu? config.yaml ve Methods bölümüne | Kayıt yok | 2 saat |
-| M7 | **Known mechanism recovery rate tablosu** — Confirmed tier k-mer'lerin kaçı bilinen ARG? | Yok | 2 gün |
-| M8 | **PostgreSQL KB + populate script** — En az gentamicin ve cefotaxime için çalışan KB | Sıfır | 2 hafta |
-| M9 | **Permutation test** — Null dağılım vs. gerçek model | Yok | 3 gün |
+| M6 | **CARD version kaydı** — CARD hangi versiyonu? config.yaml ve Methods bölümüne | ✅ DONE (2026-06-24) — `AMR_CARD_VERSION` env → `kb_metadata.card_version=4.0.1` | 2 saat |
+| M7 | **Known mechanism recovery rate tablosu** — Confirmed tier k-mer'lerin kaçı bilinen ARG? | ✅ DONE (2026-06-24) — 09 `08_validation_metrics`: recovery %32 (9/28 stable), **H2 FALSE** (<%40; §0.4'e göre sorun değil) | 2 gün |
+| M8 | **PostgreSQL KB + populate script** — En az gentamicin ve cefotaxime için çalışan KB | ✅ SQLite DONE (2026-06-24) — ampicillin `amrk.db` schema 0.2.0 dolu (65 kmer); Postgres migration + 2. antibiyotik kaldı | 2 hafta |
+| M9 | **Permutation test** — Null dağılım vs. gerçek model | ✅ DONE & saved (2026-06-24) — `12` MDA (0/51 FDR-sig: unitig redundancy) + `12b` label-perm null (REAL 0.9534 ≫ null mean 0.4994/max 0.5521, **p=0.0099 significant**) | 3 gün |
 | M10 | **KB versiyonlama + Zenodo DOI** — `kb_schema_version` alanı DB'ye eklenmeli; git semver tag (v0.1.0) + Zenodo deposit; kalıcı DOI Methods bölümüne ve README'ye yazılmalı | Yok | 2 gün |
 | M11 | **Validation evidence tablosu** — `validation_evidence` şeması + pipeline entegrasyonu; her BLAST, ResFinder ve permutation test sonucu `evidence_type`, `evidence_source`, `evidence_score`, `pipeline_run_id` alanlarıyla kayıt altına alınmalı | Sıfır | 3 gün |
 
