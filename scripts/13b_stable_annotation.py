@@ -68,7 +68,10 @@ def annotate(stable_df, blast_df, tiers, aro_index):
             "aro_accession": "", "aro_gene_family": "",
             "aro_drug_class": "", "aro_resistance_mechanism": "",
         }
-        hits = blast_df[blast_df["qseqid"] == str(fidx)] if not blast_df.empty else blast_df
+        # qseqid is a bare integer here, so read_blast_tsv infers it as int64 —
+        # compare as strings on both sides.
+        hits = (blast_df[blast_df["qseqid"].astype(str) == str(fidx)]
+                if not blast_df.empty else blast_df)
         if hits is not None and not hits.empty:
             best = hits.loc[hits["evalue"].idxmin()]
             qlen = float(best["qlen"]) if best["qlen"] == best["qlen"] else (len(kmer) or 1)
