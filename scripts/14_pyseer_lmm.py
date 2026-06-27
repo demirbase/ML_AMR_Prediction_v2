@@ -56,28 +56,30 @@ def _tool(name):
     return p
 
 
-def write_phenotype(genomes_csv, y_csv, out_tsv):
-    """pyseer phenotype TSV: 'samples\\tresistant' (sample = genome id)."""
+def write_phenotype(genomes_csv, y_csv, out_tsv, samples_txt):
+    """pyseer phenotype TSV ('samples<TAB>resistant') + a plain sample-name list
+    (one genome id per line) for similarity_pyseer's positional argument."""
     g = pd.read_csv(genomes_csv, encoding="utf-8")
     gid = g[g.columns[0]].astype(str)          # 'Genome ID' (first col)
     y = pd.read_csv(y_csv, encoding="utf-8")["label"].astype(int)
     pd.DataFrame({"samples": gid, "resistant": y.values}).to_csv(
         out_tsv, sep="\t", index=False)
+    Path(samples_txt).write_text("\n".join(gid) + "\n", encoding="utf-8")
     return int((y == 1).sum()), int((y == 0).sum())
 
 
-def bonferroni_threshold(count_patterns_bin, patterns_file):
-    """Run count_patterns.py and parse its 'Threshold:' line (0.05/#patterns)."""
-    res = subprocess.run([count_patterns_bin, str(patterns_file)],
-                         capture_output=True, text=True, check=True)
-    thr = n_pat = None
-    for line in (res.stdout + res.stderr).splitlines():
-        low = line.lower()
-        if low.startswith("threshold"):
-            thr = float(line.split()[-1])
-        elif low.startswith("patterns"):
-            n_pat = int(line.split()[-1])
-    return thr, n_pat
+def bonferroni_threshold(patterns_file):
+    """0.05 / (number of unique presence/absence patterns) — pyseer's standard
+    multiple-testing correction (count_patterns.py isn't in this container, so we
+    count unique pattern hashes from --output-patterns directly)."""
+    pats = set()
+    with open(patterns_file, encoding="utf-8") as fh:
+        for line in fh:
+            s = line.strip()
+            if s:
+                pats.add(s)
+    n = len(pats)
+    return (0.05 / n if n else float("nan")), n
 
 
 def parse_and_flag(assoc_file, threshold, cpss_kmers):
@@ -114,7 +116,6 @@ def main():
 
     pyseer = _tool("pyseer")
     sim_bin = _tool("similarity_pyseer")
-    count_bin = _tool("count_patterns.py")
 
     print("=" * 74)
     print(f"PYSEER LMM  —  {organism} / {antibiotic}")
@@ -123,8 +124,9 @@ def main():
 
     # 1) phenotype -----------------------------------------------------------
     pheno = out_dir / f"14_phenotype_{antibiotic}.tsv"
+    samples_txt = out_dir / f"14_samples_{antibiotic}.txt"
     nR, nS = write_phenotype(matrix_dir / f"genomes_{antibiotic}.csv",
-                             matrix_dir / f"y_{antibiotic}.csv", pheno)
+                             matrix_dir / f"y_{antibiotic}.csv", pheno, samples_txt)
     print(f"  [1/4] phenotype: {nR} R / {nS} S  -> {pheno.name}")
 
     # 2) kinship / similarity (genome-wide population structure) --------------
@@ -132,7 +134,8 @@ def main():
     if not sim.exists():
         print("  [2/4] computing similarity (similarity_pyseer, streamed)...", flush=True)
         with open(sim, "w") as fh:
-            subprocess.run([sim_bin, "--pres", str(pres)], stdout=fh, check=True)
+            subprocess.run([sim_bin, str(samples_txt), "--pres", str(pres)],
+                           stdout=fh, check=True)
     else:
         print(f"  [2/4] using existing similarity: {sim.name}")
 
@@ -150,7 +153,7 @@ def main():
         print(f"  [3/4] using existing association: {assoc.name}")
 
     # 4) Bonferroni + CPSS cross-check ---------------------------------------
-    threshold, n_pat = bonferroni_threshold(count_bin, patterns)
+    threshold, n_pat = bonferroni_threshold(patterns)
     cpss_csv = out_dir / f"13_stability_selection_{antibiotic}.csv"
     cpss_kmers = set()
     if cpss_csv.exists():
