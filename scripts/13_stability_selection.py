@@ -202,6 +202,16 @@ def main():
     csv_path = out_dir / f"13_stability_selection_{antibiotic}.csv"
     df.to_csv(csv_path, index=False, encoding="utf-8")
 
+    # Emit the stable set as FASTA so it can be BLAST-validated against CARD
+    # (biological closure of the statistically-stable selection).
+    stable_df = df[(df["stable"] == 1) & (df["kmer"].astype(str).str.len() > 0)]
+    fasta_path = out_dir / f"13_stable_features_{antibiotic}.fasta"
+    with open(fasta_path, "w", encoding="utf-8") as fh:
+        for rank, (_, r) in enumerate(stable_df.iterrows(), 1):
+            fh.write(f">stable_{rank}|freq_{r['selection_frequency']:.2f}|"
+                     f"shap_{r['mean_abs_shap']:.4g}|fidx_{int(r['feature_index'])}\n")
+            fh.write(f"{r['kmer']}\n")
+
     n_stable = int(stable.sum())
     summary = {
         "antibiotic": antibiotic, "organism": organism,
@@ -220,7 +230,8 @@ def main():
     print("\n" + "=" * 78)
     print(f"  stable unitigs (freq>={args.pi}): {n_stable}/{len(top_idx)} "
           f"| avg selected/fit={avg_sel:.1f} | PFER bound={pfer:.3f}")
-    print(f"  ✓ {csv_path.name}\n  ✓ 13_stability_summary_{antibiotic}.json")
+    print(f"  ✓ {csv_path.name}\n  ✓ 13_stability_summary_{antibiotic}.json"
+          f"\n  ✓ {fasta_path.name} ({n_stable} stable unitigs for BLAST)")
     print("=" * 78)
 
 
