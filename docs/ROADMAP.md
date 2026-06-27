@@ -200,7 +200,7 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | M1 | **P-01 fix: Data leakage** — Youden's J test setten kaldır, sadece train/val üzerinden hesapla | Aktif bug | 2 saat |
 | M2 | **Soya-duyarlı çapraz doğrulama (§0.1)** — PopPUNK küme etiketleri + GroupKFold. *(REVİZE: rastgele/5-seed CV artık YETERSİZ; lineage-aware ZORUNLU.)* | ✅ DONE (2026-06-23) — 07b StratifiedGroupKFold, 324 PopPUNK kümesi, AUC 0.9505±0.01 | 1-2 hafta |
 | M3 | **E-value confidence tier sistemi** — Mevcut BLAST sonuçlarını confirmed/candidate/weak olarak yeniden sınıflandır | Yok | 3 gün |
-| M4 | **Feature stability (07b) — CPSS, B=100, %50 alt-örnek, π≥0.6 + SHAP (§0.1)** *(REVİZE: 5-seed yerine Meinshausen-Bühlmann/Shah-Samworth)* | Yok | 1 hafta |
+| M4 | **Feature stability (07b) — CPSS, B=100, %50 alt-örnek, π≥0.6 + SHAP (§0.1)** *(REVİZE: 5-seed yerine Meinshausen-Bühlmann/Shah-Samworth)* | ✅ DONE (2026-06-25) — `13` CPSS (Chi² ön-filtre→200 fit→π≥0.6) + yerleşik TreeSHAP; **39 kararlı, PFER≤5.4**; `13b` CARD-tier+ARO: 5 confirmed (TEM-256/257/258, APH(6)-Id, AAC(6')-Ib7, tam-boy); KB'de (schema 0.3.0, method='cpss') | 1 hafta |
 | M12 | **Unitig temsiline geçiş (§0.1)** — bcalm2 + unitig-caller (ham k-mer yerine) | ✅ DONE (2026-06-23) — 4.94M unitig matrisi, `03u_unitig_matrix.py` | 1 hafta |
 | M13 | **Dış doğrulama (§0.1)** — zamansal/coğrafi hold-out + AMRFinderPlus/ResFinder concordance (Kappa, McNemar, bACC) | Yok | 1 hafta |
 | M14 | **pyseer LMM + Bonferroni (§0.1)** — popülasyon-yapısı düzeltmeli k-mer/unitig anlamlılığı | Yok | 3 gün |
