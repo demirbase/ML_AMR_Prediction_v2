@@ -243,6 +243,41 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
     return n
 
 
+def populate_permutation(conn, run_id, k, perm_df, labelperm):
+    """Permutation significance (step 12 / 12b) -> validation_evidence.
+
+    Per-candidate MDA (test ROC-AUC drop) rows + one model-level label-permutation
+    null row (kmer_id NULL, evidence_score = empirical p). Both are evidence, not
+    per-kmer scores, so they live in the generic evidence ledger."""
+    n = 0
+    if perm_df is not None and not perm_df.empty:
+        for _, r in perm_df.iterrows():
+            seq = str(r.get("kmer", "")).strip()
+            if not seq:
+                continue
+            kid = kmer_id(conn, seq, k)
+            conn.execute(
+                """INSERT INTO validation_evidence
+                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   VALUES (?,?,?,?,?)""",
+                (kid, "permutation_mda", "MDA test ROC-AUC drop (100 perms, BH-FDR)",
+                 _f(r.get("mda_auc_drop")), run_id),
+            )
+            n += 1
+    if labelperm:
+        src = (f"label-shuffle null (N={labelperm.get('n_permutations')}, "
+               f"real_auc={labelperm.get('real_roc_auc')}, "
+               f"null_max={labelperm.get('null_auc_max')})")
+        conn.execute(
+            """INSERT INTO validation_evidence
+               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               VALUES (?,?,?,?,?)""",
+            (None, "label_permutation", src, _f(labelperm.get("empirical_p")), run_id),
+        )
+        n += 1
+    return n
+
+
 def update_metadata(conn, card_version):
     n_kmers = conn.execute("SELECT COUNT(*) FROM kmers").fetchone()[0]
     n_models = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
@@ -289,6 +324,9 @@ def main():
     if cand is None:
         cand = _read_csv(_find(results_root, f"07_kb_candidates_{antibiotic}.csv"))
     snp = _read_csv(_find(results_root, f"11_variant_snp_check_{antibiotic}.csv"))
+    # Permutation significance (step 12 MDA + step 12b label-permutation null).
+    perm_df = _read_csv(_find(results_root, f"12_permutation_test_{antibiotic}.csv"))
+    labelperm = _read_json(_find(results_root, f"12b_label_permutation_summary_{antibiotic}.json"))
 
     # Adaptive min_support actually used (from pipeline_runs if present, else config)
     min_support = (run_meta or {}).get("min_support")
@@ -304,6 +342,8 @@ def main():
     print(f"  07b holdout  : {'yes' if holdout is not None else 'MISSING'}")
     print(f"  candidates   : {'10 (with background)' if (cand is not None and 'discriminative' in cand.columns) else ('09' if cand is not None else 'MISSING')}")
     print(f"  11 SNP       : {'yes' if snp is not None else 'absent (ok)'}")
+    print(f"  permutation  : MDA {'yes' if perm_df is not None else 'absent'} / "
+          f"label-perm {'yes' if labelperm else 'absent'}")
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
@@ -313,12 +353,14 @@ def main():
         model_id = populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout)
         n_k = populate_candidates(conn, model_id, run_id, k_length, cand, card_version)
         n_s = populate_snp(conn, model_id, run_id, k_length, snp)
+        n_p = populate_permutation(conn, run_id, k_length, perm_df, labelperm)
         update_metadata(conn, card_version)
         conn.commit()
     finally:
         conn.close()
 
-    print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} | SNP rows: {n_s}")
+    print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} "
+          f"| SNP rows: {n_s} | permutation evidence: {n_p}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
 
 
