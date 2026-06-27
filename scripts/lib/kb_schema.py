@@ -23,7 +23,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.2.0"
+KB_SCHEMA_VERSION = "0.3.0"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -84,10 +84,12 @@ CREATE TABLE IF NOT EXISTS kmer_model_scores (
     model_id             INTEGER NOT NULL REFERENCES models(model_id),
     gain                 REAL,               -- XGBoost Gain importance
     in_gain_topn         INTEGER,            -- 0/1 in the single-model top-N
-    selection_frequency  REAL,               -- 07b: fraction of seeds in top-N
+    selection_frequency  REAL,               -- selection frequency (method below)
     stable               INTEGER,            -- 0/1 selection_frequency >= threshold
     composite_score      REAL,               -- stability * log10(1/E) * identity
-    PRIMARY KEY (kmer_id, model_id)
+    mean_abs_shap        REAL,               -- mean |TreeSHAP| (CPSS rows; step 13)
+    selection_method     TEXT,               -- 'gain_seed' (07/07b) | 'cpss' (step 13)
+    PRIMARY KEY (kmer_id, model_id, selection_method)
 );
 
 -- BLAST hits (CARD local + NCBI remote), one row per (kmer, db, hit). --------

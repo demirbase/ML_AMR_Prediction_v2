@@ -167,11 +167,11 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
         conn.execute(
             """INSERT OR REPLACE INTO kmer_model_scores
                (kmer_id, model_id, gain, in_gain_topn, selection_frequency,
-                stable, composite_score)
-               VALUES (?,?,?,?,?,?,?)""",
+                stable, composite_score, mean_abs_shap, selection_method)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (kid, model_id, _f(r.get("gain_score")), _b(r.get("in_gain_topN", 1)),
              _f(r.get("selection_frequency")), _b(r.get("stable")),
-             _f(r.get("composite_score"))),
+             _f(r.get("composite_score")), None, "gain_seed"),
         )
         # CARD BLAST annotation (best hit recorded in the candidate row)
         if str(r.get("card_gene", "")).strip():
@@ -238,6 +238,52 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
                (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (kid, "snp", "CARD variant model", None, run_id),
+        )
+        n += 1
+    return n
+
+
+def populate_cpss(conn, model_id, run_id, k, cpss_df):
+    """Load the CPSS-stable, CARD-annotated unitigs (steps 13/13b) into the KB:
+    kmer_model_scores (selection_method='cpss', CPSS selection_frequency +
+    mean|SHAP|), CARD blast_annotations (tier + coverage + ARO), and a
+    stability_selection evidence row each."""
+    if cpss_df is None or cpss_df.empty:
+        return 0
+    n = 0
+    for _, r in cpss_df.iterrows():
+        seq = str(r.get("kmer", "")).strip()
+        if not seq:
+            continue
+        kid = kmer_id(conn, seq, k)
+        conn.execute(
+            """INSERT OR REPLACE INTO kmer_model_scores
+               (kmer_id, model_id, gain, in_gain_topn, selection_frequency,
+                stable, composite_score, mean_abs_shap, selection_method)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (kid, model_id, None, 0, _f(r.get("selection_frequency")),
+             _b(r.get("stable")), _f(r.get("composite_score")),
+             _f(r.get("mean_abs_shap")), "cpss"),
+        )
+        if str(r.get("card_gene", "")).strip():
+            conn.execute(
+                """INSERT INTO blast_annotations
+                   (kmer_id, model_id, source_db, gene_symbol, identity_pct,
+                    coverage, evalue, tier, aro_accession, aro_gene_family,
+                    aro_drug_class, aro_resistance_mechanism)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (kid, model_id, "card", str(r.get("card_gene")),
+                 _f(r.get("card_identity")), _f(r.get("coverage")),
+                 _f(r.get("card_evalue")), str(r.get("confidence_tier", "none")),
+                 _s(r.get("aro_accession")), _s(r.get("aro_gene_family")),
+                 _s(r.get("aro_drug_class")), _s(r.get("aro_resistance_mechanism"))),
+            )
+        conn.execute(
+            """INSERT INTO validation_evidence
+               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               VALUES (?,?,?,?,?)""",
+            (kid, "stability_selection", "CPSS (B=100, pi>=0.6, PFER-bounded)",
+             _f(r.get("selection_frequency")), run_id),
         )
         n += 1
     return n
@@ -327,6 +373,8 @@ def main():
     # Permutation significance (step 12 MDA + step 12b label-permutation null).
     perm_df = _read_csv(_find(results_root, f"12_permutation_test_{antibiotic}.csv"))
     labelperm = _read_json(_find(results_root, f"12b_label_permutation_summary_{antibiotic}.json"))
+    # CPSS-stable, CARD-annotated unitigs (steps 13/13b).
+    cpss = _read_csv(_find(results_root, f"13_stable_kb_candidates_{antibiotic}.csv"))
 
     # Adaptive min_support actually used (from pipeline_runs if present, else config)
     min_support = (run_meta or {}).get("min_support")
@@ -344,6 +392,7 @@ def main():
     print(f"  11 SNP       : {'yes' if snp is not None else 'absent (ok)'}")
     print(f"  permutation  : MDA {'yes' if perm_df is not None else 'absent'} / "
           f"label-perm {'yes' if labelperm else 'absent'}")
+    print(f"  CPSS stable  : {'yes' if cpss is not None else 'absent'}")
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
@@ -354,13 +403,14 @@ def main():
         n_k = populate_candidates(conn, model_id, run_id, k_length, cand, card_version)
         n_s = populate_snp(conn, model_id, run_id, k_length, snp)
         n_p = populate_permutation(conn, run_id, k_length, perm_df, labelperm)
+        n_c = populate_cpss(conn, model_id, run_id, k_length, cpss)
         update_metadata(conn, card_version)
         conn.commit()
     finally:
         conn.close()
 
     print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} "
-          f"| SNP rows: {n_s} | permutation evidence: {n_p}")
+          f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
 
 
