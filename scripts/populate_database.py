@@ -289,6 +289,33 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
     return n
 
 
+def populate_pyseer(conn, run_id, sig_df, threshold):
+    """pyseer LMM (lineage-corrected) significance (step 14) -> validation_evidence,
+    only for unitigs ALREADY in the KB (don't create bare kmers for genome-wide
+    hits with no model/annotation)."""
+    if sig_df is None or sig_df.empty:
+        return 0
+    pcol = "lrt-pvalue" if "lrt-pvalue" in sig_df.columns else "filter-pvalue"
+    src = f"pyseer LMM lineage-corrected (Bonferroni {threshold:.2e})" if threshold else \
+          "pyseer LMM lineage-corrected"
+    n = 0
+    for _, r in sig_df.iterrows():
+        seq = str(r.get("variant", "")).strip()
+        if not seq:
+            continue
+        row = conn.execute("SELECT kmer_id FROM kmers WHERE sequence=?", (seq,)).fetchone()
+        if not row:
+            continue
+        conn.execute(
+            """INSERT INTO validation_evidence
+               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               VALUES (?,?,?,?,?)""",
+            (row[0], "pyseer_lmm", src, _f(r.get(pcol)), run_id),
+        )
+        n += 1
+    return n
+
+
 def populate_permutation(conn, run_id, k, perm_df, labelperm):
     """Permutation significance (step 12 / 12b) -> validation_evidence.
 
@@ -375,6 +402,9 @@ def main():
     labelperm = _read_json(_find(results_root, f"12b_label_permutation_summary_{antibiotic}.json"))
     # CPSS-stable, CARD-annotated unitigs (steps 13/13b).
     cpss = _read_csv(_find(results_root, f"13_stable_kb_candidates_{antibiotic}.csv"))
+    # pyseer LMM lineage-corrected significance (step 14).
+    pyseer_sig = _read_csv(_find(results_root, f"14_pyseer_significant_{antibiotic}.csv"))
+    pyseer_sum = _read_json(_find(results_root, f"14_pyseer_summary_{antibiotic}.json"))
 
     # Adaptive min_support actually used (from pipeline_runs if present, else config)
     min_support = (run_meta or {}).get("min_support")
@@ -393,6 +423,7 @@ def main():
     print(f"  permutation  : MDA {'yes' if perm_df is not None else 'absent'} / "
           f"label-perm {'yes' if labelperm else 'absent'}")
     print(f"  CPSS stable  : {'yes' if cpss is not None else 'absent'}")
+    print(f"  pyseer LMM   : {'yes' if pyseer_sig is not None else 'absent'}")
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
@@ -404,13 +435,16 @@ def main():
         n_s = populate_snp(conn, model_id, run_id, k_length, snp)
         n_p = populate_permutation(conn, run_id, k_length, perm_df, labelperm)
         n_c = populate_cpss(conn, model_id, run_id, k_length, cpss)
+        n_l = populate_pyseer(conn, run_id, pyseer_sig,
+                              (pyseer_sum or {}).get("bonferroni_threshold"))
         update_metadata(conn, card_version)
         conn.commit()
     finally:
         conn.close()
 
     print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} "
-          f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c}")
+          f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c} "
+          f"| pyseer LMM evidence: {n_l}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
 
 
