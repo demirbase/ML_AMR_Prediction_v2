@@ -145,6 +145,10 @@ def main():
     ap.add_argument("--n-candidates", type=int, default=5000, help="Chi² prefilter top-K")
     ap.add_argument("--B", type=int, default=100, help="complementary pairs (2B fits)")
     ap.add_argument("--pi", type=float, default=0.6, help="stability threshold")
+    ap.add_argument("--base-trees", type=int, default=10,
+                    help="trees in the CPSS base selector — kept small/sparse and "
+                         "decoupled from the final model so few features are picked "
+                         "per fit, which is what makes the PFER bound tight")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
@@ -158,7 +162,7 @@ def main():
 
     print("=" * 78)
     print(f"STABILITY SELECTION (CPSS) + SHAP  —  {organism} / {antibiotic}")
-    print(f"  K={args.n_candidates}  B={args.B} (2B fits)  pi={args.pi}")
+    print(f"  K={args.n_candidates}  B={args.B} (2B fits)  pi={args.pi}  base_trees={args.base_trees}")
     print("=" * 78)
 
     y_all = np.asarray(
@@ -180,8 +184,8 @@ def main():
     print("  [2/4] loading candidate matrix...", flush=True)
     X_k = load_candidate_matrix(chunk_files, chunk_size, top_idx)
 
-    print(f"  [3/4] CPSS — {2*args.B} fits...", flush=True)
-    sel_freq, avg_sel = cpss(X_k, y_all, params, total_trees, args.B, rng)
+    print(f"  [3/4] CPSS — {2*args.B} fits (base selector: {args.base_trees} trees)...", flush=True)
+    sel_freq, avg_sel = cpss(X_k, y_all, params, args.base_trees, args.B, rng)
 
     print("  [4/4] SHAP (TreeSHAP, built-in)...", flush=True)
     shap_imp = shap_importance(X_k, y_all, params, total_trees)
@@ -220,6 +224,7 @@ def main():
         "n_stable": n_stable,
         "avg_selected_per_fit": avg_sel,
         "pfer_bound": pfer,
+        "base_trees": args.base_trees,
         "n_trees": int(total_trees),
         "top_stable": df[df["stable"] == 1].head(15)[
             ["kmer", "selection_frequency", "mean_abs_shap"]].to_dict("records"),

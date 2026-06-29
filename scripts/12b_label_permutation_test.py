@@ -37,6 +37,7 @@ from pathlib import Path
 
 import numpy as np
 import xgboost as xgb
+from scipy.sparse import load_npz, vstack
 from sklearn.metrics import roc_auc_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -105,10 +106,19 @@ def main():
     dtrain = _s.build_quantile_dmatrix(chunk_files, y_all, _s.CHUNK_SIZE,
                                        max_bin=max_bin, row_mask=train_mask,
                                        pos_weight=None)
-    # The held-out test set is one stratified split (small) — load it once.
-    X_test, _y_test_real, _ids = _ev.load_test_data(y_all, chunk_files, test_filenames)
-    dtest = xgb.DMatrix(X_test)
-    assert dtest.num_row() == int(test_mask.sum()), "test row order/count mismatch"
+    # Build the test matrix in ASCENDING chunk order so it aligns with
+    # y[test_mask]. The experiment config's test_files can be listed in a
+    # non-ascending order; using that order (load_test_data) would misalign the
+    # per-row labels and collapse the AUC to ~0.5. Stream + select test rows.
+    test_parts = []
+    for f in chunk_files:
+        cid = int(f.stem.split("_")[-1])
+        X = load_npz(f).tocsr()
+        local = test_mask[cid * _s.CHUNK_SIZE: cid * _s.CHUNK_SIZE + X.shape[0]]
+        if local.any():
+            test_parts.append(X[local])
+    dtest = xgb.DMatrix(vstack(test_parts, format="csr"))
+    assert dtest.num_row() == int(test_mask.sum()), "test row count mismatch"
 
     def fit_eval(y_vec):
         ytr, yte = y_vec[train_mask], y_vec[test_mask]
