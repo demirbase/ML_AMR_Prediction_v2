@@ -108,17 +108,29 @@ def populate_run(conn, organism, antibiotic, run_meta, card_version, min_support
     rm = run_meta or {}
     run_id = rm.get("run_id") or f"{organism}__{antibiotic}__unknown"
     versions = rm.get("versions", {}) if isinstance(rm.get("versions"), dict) else {}
+    # Keys must match lib.run_metadata.build_run_metadata: git_commit_hash,
+    # random_seed, started_at, data_fingerprint (a dict). config_hash column gets
+    # the fingerprint's sha256 (or the whole dict JSON-encoded — SQLite can't bind
+    # a dict directly, which crashed once run_metadata.json actually existed).
+    fp = rm.get("data_fingerprint")
+    if isinstance(fp, dict):
+        config_hash = fp.get("sha256") if isinstance(fp.get("sha256"), str) \
+            else json.dumps(fp, sort_keys=True)
+    else:
+        config_hash = rm.get("config_hash")
+        if config_hash is not None and not isinstance(config_hash, str):
+            config_hash = json.dumps(config_hash, sort_keys=True)
     conn.execute(
         """INSERT OR REPLACE INTO pipeline_runs
            (run_id, organism, antibiotic, git_commit, git_dirty, card_version,
             kmc_version, xgboost_version, random_seed, config_hash, min_support,
             n_genomes, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (run_id, organism, antibiotic, rm.get("git_commit"), _i(rm.get("git_dirty")),
+        (run_id, organism, antibiotic, rm.get("git_commit_hash"), _i(rm.get("git_dirty")),
          card_version, versions.get("kmc"), versions.get("xgboost"),
-         _i(rm.get("seed")), rm.get("data_fingerprint") or rm.get("config_hash"),
+         _i(rm.get("random_seed")), config_hash,
          _i(min_support), _i(rm.get("n_genomes")),
-         rm.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
+         rm.get("started_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
     )
     return run_id
 
