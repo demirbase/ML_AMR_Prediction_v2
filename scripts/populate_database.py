@@ -13,9 +13,9 @@ note, so the KB can be built from a partial pipeline):
   models/.../manifest.json + 06 metrics    -> models
   results/.../10_repeated_holdout_summary  -> models (07b 5-seed AUC mean/std)
   results/.../07_kb_candidates_{ab}.csv     \\
-  results/.../10_kmer_background_frequency   } -> kmers, kmer_model_scores,
+  results/.../10_kmer_background_frequency   } -> unitigs, unitig_model_scores,
   results/.../11_variant_snp_check           /    blast_annotations,
-                                                  kmer_background_frequency,
+                                                  unitig_background_frequency,
                                                   variant_snp_check, validation_evidence
 
 Usage:
@@ -94,11 +94,11 @@ def _s(x):
 # ---------------------------------------------------------------------------
 # Per-table loaders
 # ---------------------------------------------------------------------------
-def kmer_id(conn, sequence, k):
+def unitig_id(conn, sequence, k):
     """INSERT-OR-IGNORE a k-mer and return its id (dedup on sequence)."""
-    conn.execute("INSERT OR IGNORE INTO kmers(sequence, k) VALUES (?,?)",
+    conn.execute("INSERT OR IGNORE INTO unitigs(sequence, k) VALUES (?,?)",
                  (sequence, k))
-    row = conn.execute("SELECT kmer_id FROM kmers WHERE sequence=?",
+    row = conn.execute("SELECT unitig_id FROM unitigs WHERE sequence=?",
                        (sequence,)).fetchone()
     return row[0]
 
@@ -175,10 +175,10 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
         seq = str(r.get("kmer", "")).strip()
         if not seq:
             continue
-        kid = kmer_id(conn, seq, k)
+        kid = unitig_id(conn, seq, k)
         conn.execute(
-            """INSERT OR REPLACE INTO kmer_model_scores
-               (kmer_id, model_id, gain, in_gain_topn, selection_frequency,
+            """INSERT OR REPLACE INTO unitig_model_scores
+               (unitig_id, model_id, gain, in_gain_topn, selection_frequency,
                 stable, composite_score, mean_abs_shap, selection_method)
                VALUES (?,?,?,?,?,?,?,?,?)""",
             (kid, model_id, _f(r.get("gain_score")), _b(r.get("in_gain_topN", 1)),
@@ -189,7 +189,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
         if str(r.get("card_gene", "")).strip():
             conn.execute(
                 """INSERT INTO blast_annotations
-                   (kmer_id, model_id, source_db, gene_symbol, identity_pct,
+                   (unitig_id, model_id, source_db, gene_symbol, identity_pct,
                     evalue, tier, aro_accession, aro_gene_family, aro_drug_class,
                     aro_resistance_mechanism)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
@@ -201,15 +201,15 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
             )
             conn.execute(
                 """INSERT INTO validation_evidence
-                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "blast", f"CARD {card_version}", _f(r.get("card_evalue")), run_id),
             )
         # Background frequency / discriminativeness (only present in 10's output)
         if has_bg:
             conn.execute(
-                """INSERT OR REPLACE INTO kmer_background_frequency
-                   (kmer_id, model_id, prevalence_resistant, prevalence_susceptible,
+                """INSERT OR REPLACE INTO unitig_background_frequency
+                   (unitig_id, model_id, prevalence_resistant, prevalence_susceptible,
                     prevalence_overall, delta_prevalence, odds_ratio, fisher_p,
                     discriminative) VALUES (?,?,?,?,?,?,?,?,?)""",
                 (kid, model_id, _f(r.get("prevalence_resistant")),
@@ -219,7 +219,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
             )
             conn.execute(
                 """INSERT INTO validation_evidence
-                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "background_frequency", "R-vs-S Fisher exact",
                  _f(r.get("fisher_p")), run_id),
@@ -237,17 +237,17 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
         seq = str(r.get("kmer", r.get("kmer_qseqid", ""))).strip()
         if not seq:
             continue
-        kid = kmer_id(conn, seq, k)
+        kid = unitig_id(conn, seq, k)
         conn.execute(
             """INSERT OR REPLACE INTO variant_snp_check
-               (kmer_id, model_id, card_model, snp, allele_class)
+               (unitig_id, model_id, card_model, snp, allele_class)
                VALUES (?,?,?,?,?)""",
             (kid, model_id, str(r.get("variant_gene", "")), str(r.get("snp", "")),
              str(r.get("allele_class", ""))),
         )
         conn.execute(
             """INSERT INTO validation_evidence
-               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (kid, "snp", "CARD variant model", None, run_id),
         )
@@ -257,7 +257,7 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
 
 def populate_cpss(conn, model_id, run_id, k, cpss_df):
     """Load the CPSS-stable, CARD-annotated unitigs (steps 13/13b) into the KB:
-    kmer_model_scores (selection_method='cpss', CPSS selection_frequency +
+    unitig_model_scores (selection_method='cpss', CPSS selection_frequency +
     mean|SHAP|), CARD blast_annotations (tier + coverage + ARO), and a
     stability_selection evidence row each."""
     if cpss_df is None or cpss_df.empty:
@@ -267,10 +267,10 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
         seq = str(r.get("kmer", "")).strip()
         if not seq:
             continue
-        kid = kmer_id(conn, seq, k)
+        kid = unitig_id(conn, seq, k)
         conn.execute(
-            """INSERT OR REPLACE INTO kmer_model_scores
-               (kmer_id, model_id, gain, in_gain_topn, selection_frequency,
+            """INSERT OR REPLACE INTO unitig_model_scores
+               (unitig_id, model_id, gain, in_gain_topn, selection_frequency,
                 stable, composite_score, mean_abs_shap, selection_method)
                VALUES (?,?,?,?,?,?,?,?,?)""",
             (kid, model_id, None, 0, _f(r.get("selection_frequency")),
@@ -280,7 +280,7 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
         if str(r.get("card_gene", "")).strip():
             conn.execute(
                 """INSERT INTO blast_annotations
-                   (kmer_id, model_id, source_db, gene_symbol, identity_pct,
+                   (unitig_id, model_id, source_db, gene_symbol, identity_pct,
                     coverage, evalue, tier, aro_accession, aro_gene_family,
                     aro_drug_class, aro_resistance_mechanism)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -292,7 +292,7 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
             )
         conn.execute(
             """INSERT INTO validation_evidence
-               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (kid, "stability_selection", "CPSS (B=100, pi>=0.6, PFER-bounded)",
              _f(r.get("selection_frequency")), run_id),
@@ -315,12 +315,12 @@ def populate_pyseer(conn, run_id, sig_df, threshold):
         seq = str(r.get("variant", "")).strip()
         if not seq:
             continue
-        row = conn.execute("SELECT kmer_id FROM kmers WHERE sequence=?", (seq,)).fetchone()
+        row = conn.execute("SELECT unitig_id FROM unitigs WHERE sequence=?", (seq,)).fetchone()
         if not row:
             continue
         conn.execute(
             """INSERT INTO validation_evidence
-               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (row[0], "pyseer_lmm", src, _f(r.get(pcol)), run_id),
         )
@@ -332,7 +332,7 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
     """Permutation significance (step 12 / 12b) -> validation_evidence.
 
     Per-candidate MDA (test ROC-AUC drop) rows + one model-level label-permutation
-    null row (kmer_id NULL, evidence_score = empirical p). Both are evidence, not
+    null row (unitig_id NULL, evidence_score = empirical p). Both are evidence, not
     per-kmer scores, so they live in the generic evidence ledger."""
     n = 0
     if perm_df is not None and not perm_df.empty:
@@ -340,10 +340,10 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
             seq = str(r.get("kmer", "")).strip()
             if not seq:
                 continue
-            kid = kmer_id(conn, seq, k)
+            kid = unitig_id(conn, seq, k)
             conn.execute(
                 """INSERT INTO validation_evidence
-                   (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+                   (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "permutation_mda", "MDA test ROC-AUC drop (100 perms, BH-FDR)",
                  _f(r.get("mda_auc_drop")), run_id),
@@ -355,7 +355,7 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
                f"null_max={labelperm.get('null_auc_max')})")
         conn.execute(
             """INSERT INTO validation_evidence
-               (kmer_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
+               (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (None, "label_permutation", src, _f(labelperm.get("empirical_p")), run_id),
         )
@@ -364,15 +364,15 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
 
 
 def update_metadata(conn, card_version):
-    n_kmers = conn.execute("SELECT COUNT(*) FROM kmers").fetchone()[0]
+    n_unitigs = conn.execute("SELECT COUNT(*) FROM unitigs").fetchone()[0]
     n_models = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
     conn.execute(
         """INSERT OR REPLACE INTO kb_metadata
            (id, kb_schema_version, card_version, zenodo_doi, license, created_at,
-            n_kmers, n_models)
+            n_unitigs, n_models)
            VALUES (1,?,?,?,?,?,?,?)""",
         (KB_SCHEMA_VERSION, card_version, None, "CC-BY-4.0",
-         datetime.datetime.now(datetime.timezone.utc).isoformat(), n_kmers, n_models),
+         datetime.datetime.now(datetime.timezone.utc).isoformat(), n_unitigs, n_models),
     )
 
 
@@ -454,7 +454,7 @@ def main():
     finally:
         conn.close()
 
-    print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | k-mers loaded: {n_k} "
+    print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | unitigs loaded: {n_k} "
           f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c} "
           f"| pyseer LMM evidence: {n_l}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
