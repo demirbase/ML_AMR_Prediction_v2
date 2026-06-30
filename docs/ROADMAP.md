@@ -69,6 +69,7 @@ Mevcut analizlerde yeterince vurgulanmamış: Gentamicin Rank 4 ve 5'teki k-mer'
 
 ### 0.5 Showcase antibiyotik + hedef dergi
 - **Showcase:** ciprofloxacin (gyrA/parC **SNP** — step 11 pozitif kontrol) + β-laktam (**edinilmiş gen** pozitif kontrol). Merkeze "**test edilebilir yeni biyolojik keşif**" koy (Database Oxford şartı).
+  - ✅ **GERÇEKLEŞTİ (2026-06-29):** **ampicillin** = edinilmiş gen (TEM-256/257/258; CARD recovery %47/H2 TRUE; SNP 0). **ciprofloxacin** = hedef-gen SNP (**gyrA S83L + parC S80I = resistant_allele**, step 11; CARD homolog recovery ~0 = beklenen). İki mekanizma, her biri doğru araçla doğrulanmış — showcase çifti hazır. KB çok-antibiyotikli (schema 0.4.0).
 - **Hedef dergi: Database (Oxford)** veya **Briefings in Bioinformatics** (NAR Database Issue 6 ayda gerçekçi değil). FAIR minimum: Zenodo DOI, REST API, Docker/Conda <30dk kurulum, 2-yıl erişim garantisi, ARO eşlemesi.
 
 ### 0.6 Pipeline'a etki — değişecek/eklenecek scriptler
@@ -206,7 +207,7 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | M14 | **pyseer LMM + Bonferroni (§0.1)** — popülasyon-yapısı düzeltmeli k-mer/unitig anlamlılığı | ✅ DONE (2026-06-25) — `14` pyseer LMM (kinship alt-örnekten, LMM adaylarda); eşik 1.09e-5; **26/39 CPSS-kararlı soy-düzeltmeli anlamlı; 3/3 TEM β-laktamaz geçti, aminoglikozid ko-direnç GEÇMEDI** (LMM mekanizmayı ayırdı); KB'de (pyseer_lmm evidence, TEM p≈1e-109) | 3 gün |
 | M15 | **Genom QC (§0.2)** — BV-BRC metadata ön-filtre + yerel CheckM2 + QUAST | Eksik (IQR-only) | 3 gün |
 | M16 | **ARO/CARD ontoloji eşlemesi (§0.2)** — KB'de ARO ID + gen ailesi + mekanizma + ilaç sınıfı | ✅ DONE (2026-06-24) — 09 ARO mapping + `blast_annotations` ARO kolonları (kb_schema 0.2.0), 13/60 eşlendi | 3 gün |
-| M5 | **Reproducibility fix** — Ampicillin ve ciprofloxacin matrislerini Zenodo'ya yükle veya yeniden üretim pipeline'ını belgele | Eksik | 3 gün |
+| M5 | **Reproducibility fix** — Ampicillin ve ciprofloxacin matrislerini Zenodo'ya yükle veya yeniden üretim pipeline'ını belgele | ✅ Büyük kısmı DONE (2026-06-29) — kanonik 04→populate yeniden üretim koşusu; her `pipeline_runs` git_commit+seed+config_hash(sha256)+CARD 4.0.1 damgalıyor; Drive yedeği (`TRUBA_25626`). Zenodo DOI kaldı (M10) | 3 gün |
 | M6 | **CARD version kaydı** — CARD hangi versiyonu? config.yaml ve Methods bölümüne | ✅ DONE (2026-06-24) — `AMR_CARD_VERSION` env → `kb_metadata.card_version=4.0.1` | 2 saat |
 | M7 | **Known mechanism recovery rate tablosu** — Confirmed tier k-mer'lerin kaçı bilinen ARG? | ✅ DONE (2026-06-24) — 09 `08_validation_metrics`: recovery %32 (9/28 stable), **H2 FALSE** (<%40; §0.4'e göre sorun değil) | 2 gün |
 | M8 | **PostgreSQL KB + populate script** — En az gentamicin ve cefotaxime için çalışan KB | ✅ SQLite DONE (2026-06-24) — ampicillin `amrk.db` schema 0.2.0 dolu (65 kmer); Postgres migration + 2. antibiyotik kaldı | 2 hafta |

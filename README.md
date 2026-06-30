@@ -176,7 +176,19 @@ python scripts/08_blast_annotation.py     # needs BLAST+ / Nextflow / CARD DB
 python scripts/09_biological_summary.py   # tiered report; set ncbi.entrez_email or AMR_ENTREZ_EMAIL
 python scripts/10_kmer_background_frequency.py  # resistant-vs-susceptible discriminativeness
 python scripts/11_variant_snp_check.py    # CARD variant-model SNP allele check (optional)
+python scripts/12_permutation_test.py     # M9: MDA permutation importance (+ BH-FDR)
+python scripts/12b_label_permutation_test.py  # M9: label-permutation null (model significance)
+python scripts/13_stability_selection.py  # M4: CPSS stability selection (PFER bound) + TreeSHAP
+python scripts/13b_stable_annotation.py   # M4: CARD-annotate the stable set (tier + ARO)
+python scripts/14_pyseer_lmm.py --mode prep   # M14: pyseer LMM (population-structure-corrected); pyseer CLIs run via amr-tools.sif
+python scripts/populate_database.py --antibiotic <ab>   # M8: load everything -> results/{org}/kb/amrk.db (multi-antibiotic, unitig schema 0.4.0)
+streamlit run scripts/kb_app.py           # local queryable KB explorer (pip install streamlit pandas)
 ```
+
+> **Feature unit = unitig** (compacted de Bruijn graph; ROADMAP §0). The pipeline
+> runs per antibiotic (set `project.target_antibiotic` in `config.yaml`); the KB
+> is organism-level and multi-antibiotic. Each run is reproducible — `pipeline_runs`
+> stamps the git commit, seed, config hash and CARD version.
 
 See `QUICKSTART.md` for prerequisites, HPC notes and expected outputs.
 

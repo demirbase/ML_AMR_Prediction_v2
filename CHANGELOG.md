@@ -7,6 +7,40 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Second antibiotic + multi-antibiotic KB (ciprofloxacin).** Canonical 04→populate
+  run for ciprofloxacin appended to the same `amrk.db` (model_id 2). lineage-CV
+  0.9496±0.007. **SNP showcase:** step 11 detects `gyrA S83L` + `parC S80I` as
+  resistant alleles — the fluoroquinolone positive control — while CARD-homolog
+  recovery is ~0 (resistance is a target-gene SNP, not an acquired gene), the exact
+  complement of ampicillin's acquired-gene mechanism.
+- **`13_stability_selection.py --base-trees`** — decouple the CPSS base selector
+  (sparse, default 10 trees) from the final model so the PFER bound stays tight
+  (a 66/146-tree model over-selects → PFER ~100; 10 trees → ~2.7).
+- **`scripts/kb_app.py`** — local Streamlit explorer over `amrk.db`: filterable
+  biomarker table, per-unitig multi-layer evidence chain, model + provenance
+  (ROADMAP S8/N1). `pip install streamlit pandas`.
+- **Canonical reproducible re-run** of the whole pipeline from step 04 (HPO
+  included) so every artefact carries provenance: `pipeline_runs` now stamps
+  git_commit + random_seed + config_hash(sha256) + CARD version (run_id is no
+  longer `…__unknown`).
+
+### Changed (KB schema 0.3.0 → 0.4.0 — renamed k-mer → unitig)
+- Tables/columns renamed to the actual feature unit: `kmers`→`unitigs`,
+  `kmer_id`→`unitig_id`, `kmer_model_scores`→`unitig_model_scores`,
+  `kmer_background_frequency`→`unitig_background_frequency`,
+  `kmer_antibiotic_overlap`→`unitig_antibiotic_overlap`, `kb_metadata.n_kmers`→
+  `n_unitigs`. Candidate-CSV column reads stay `kmer` (on-disk name); output
+  filenames unchanged.
+
+### Fixed
+- `populate_run` crashed once `run_metadata.json` actually existed: wrong keys
+  (`git_commit`/`seed`/`created_at`) and a dict (`data_fingerprint`) bound to a
+  TEXT column. Aligned to `git_commit_hash`/`random_seed`/`started_at` and store
+  `data_fingerprint.sha256` in `config_hash`.
+- `12b_label_permutation_test.py` test/label misalignment when the experiment
+  config's `test_files` are non-ascending (REAL AUC collapsed to ~0.49) — build
+  the test matrix in ascending chunk order.
+
 - **M9 permutation significance tests.** `12_permutation_test.py` — MDA
   (per-feature permutation importance): model fixed, permute each candidate
   unitig's column in the held-out test set, measure ROC-AUC drop + BH-FDR

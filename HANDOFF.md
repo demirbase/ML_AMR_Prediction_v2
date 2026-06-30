@@ -43,7 +43,57 @@
 
 **Per-antibiotic playbook (cefotaxime/gentamicin):** `sed -i 's/target_antibiotic: .*/target_antibiotic: cefotaxime/' config/config.yaml` → 03u (unitig-caller, ~hours, full node) → Faz1 `04 05 06 07b` (full node, `AMR_EXTERNAL_MEMORY=false AMR_OPTUNA_PATIENCE=15`) → Faz2a `07 08 09` (UI, internet, `AMR_ENTREZ_EMAIL` + `NXF_ANSI_LOG=false`; NCBI remote may need one retry) → Faz2b `10 11` (compute) → Faz3 `12`(`--n-permutations 100`) `12b`(`--n-permutations 50`, full node) `13`(`--base-trees 10`) `13b` → Faz3c `14` (two-container) → `populate_database.py --antibiotic <ab>` (`AMR_CARD_VERSION=4.0.1`, no rm). **Always `sbatch --exclude=barbun45`** (Apptainer `lookup userid` glitch node).
 
-## §0.1 Unitig + lineage-CV + biology — STATUS (2026-06-24)
+## §0.0 CANONICAL multi-antibiotic state (2026-06-29) — READ FIRST
+
+The whole pipeline was **re-run cleanly from scratch (after the unitig matrix) for two antibiotics** so every artefact is saved with provenance. This supersedes the earlier ampicillin numbers in §0.1/§0.2 (those were the first, partly hand-patched run). The KB (`results/ecoli/kb/amrk.db`) is now **multi-antibiotic, unitig-named, schema 0.4.0**.
+
+### Why re-run
+The first ampicillin run had hand-written bits: `config_ampicillin.yaml` was written by hand (04 HPO was cut short, n_estimators=8), so it was not git-reproducible, and `run_metadata.json` was missing → KB run_id was `…__unknown` (no git hash). The canonical re-run starts at **04 (HPO included)** → reproducible config + run_metadata + git provenance.
+
+### Pipeline phases (per antibiotic — the playbook)
+Set the target once, then run the phases. **Always `sbatch --exclude=barbun45`** (that node throws the Apptainer `Couldn't determine user account information: lookup userid` glitch — env, not code).
+- **Switch target:** `sed -i 's/target_antibiotic: .*/target_antibiotic: <ab>/' config/config.yaml` (universal — scripts read config both via `load_config` and direct `yaml`, so config.yaml is the only reliable switch; an env override would leak).
+- **Faz 0 — `03u`** unitig-caller on the antibiotic's genome set → `data/processed/ecoli/<ab>/matrix_unitig/` (no organism `unitig_all` store exists, so each antibiotic runs unitig-caller fresh, ~hours). Full node `-c40 --mem 300G`, `AMR_FEATURE_REPR=unitig`.
+- **Faz 1 — `04 05 06 07b`** (full node, in-core): `AMR_FEATURE_REPR=unitig AMR_EXTERNAL_MEMORY=false AMR_OPTUNA_PATIENCE=15`. 04 HPO is the long pole (~hours; high CPU load = good; the brief low-eff dip is the serial 05 DMatrix build — a nag, not fatal).
+- **Faz 2a — `07 08 09`** on the **UI node** (internet for NCBI/Entrez): `AMR_FEATURE_REPR=unitig AMR_ENTREZ_EMAIL=… NXF_ANSI_LOG=false`. 08 runs CARD (local, blastn-short/word7) + NCBI (remote, blastn/word11, `txid562[Organism:exp]`). **NCBI remote can transiently fail** (`Connection stream is in bad state`) → just re-run the NCBI blastn directly (idempotent), it's a network blip not a code/param issue.
+- **Faz 2b — `10 11`** (compute, offline).
+- **Faz 3 — `12`(`--n-permutations 100`, fast MDA) · `12b`(`--n-permutations 50`, full node, slow: N=50 is now standard) · `13`(`--n-candidates 5000 --B 100 --pi 0.6 --base-trees 10`) · `13b`** (compute).
+- **Faz 3c — `14`** pyseer LMM (two-container SLURM: prep/post in `amr.sif`, `similarity_pyseer`+`pyseer --lmm` in `amr-tools.sif`; kinship from a subsampled Rtab (~every 100th unitig), LMM on the 5000 Chi² candidates — genome-wide pyseer over the full 60 GB Rtab is impractical (16 h, OOM)).
+- **Faz 4 — `populate_database.py --antibiotic <ab>`** (`AMR_CARD_VERSION=4.0.1`). **Do NOT `rm` the db for the 2nd+ antibiotic** — populate appends (new model_id, new unitigs/evidence). Only `rm` for a from-scratch single-antibiotic rebuild.
+
+### Results (both canonical)
+| | ampicillin (model_id 1) | ciprofloxacin (model_id 2) |
+|---|---|---|
+| genomes (R/S) | 4373 (2717/1729) | 4150 (1324/2826) |
+| unitigs | 4.94M | 4.62M |
+| **lineage-CV ROC-AUC** | **0.9511 ± 0.011** | **0.9496 ± 0.007** |
+| 06 single-split AUC | 0.924 | 0.980 |
+| trees (early stop) | 146 | 118 |
+| CARD recovery / H2 | 47% / **TRUE** | ~0% / FALSE *(expected — SNP not acquired gene)* |
+| CPSS stable / PFER | 36 / **2.73** | 70 / 8.4 |
+| MDA significant | 0 (redundancy) | 0 (redundancy) |
+| label-perm p | 0.0196 | 0.0196 |
+| pyseer lineage-sig | **25/36** (3/3 TEM pass; aminogly. co-res NOT) | 5/70 (signal more lineage-entangled — clonal FQ) |
+| **SNP (step 11)** | **0 resistant-allele** (expected) | **gyrA S83L + parC S80I = resistant_allele** ✓ |
+| confirmed biomarkers | TEM-256/257/258, tet(A), APH(6)-Id, AAC(6')-Ib7 | efflux/co-res (gyrA/parC SNPs aren't CARD homologs) |
+
+**The pair is the thesis showcase:** ampicillin = **acquired gene** (β-lactamase, homolog-BLAST + H2), ciprofloxacin = **target-gene SNP** (gyrA/parC, validated by step 11 not H2). Each mechanism validated by the appropriate tool.
+
+### KB schema renamed k-mer→unitig (0.3.0→0.4.0)
+`kb_schema.py`: `kmers`→`unitigs`, `kmer_id`→`unitig_id`, `kmer_model_scores`→`unitig_model_scores`, `kmer_background_frequency`→`unitig_background_frequency`, `kmer_antibiotic_overlap`→`unitig_antibiotic_overlap`, `kb_metadata.n_kmers`→`n_unitigs`. `populate_database.py` matches. NB: candidate-CSV **column** reads stay `kmer` (that's the on-disk column name from 07/10/13), and output **filenames** are unchanged (e.g. `10_kmer_background_frequency_<ab>.csv`).
+
+### Local KB access — `scripts/kb_app.py` (Streamlit, S8/N1)
+`pip install streamlit pandas` then `streamlit run scripts/kb_app.py` → point at `amrk.db`. Tabs: biomarkers (filter by method/tier/stability/gene), per-unitig **evidence chain** (BLAST+ARO, discriminativeness, CPSS, permutation, pyseer LMM), model + provenance. Get `amrk.db` to the Mac via `scp` from the transfer host (it's tiny) or the Drive backup.
+
+### Bugs fixed during the canonical re-run (don't reintroduce)
+1. `populate_run` used wrong run_metadata keys (`git_commit`/`seed`/`created_at`) and bound `data_fingerprint` (a dict) → crashed once run_metadata.json existed. Fixed to `git_commit_hash`/`random_seed`/`started_at` + store `data_fingerprint.sha256` in `config_hash`.
+2. `12b` aligned test labels via `y[test_mask]` but loaded X_test in the config's (non-ascending) `test_files` order → REAL AUC collapsed to ~0.49. Fixed: build the test matrix in **ascending chunk order**.
+3. `13` CPSS base learner inherited the model's 66/146 trees → ~317 features/fit → **PFER blew up to ~100**. Fixed: `--base-trees 10` (sparse base selector, decoupled from the final model) → PFER ~2.7. The final SHAP model still uses the full tree count.
+
+### Backup / provenance
+Drive backup via `rclone` to `gdrive:TRUBA_25626/scratch_amr` (incremental; transfer host arf-ui4, in `screen`). Repo is on GitHub. Every `pipeline_runs` row stamps git_commit 5b76f47 + seed + config_hash(sha256) + CARD 4.0.1.
+
+## §0.1 Unitig + lineage-CV + biology — STATUS (2026-06-24, ampicillin FIRST run — see §0.0 for the canonical re-run)
 
 ### M9 — permutation significance (DONE; one resubmit pending) (2026-06-24)
 Two complementary permutation tests written (commits `2306f61`→`7b69af4` on `main`), both reusing existing infra (06's exact held-out split, 07b's frozen-HP loader):
