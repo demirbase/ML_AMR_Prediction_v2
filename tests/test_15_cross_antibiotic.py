@@ -78,6 +78,42 @@ def test_h3_contrast_not_testable_single_cross_pair(mod):
     assert h3["within_family_min_p_enrichment"] is None
 
 
+def test_h3_contrast_gene_family_level(mod):
+    # The real cefotaxime finding: within-β-lactam (amp~cef) shares NO gene family
+    # (TEM vs CTX-M/CMY), cross-class pairs overlap more -> H3 rejected at gene level.
+    summaries = [
+        {"antibiotic_a": "ampicillin", "antibiotic_b": "cefotaxime",
+         "same_drug_family": True, "gene_family_jaccard": 0.0, "n_gene_family_overlap": 0},
+        {"antibiotic_a": "cefotaxime", "antibiotic_b": "ciprofloxacin",
+         "same_drug_family": False, "gene_family_jaccard": 0.33, "n_gene_family_overlap": 2},
+    ]
+    h3 = mod.h3_contrast(summaries, jaccard_key="gene_family_jaccard",
+                         overlap_key="n_gene_family_overlap", p_key=None)
+    assert h3["level"] == "gene_family"
+    assert h3["testable"] is True
+    assert h3["verdict"] == "within_not_greater"
+    assert h3["within_family"]["mean_overlap"] == 0.0
+    assert h3["within_family_min_p_enrichment"] is None
+
+
+def test_gene_family_sets(mod, tmp_path):
+    db = _kb(tmp_path, {"ampicillin": {1, 2}, "cefotaxime": {3, 4}})
+    conn = sqlite3.connect(str(db))
+    # ampicillin -> TEM; cefotaxime -> CTX-M + CMY (distinct β-lactamase families).
+    rows = [(1, 1, "confirmed", "TEM beta-lactamase"),
+            (3, 2, "confirmed", "CTX-M beta-lactamase"),
+            (4, 2, "candidate", "CMY beta-lactamase"),
+            (2, 1, "none", "should-be-ignored")]
+    conn.executemany(
+        """INSERT INTO blast_annotations(unitig_id, model_id, source_db, tier, aro_gene_family)
+           VALUES (?,?,'card',?,?)""", rows)
+    conn.commit()
+    gf = mod.gene_family_sets(conn)
+    assert gf["ampicillin"] == {"TEM beta-lactamase"}
+    assert gf["cefotaxime"] == {"CTX-M beta-lactamase", "CMY beta-lactamase"}
+    conn.close()
+
+
 # --- synthetic KB ----------------------------------------------------------
 def _kb(tmp_path, stable_by_ab):
     """Build a minimal populated KB. stable_by_ab: {antibiotic: set(unitig_id)}.

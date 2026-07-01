@@ -107,6 +107,25 @@ def gene_for_unitig(conn, unitig_id):
     return ";".join(sorted({r[0] for r in rows if r[0]}))
 
 
+def gene_family_sets(conn, tiers=("confirmed", "candidate")):
+    """{antibiotic: set(aro_gene_family)} — the resistance gene families each
+    antibiotic's confirmed/candidate BLAST hits map to. This is the biologically
+    meaningful level for H3: unitig-SEQUENCE overlap is confounded by genome-set-
+    dependent unitig segmentation (two antibiotics can share a mechanism yet no
+    exact unitig), whereas a shared gene FAMILY is the real cross-antibiotic signal."""
+    ph = ",".join("?" * len(tiers))
+    rows = conn.execute(
+        f"""SELECT m.antibiotic, b.aro_gene_family
+              FROM blast_annotations b JOIN models m ON m.model_id = b.model_id
+             WHERE b.tier IN ({ph}) AND b.aro_gene_family IS NOT NULL""",
+        tuple(tiers)).fetchall()
+    sets = {}
+    for ab, fam in rows:
+        if fam:
+            sets.setdefault(ab, set()).add(fam)
+    return sets
+
+
 def hypergeom_sf(k, N, K, n):
     """P(X >= k) for the overlap of two stable sets of sizes K and n drawn from
     a universe of N unitigs (enrichment). Uses scipy if available, else an exact
@@ -168,15 +187,18 @@ def populate_overlap(conn, sets, classes, logger):
     return summaries, union_all
 
 
-def h3_contrast(summaries):
+def h3_contrast(summaries, jaccard_key="jaccard", overlap_key="n_overlap",
+                p_key="hypergeom_p_enrichment"):
     """Aggregate per-pair overlaps into the H3 within- vs cross-drug-family
     contrast (ROADMAP §1.6 / H3: within-β-lactam overlap > cross-class overlap).
 
-    Groups the pairs by ``same_drug_family`` and reports each group's mean
-    Jaccard / overlap, a descriptive verdict, and — when ``--with-test`` has
-    populated per-pair enrichment p's — the smallest within-family p. H3 is
-    ``testable`` only once at least one within-family AND one cross-class pair
-    exist (i.e. after a second β-lactam such as cefotaxime enters the KB)."""
+    ``jaccard_key``/``overlap_key`` select the LEVEL: unitig-sequence (default) or
+    gene-family (``gene_family_jaccard``/``n_gene_family_overlap``). The gene-family
+    level is the biologically meaningful one — a unitig SEQUENCE overlap is
+    confounded by genome-set-dependent unitig segmentation, so two antibiotics can
+    share a resistance mechanism yet share no exact unitig. Groups pairs by
+    ``same_drug_family``; H3 is ``testable`` only once at least one within-family
+    AND one cross-class pair exist. ``p_key=None`` skips the p aggregation."""
     within = [s for s in summaries if s["same_drug_family"]]
     cross = [s for s in summaries if not s["same_drug_family"]]
 
@@ -185,8 +207,8 @@ def h3_contrast(summaries):
             return {"n_pairs": 0, "mean_jaccard": None, "mean_overlap": None, "pairs": []}
         return {
             "n_pairs": len(group),
-            "mean_jaccard": round(sum(g["jaccard"] for g in group) / len(group), 6),
-            "mean_overlap": round(sum(g["n_overlap"] for g in group) / len(group), 3),
+            "mean_jaccard": round(sum(g[jaccard_key] for g in group) / len(group), 6),
+            "mean_overlap": round(sum(g[overlap_key] for g in group) / len(group), 3),
             "pairs": [f'{g["antibiotic_a"]}~{g["antibiotic_b"]}' for g in group],
         }
 
@@ -195,9 +217,10 @@ def h3_contrast(summaries):
     verdict = None
     if testable:
         verdict = "within_greater" if w["mean_jaccard"] > c["mean_jaccard"] else "within_not_greater"
-    within_ps = [s.get("hypergeom_p_enrichment") for s in within
-                 if s.get("hypergeom_p_enrichment") is not None]
+    within_ps = ([s.get(p_key) for s in within if s.get(p_key) is not None]
+                 if p_key else [])
     return {
+        "level": "gene_family" if jaccard_key.startswith("gene_family") else "unitig",
         "testable": testable,
         "within_family": w,
         "cross_class": c,
@@ -205,7 +228,7 @@ def h3_contrast(summaries):
         "within_family_min_p_enrichment": min(within_ps) if within_ps else None,
         "note": ("H3: within-β-lactam overlap > cross-class overlap. Compares mean "
                  "Jaccard/overlap between within-family and cross-class pairs; needs "
-                 ">=1 of each to be testable. p from --with-test (union universe)."),
+                 ">=1 of each to be testable."),
     }
 
 
@@ -248,6 +271,18 @@ def main():
         for s in summaries:
             s["shared_genes"] = {uid: gene_for_unitig(conn, uid) for uid in s["shared_unitig_ids"]}
 
+        # Gene-family (ARO) overlap — the biologically meaningful H3 level.
+        gfam = gene_family_sets(conn)
+        for s in summaries:
+            fa, fb = gfam.get(s["antibiotic_a"], set()), gfam.get(s["antibiotic_b"], set())
+            shared_fam = sorted(fa & fb)
+            union_fam = fa | fb
+            s["n_gene_family_a"] = len(fa)
+            s["n_gene_family_b"] = len(fb)
+            s["n_gene_family_overlap"] = len(shared_fam)
+            s["gene_family_jaccard"] = round(len(shared_fam) / len(union_fam), 6) if union_fam else 0.0
+            s["shared_gene_families"] = shared_fam
+
         # Hypergeometric significance — DEFERRED unless explicitly requested.
         N = len(union_all)  # ROADMAP §1.6 universe: union of all stable unitigs
         has_within = any(s["same_drug_family"] for s in summaries)
@@ -264,15 +299,20 @@ def main():
                         "preliminary p). within-class/β-lactam pair present: %s.",
                         has_within)
 
-        h3 = h3_contrast(summaries)
-        if h3["testable"]:
-            logger.info("H3 contrast: within-family mean Jaccard %.4f vs cross-class "
-                        "%.4f -> %s", h3["within_family"]["mean_jaccard"],
-                        h3["cross_class"]["mean_jaccard"], h3["verdict"])
-        else:
-            logger.info("H3 contrast NOT yet testable (within-family pairs: %d, "
-                        "cross-class: %d) -> needs a 2nd β-lactam (cefotaxime).",
-                        h3["within_family"]["n_pairs"], h3["cross_class"]["n_pairs"])
+        h3 = h3_contrast(summaries)  # unitig-sequence level
+        h3_gene = h3_contrast(summaries, jaccard_key="gene_family_jaccard",
+                              overlap_key="n_gene_family_overlap", p_key=None)
+        for lvl, h in (("unitig", h3), ("gene-family", h3_gene)):
+            if h["testable"]:
+                logger.info("H3 [%s]: within-family mean overlap %.3f (J=%.4f) vs "
+                            "cross-class %.3f (J=%.4f) -> %s", lvl,
+                            h["within_family"]["mean_overlap"], h["within_family"]["mean_jaccard"],
+                            h["cross_class"]["mean_overlap"], h["cross_class"]["mean_jaccard"],
+                            h["verdict"])
+            else:
+                logger.info("H3 [%s] NOT yet testable (within-family pairs: %d, "
+                            "cross-class: %d).", lvl,
+                            h["within_family"]["n_pairs"], h["cross_class"]["n_pairs"])
 
         conn.commit()
     finally:
@@ -299,6 +339,7 @@ def main():
                         for ab, s in sets.items()},
         "hypergeometric_test": "computed" if args.with_test else "deferred",
         "h3_contrast": h3,
+        "h3_contrast_gene_family": h3_gene,
         "pairs": [{k: v for k, v in s.items() if k != "shared_genes"} for s in summaries],
     }
     with open(summary_path, "w", encoding="utf-8") as fh:
