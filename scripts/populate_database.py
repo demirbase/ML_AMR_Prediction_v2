@@ -366,12 +366,18 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
 def update_metadata(conn, card_version):
     n_unitigs = conn.execute("SELECT COUNT(*) FROM unitigs").fetchone()[0]
     n_models = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+    # Zenodo DOI (M10/FAIR): an AMR_ZENODO_DOI env override wins (mirrors
+    # AMR_CARD_VERSION so a release can stamp the DOI without editing code);
+    # otherwise PRESERVE any DOI already in the row — re-populating a new
+    # antibiotic must not wipe the release DOI.
+    prev = conn.execute("SELECT zenodo_doi FROM kb_metadata WHERE id = 1").fetchone()
+    zenodo_doi = os.environ.get("AMR_ZENODO_DOI") or (prev[0] if prev else None)
     conn.execute(
         """INSERT OR REPLACE INTO kb_metadata
            (id, kb_schema_version, card_version, zenodo_doi, license, created_at,
             n_unitigs, n_models)
            VALUES (1,?,?,?,?,?,?,?)""",
-        (KB_SCHEMA_VERSION, card_version, None, "CC-BY-4.0",
+        (KB_SCHEMA_VERSION, card_version, zenodo_doi, "CC-BY-4.0",
          datetime.datetime.now(datetime.timezone.utc).isoformat(), n_unitigs, n_models),
     )
 

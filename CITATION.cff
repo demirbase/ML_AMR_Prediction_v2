@@ -1,14 +1,17 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it using these metadata."
-title: "ML_AMR_Prediction_v2: A stability-filtered, biologically validated AMR k-mer Knowledge Base pipeline for Escherichia coli"
+message: "If you use this software or the AMRK-DB knowledge base, please cite it using these metadata."
+title: "ML_AMR_Prediction_v2 / AMRK-DB: a stability-filtered, lineage-validated, unitig-resolution AMR biomarker Knowledge Base pipeline for Escherichia coli"
 abstract: >-
   An alignment-free, out-of-core machine-learning pipeline that predicts
   antimicrobial resistance (AMR) in Escherichia coli from whole-genome
-  assemblies using canonical 21-mer features and XGBoost, then reverse-translates
-  the most important k-mers into biology via 5-seed feature stability, CARD/NCBI
-  BLAST confidence tiering, resistant-versus-susceptible discriminativeness, and
-  CARD variant-model SNP allele checks — building a queryable, confidence-tiered
-  AMR k-mer knowledge base.
+  assemblies using unitig (compacted de Bruijn graph) presence/absence features
+  and XGBoost, then reverse-translates the most important unitigs into biology
+  via CPSS stability selection (B=100, pi>=0.6, PFER-bounded), lineage-aware
+  cross-validation (PopPUNK + GroupKFold), CARD/NCBI BLAST confidence tiering
+  with ARO ontology mapping, resistant-versus-susceptible discriminativeness
+  (Fisher + BH-FDR), CARD variant-model SNP allele checks, permutation tests and
+  pyseer LMM significance — building a queryable, confidence-tiered, FAIR AMR
+  biomarker knowledge base with full per-run provenance.
 type: software
 authors:
   - family-names: "Demirbaş"
@@ -16,16 +19,25 @@ authors:
     email: "eren0demirbas@gmail.com"
 repository-code: "https://github.com/demirbase/ML_AMR_Prediction_v2"
 license: MIT
-version: "0.1.0"
-date-released: "2026-06-15"
+version: "0.4.0"
+date-released: "2026-07-01"
 keywords:
   - antimicrobial resistance
   - machine learning
+  - unitig
   - k-mer
   - XGBoost
-  - bioinformatics
+  - stability selection
+  - lineage-aware validation
+  - pyseer
   - knowledge base
   - Escherichia coli
   - CARD
+  - ARO ontology
   - reproducible research
   - FAIR
+# After the Zenodo deposit, add the minted DOI here, e.g.:
+# identifiers:
+#   - type: doi
+#     value: "10.5281/zenodo.XXXXXXX"
+#     description: "Archived AMRK-DB knowledge base (this version)"

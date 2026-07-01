@@ -227,6 +227,27 @@ metadata are *generated* and reproduced by running the pipeline (see
 
 ## License & citation
 
-Released under the [MIT License](LICENSE). If you use this software, please cite
-it via [`CITATION.cff`](CITATION.cff). Contributions are welcome — see
+The **software** is released under the [MIT License](LICENSE). If you use it,
+please cite it via [`CITATION.cff`](CITATION.cff). Contributions are welcome — see
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md).
+
+## Data availability & KB versioning (FAIR)
+
+The **AMRK-DB knowledge base** (`results/{organism}/kb/amrk.db`) is released under
+**CC-BY-4.0** (distinct from the MIT-licensed code) and versioned with a semantic
+`kb_schema_version` (currently **0.4.0**, stamped in the `kb_metadata` table).
+Every KB record links to a `pipeline_runs` row carrying the git commit, random
+seed, config hash and CARD version, so any biomarker is reproducible.
+
+Each release is archived on **Zenodo** with a persistent DOI (concept DOI resolves
+to the latest version; each version also gets its own DOI). The DOI is stored in
+`kb_metadata.zenodo_doi` and mirrored in [`CITATION.cff`](CITATION.cff) /
+[`.zenodo.json`](.zenodo.json).
+
+> **Zenodo DOI:** _reserved — added on first deposit_ (see
+> [`docs/RELEASE_ZENODO.md`](docs/RELEASE_ZENODO.md)).
+
+Raw genome assemblies come from [BV-BRC](https://www.bv-brc.org); resistance
+gene annotations from [CARD](https://card.mcmaster.ca) (v4.0.1). The pipeline
+regenerates the unitig matrices from the BV-BRC assemblies, so the FAIR deposit
+ships the KB + evidence tables + run metadata rather than the large raw matrices.

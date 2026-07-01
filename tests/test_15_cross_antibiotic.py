@@ -44,6 +44,40 @@ def test_hypergeom_sf_enrichment_and_degenerate(mod):
     assert mod.hypergeom_sf(3, 0, 5, 5) is None
 
 
+def _pair(a, b, fam, jac, ov, p=None):
+    d = {"antibiotic_a": a, "antibiotic_b": b, "same_drug_family": fam,
+         "jaccard": jac, "n_overlap": ov}
+    if p is not None:
+        d["hypergeom_p_enrichment"] = p
+    return d
+
+
+def test_h3_contrast_within_greater(mod):
+    # ampicillin~cefotaxime (β-lactam, within) overlaps more than the cross-class
+    # quinolone pairs -> H3 supported (descriptive).
+    summaries = [
+        _pair("ampicillin", "cefotaxime", True, 0.60, 3, p=1e-4),
+        _pair("ampicillin", "ciprofloxacin", False, 0.14, 1),
+        _pair("cefotaxime", "ciprofloxacin", False, 0.14, 1),
+    ]
+    h3 = mod.h3_contrast(summaries)
+    assert h3["testable"] is True
+    assert h3["verdict"] == "within_greater"
+    assert h3["within_family"]["n_pairs"] == 1
+    assert h3["cross_class"]["n_pairs"] == 2
+    assert h3["within_family"]["mean_jaccard"] > h3["cross_class"]["mean_jaccard"]
+    assert h3["within_family_min_p_enrichment"] == 1e-4
+
+
+def test_h3_contrast_not_testable_single_cross_pair(mod):
+    # The current canonical state: one cross-class pair, no within-family pair.
+    h3 = mod.h3_contrast([_pair("ampicillin", "ciprofloxacin", False, 0.02, 4)])
+    assert h3["testable"] is False
+    assert h3["verdict"] is None
+    assert h3["within_family"]["n_pairs"] == 0
+    assert h3["within_family_min_p_enrichment"] is None
+
+
 # --- synthetic KB ----------------------------------------------------------
 def _kb(tmp_path, stable_by_ab):
     """Build a minimal populated KB. stable_by_ab: {antibiotic: set(unitig_id)}.

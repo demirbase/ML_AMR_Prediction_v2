@@ -168,6 +168,47 @@ def populate_overlap(conn, sets, classes, logger):
     return summaries, union_all
 
 
+def h3_contrast(summaries):
+    """Aggregate per-pair overlaps into the H3 within- vs cross-drug-family
+    contrast (ROADMAP §1.6 / H3: within-β-lactam overlap > cross-class overlap).
+
+    Groups the pairs by ``same_drug_family`` and reports each group's mean
+    Jaccard / overlap, a descriptive verdict, and — when ``--with-test`` has
+    populated per-pair enrichment p's — the smallest within-family p. H3 is
+    ``testable`` only once at least one within-family AND one cross-class pair
+    exist (i.e. after a second β-lactam such as cefotaxime enters the KB)."""
+    within = [s for s in summaries if s["same_drug_family"]]
+    cross = [s for s in summaries if not s["same_drug_family"]]
+
+    def _agg(group):
+        if not group:
+            return {"n_pairs": 0, "mean_jaccard": None, "mean_overlap": None, "pairs": []}
+        return {
+            "n_pairs": len(group),
+            "mean_jaccard": round(sum(g["jaccard"] for g in group) / len(group), 6),
+            "mean_overlap": round(sum(g["n_overlap"] for g in group) / len(group), 3),
+            "pairs": [f'{g["antibiotic_a"]}~{g["antibiotic_b"]}' for g in group],
+        }
+
+    w, c = _agg(within), _agg(cross)
+    testable = bool(within and cross)
+    verdict = None
+    if testable:
+        verdict = "within_greater" if w["mean_jaccard"] > c["mean_jaccard"] else "within_not_greater"
+    within_ps = [s.get("hypergeom_p_enrichment") for s in within
+                 if s.get("hypergeom_p_enrichment") is not None]
+    return {
+        "testable": testable,
+        "within_family": w,
+        "cross_class": c,
+        "verdict": verdict,
+        "within_family_min_p_enrichment": min(within_ps) if within_ps else None,
+        "note": ("H3: within-β-lactam overlap > cross-class overlap. Compares mean "
+                 "Jaccard/overlap between within-family and cross-class pairs; needs "
+                 ">=1 of each to be testable. p from --with-test (union universe)."),
+    }
+
+
 def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="Cross-antibiotic stable-unitig overlap (S1/H3).")
@@ -223,6 +264,16 @@ def main():
                         "preliminary p). within-class/β-lactam pair present: %s.",
                         has_within)
 
+        h3 = h3_contrast(summaries)
+        if h3["testable"]:
+            logger.info("H3 contrast: within-family mean Jaccard %.4f vs cross-class "
+                        "%.4f -> %s", h3["within_family"]["mean_jaccard"],
+                        h3["cross_class"]["mean_jaccard"], h3["verdict"])
+        else:
+            logger.info("H3 contrast NOT yet testable (within-family pairs: %d, "
+                        "cross-class: %d) -> needs a 2nd β-lactam (cefotaxime).",
+                        h3["within_family"]["n_pairs"], h3["cross_class"]["n_pairs"])
+
         conn.commit()
     finally:
         conn.close()
@@ -247,6 +298,7 @@ def main():
         "antibiotics": {ab: {"class": classes.get(ab), "n_stable": len(s)}
                         for ab, s in sets.items()},
         "hypergeometric_test": "computed" if args.with_test else "deferred",
+        "h3_contrast": h3,
         "pairs": [{k: v for k, v in s.items() if k != "shared_genes"} for s in summaries],
     }
     with open(summary_path, "w", encoding="utf-8") as fh:
