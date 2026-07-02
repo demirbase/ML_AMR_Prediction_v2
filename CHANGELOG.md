@@ -7,6 +7,27 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **M13 external-validation concordance.** `scripts/16_external_concordance.py`
+  + `scripts/lib/concordance.py` (balanced accuracy, sensitivity, specificity,
+  Cohen's κ, McNemar, FDA major/very-major error bands). AMRFinderPlus
+  2026-05-15.1 + ResFinder 4.5.0 run on all 5468 genomes; per-antibiotic
+  genotype-vs-phenotype concordance **and a leakage-free model-vs-tool
+  head-to-head** on the held-out test split (`06_evaluation.py` now saves
+  `16_model_preds_{ab}.csv`). The unitig model's balanced accuracy (amp 0.873 /
+  cef 0.925 / cip 0.928) matches ResFinder for cefotaxime & ciprofloxacin and
+  beats AMRFinderPlus for ciprofloxacin & ampicillin — external evidence the
+  signal is mechanism-driven, not lineage memorisation.
+- **Third antibiotic (cefotaxime) + H3 result.** Canonical 03u→populate for
+  cefotaxime (model_id 3, lineage-CV 0.9546±0.020, CTX-M-276/278 confirmed).
+  `scripts/15_cross_antibiotic.py` (S1) computes cross-antibiotic stable-unitig
+  overlap + the H3 within/cross contrast at both unitig and ARO gene-family
+  level. **H3 rejected**: within-β-lactam (ampicillin=TEM vs cefotaxime=CTX-M/CMY)
+  shares no gene family — same class, distinct enzymes — a biologically
+  substantive negative finding.
+- **M10 FAIR/Zenodo prep.** `populate_database.py` preserves `zenodo_doi` across
+  re-populates and honours the `AMR_ZENODO_DOI` env override; added `.zenodo.json`,
+  refreshed `CITATION.cff`, a README "Data availability & KB versioning" section,
+  and `docs/RELEASE_ZENODO.md` deposit checklist. (Deposit itself pending.)
 - **Second antibiotic + multi-antibiotic KB (ciprofloxacin).** Canonical 04→populate
   run for ciprofloxacin appended to the same `amrk.db` (model_id 2). lineage-CV
   0.9496±0.007. **SNP showcase:** step 11 detects `gyrA S83L` + `parC S80I` as
