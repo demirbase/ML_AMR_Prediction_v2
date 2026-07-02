@@ -37,3 +37,27 @@ organisms:
     filter_criteria: null
     antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
     enabled: false
+
+  staphylococcus_aureus:
+    display_name: "Staphylococcus aureus"
+    taxid: 1280
+    metadata_file: "data/external/staphylococcus_aureus/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/staphylococcus_aureus/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
+    enabled: false
+
+  Pseudomonas_aeruginosa:
+    display_name: "Pseudomonas aeruginosa"
+    taxid: 287
+    metadata_file: "data/external/pseudomonas_aeruginosa/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/pseudomonas_aeruginosa/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
+    enabled: false
