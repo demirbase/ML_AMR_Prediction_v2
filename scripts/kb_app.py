@@ -69,6 +69,7 @@ bg = T.get("unitig_background_frequency", pd.DataFrame())
 evidence = T.get("validation_evidence", pd.DataFrame())
 models = T.get("models", pd.DataFrame())
 runs = T.get("pipeline_runs", pd.DataFrame())
+overlap = T.get("unitig_antibiotic_overlap", pd.DataFrame())
 
 # --- header / FAIR metadata ------------------------------------------------
 st.title("AMR Unitig Biyobelirteç Bilgi Tabanı")
@@ -117,7 +118,9 @@ if search:
     mask = mask | f["sequence"].fillna("").str.lower().str.contains(search)
     f = f[mask]
 
-tab1, tab2, tab3 = st.tabs(["🔬 Biyobelirteçler", "🧩 Kanıt zinciri", "📊 Model & Provenance"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🔬 Biyobelirteçler", "🧩 Kanıt zinciri", "📊 Model & Provenance",
+     "🔗 Çapraz-antibiyotik (H3)", "✅ Dış doğrulama (M13)"])
 
 with tab1:
     st.caption(f"{len(f)} unitig (filtreli). Güven seviyesi CARD identity+coverage'a dayanır.")
@@ -159,5 +162,50 @@ with tab3:
     if not runs.empty:
         st.dataframe(runs, use_container_width=True)
     st.caption("git_commit + config_hash + seed → her KB kaydı tam tekrarlanabilir.")
+
+with tab4:
+    st.caption("Antibiyotikler arası paylaşılan kararlı unitig'ler (S1). H3: "
+               "sınıf-içi (β-laktam) overlap > sınıf-arası? Tüm çiftler listelenir "
+               "(0 paylaşım = within-β-laktam ampicillin~cefotaxime, H3'ün özü).")
+    abx = sorted(models["antibiotic"].dropna().unique()) if not models.empty else []
+    if len(abx) >= 2 and not overlap.empty:
+        import itertools as _it
+        cnt = (overlap.groupby(["antibiotic_a", "antibiotic_b"])
+               .size().to_dict())
+        sc = (overlap.groupby(["antibiotic_a", "antibiotic_b"])["same_class"]
+              .max().to_dict())
+        rows = []
+        for a, b in _it.combinations(abx, 2):
+            n = cnt.get((a, b), cnt.get((b, a), 0))
+            same = sc.get((a, b), sc.get((b, a), 0))
+            rows.append({"çift": f"{a} ~ {b}",
+                         "aynı registry sınıfı": "evet" if same else "hayır",
+                         "paylaşılan kararlı unitig": int(n)})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        shared = overlap.merge(unitigs, on="unitig_id", how="left")
+        if not ann.empty:
+            shared = shared.merge(ann[["unitig_id", "gene_symbol", "tier"]],
+                                  on="unitig_id", how="left")
+        st.write("**Paylaşılan unitig'ler:**")
+        st.dataframe(shared[[c for c in ["antibiotic_a", "antibiotic_b", "sequence",
+                     "gene_symbol", "tier", "same_class"] if c in shared.columns]],
+                     use_container_width=True)
+    else:
+        st.info("Overlap tablosu boş / <2 antibiyotik. `15_cross_antibiotic.py` çalıştır.")
+
+with tab5:
+    st.caption("AMRFinderPlus/ResFinder concordance + model head-to-head (M13). "
+               "Model run'ına bağlı; evidence_source bACC/κ/n içerir.")
+    m13_types = ["concordance_amrfinderplus", "concordance_resfinder", "head_to_head_model"]
+    if not evidence.empty and evidence["evidence_type"].isin(m13_types).any():
+        e = evidence[evidence["evidence_type"].isin(m13_types)].copy()
+        if not models.empty:
+            run_ab = dict(zip(models["run_id"], models["antibiotic"]))
+            e["antibiyotik"] = e["pipeline_run_id"].map(run_ab)
+        st.dataframe(e[[c for c in ["antibiyotik", "evidence_type", "evidence_source",
+                     "evidence_score"] if c in e.columns]], use_container_width=True)
+    else:
+        st.info("M13 concordance kanıtı yok. `16_external_concordance.py --mode post "
+                "--write-kb` çalıştır.")
 
 st.sidebar.caption("ROADMAP S8/N1 · CC-BY-4.0")
