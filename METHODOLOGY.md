@@ -16,6 +16,8 @@
 4. [Explainable AI and Biological Validation](#4-explainable-ai-and-biological-validation)
    - [4.1 Feature Importance Mapping](#41-feature-importance-mapping)
    - [4.2 Automated Nextflow BLAST Pipeline](#42-automated-nextflow-blast-pipeline)
+   - [4.3 Automated Biological Reporting](#43-automated-biological-reporting)
+   - [4.4 Statistical Signal ≠ Biological Causation (reification safeguard)](#44-statistical-signal--biological-causation-reification-safeguard)
 
 ---
 
@@ -284,6 +286,20 @@ To translate mathematical importance into biological relevance, we employ a dual
 ### 4.3 Automated Biological Reporting
 
 To bridge the gap between raw alignment metrics (BLAST `outfmt 6` TSV format) and final biological discovery, an automated reporting mechanism (`09_biological_summary.py`) distills the pipeline's outputs into a synthesized summary. By enforcing strict FASTA header ID matching (e.g., `Rank_1|Score_154.4288|Feature_...`) and implementing regex-based text mining, the script filters low-quality alignments and extracts precise AMR determinants. It cleanly isolates specific resistance symbols (like `OXA-909` or `msbA`) from CARD and unambiguous species/strain identifiers from NCBI, ultimately generating a human-readable, publication-ready Markdown report.
+
+### 4.4 Statistical Signal ≠ Biological Causation (reification safeguard)
+
+Every claim the knowledge base makes about a unitig is **associational, not causal**, and the pipeline is worded and structured to keep that distinction explicit (ROADMAP S10; cf. Takefuji 2025 on the over-interpretation of feature-importance). A high XGBoost gain, a stable CPSS selection frequency, or a large SHAP value means only that a feature *carries predictive signal for the resistance label in this population* — it does **not** establish that the sequence *causes*, *confers*, or *mechanistically determines* resistance. Reporting therefore uses associational verbs ("is associated with", "is predictive of", "co-occurs with") and never causal ones ("causes", "confers", "is responsible for") outside of determinants independently confirmed by an orthogonal, mechanism-aware line of evidence.
+
+Three structural safeguards operationalise this:
+
+1. **Layered, orthogonal evidence rather than a single score.** A biomarker is only elevated to a strong tier when independent lines agree: importance/stability (gain, CPSS π≥0.6, PFER bound), sequence identity to a curated determinant (CARD/ARO BLAST tier), discriminativeness (R-vs-S Δprevalence + Fisher/BH-FDR), allele-level confirmation for SNP mechanisms (step 11 variant model), population-structure-corrected association (pyseer LMM + Bonferroni), and external genotype–phenotype concordance (AMRFinderPlus/ResFinder, M13). Any one alone is treated as a hypothesis, not a fact.
+
+2. **Confounding is measured, not assumed away.** Lineage-aware GroupKFold (PopPUNK) and pyseer's kinship random effect quantify how much of a signal is clonal/lineage co-carriage versus mechanism-driven. The cross-antibiotic H3 result is reported honestly as a *negative* finding (ampicillin=TEM vs cefotaxime=CTX-M/CMY share no gene family; the only β-lactamase overlap is cross-class CTX-M co-carriage) precisely because the method refuses to manufacture a mechanistic story the data does not support.
+
+3. **Provenance over assertion.** Each `validation_evidence` row records the *evidence type, source (tool + version), score, and pipeline run* — so a KB consumer sees *why* a claim is tiered as it is and can re-derive it, rather than trusting an unqualified label. "Novel candidate" strictly means "no curated homolog found", an explicit knowledge gap, not a discovery claim.
+
+This makes the KB's epistemic status auditable: it is a ranked, confidence-tiered, reproducible catalogue of *statistical AMR signals with biological context*, not a claim of causal mechanism.
 
 ---
 

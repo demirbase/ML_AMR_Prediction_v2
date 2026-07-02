@@ -228,7 +228,7 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | S7 | ResFinder cross-database validation | 1 hafta |
 | S8 | FastAPI minimal REST endpoint | 3 gün |
 | S9 | FAIR metadata şeması — `/api/v1/metadata` endpoint üzerinden makine-okunabilir KB metadata (schema.org veya Dublin Core JSON-LD); CC-BY 4.0 lisans beyanı; Database (Oxford) submission için "veri erişim stratejisi" kriteri | 2 gün |
-| S10 | Reification fallacy güvencesi notu — confidence tier sisteminin "istatistiksel sinyal ≠ biyolojik nedensellik" ayrımını açıkça belgeleyen metodoloji paragrafı; Methods ve Discussion bölümlerine eklenmeli; Takefuji 2025 eleştirisine yanıt | 1 gün |
+| S10 | Reification fallacy güvencesi notu — confidence tier sisteminin "istatistiksel sinyal ≠ biyolojik nedensellik" ayrımını açıkça belgeleyen metodoloji paragrafı; Methods ve Discussion bölümlerine eklenmeli; Takefuji 2025 eleştirisine yanıt ✅ **DONE (2026-07-02)** — `METHODOLOGY.md §4.4` (associational-not-causal wording policy + 3 yapısal güvence: layered orthogonal evidence, measured confounding/H3 negative finding, provenance-over-assertion) | 1 gün |
 
 ### Nice To Have (Bunlar Gelecek Çalışmaya Kalabilir)
 
