@@ -258,10 +258,51 @@ def do_post(organism, antibiotics, out_dir, config, logger):
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     logger.info("  ✓ %s", csv_path)
     logger.info("  ✓ %s", summary_path)
+    return summary
 
 
 def _r(x):
     return "NA" if x is None else f"{x:.3f}"
+
+
+def write_kb_evidence(db_path, summary, logger):
+    """Persist the concordance result into amrk.db `validation_evidence` (M11):
+    one row per (antibiotic, caller) vs phenotype + the model head-to-head, linked
+    to that antibiotic's model run. Idempotent (clears prior concordance rows)."""
+    import sqlite3
+    conn = sqlite3.connect(str(db_path))
+    try:
+        runs = dict(conn.execute("SELECT antibiotic, run_id FROM models").fetchall())
+        etypes = ("concordance_amrfinderplus", "concordance_resfinder", "head_to_head_model")
+        conn.execute(f"DELETE FROM validation_evidence WHERE evidence_type IN "
+                     f"({','.join('?' * len(etypes))})", etypes)
+        n = 0
+        for ab, doc in summary["antibiotics"].items():
+            rid = runs.get(ab)
+            for caller, et, src in (
+                    ("amrfinderplus", "concordance_amrfinderplus", "AMRFinderPlus 2026-05-15.1"),
+                    ("resfinder", "concordance_resfinder", "ResFinder 4.5.0")):
+                s = doc[caller]
+                conn.execute(
+                    "INSERT INTO validation_evidence(unitig_id, evidence_type, "
+                    "evidence_source, evidence_score, pipeline_run_id) VALUES (NULL,?,?,?,?)",
+                    (et, f"{src} vs EUCAST/CLSI (bACC={_r(s['balanced_accuracy'])}, "
+                     f"kappa={_r(s['cohen_kappa'])}, n={s['n']})", s["cohen_kappa"], rid))
+                n += 1
+        for ab, h in summary.get("head_to_head_model_test_genomes", {}).items():
+            m = h["model"]
+            conn.execute(
+                "INSERT INTO validation_evidence(unitig_id, evidence_type, "
+                "evidence_source, evidence_score, pipeline_run_id) VALUES (NULL,?,?,?,?)",
+                ("head_to_head_model",
+                 f"unitig model vs AMRFinderPlus/ResFinder on held-out test "
+                 f"(bACC={_r(m['balanced_accuracy'])}, kappa={_r(m['cohen_kappa'])}, "
+                 f"n={h['n_common_test_genomes']})", m["cohen_kappa"], runs.get(ab)))
+            n += 1
+        conn.commit()
+        logger.info("  ✓ wrote %d concordance evidence rows to KB (%s)", n, db_path)
+    finally:
+        conn.close()
 
 
 def main():
@@ -271,6 +312,9 @@ def main():
     ap.add_argument("--organism", default=config.get("project", {}).get("organism", "ecoli"))
     ap.add_argument("--antibiotics", default=",".join(DEFAULT_ANTIBIOTICS),
                     help="comma-separated (default: ampicillin,cefotaxime,ciprofloxacin)")
+    ap.add_argument("--write-kb", action="store_true",
+                    help="(post) also write concordance to amrk.db validation_evidence (M11)")
+    ap.add_argument("--db", default=None, help="KB path (default: results/{org}/kb/amrk.db)")
     args = ap.parse_args()
     organism = args.organism
     antibiotics = [a.strip() for a in args.antibiotics.split(",") if a.strip()]
@@ -281,7 +325,14 @@ def main():
     if args.mode == "prep":
         do_prep(organism, antibiotics, config, out_dir, logger)
     else:
-        do_post(organism, antibiotics, out_dir, config, logger)
+        summary = do_post(organism, antibiotics, out_dir, config, logger)
+        if args.write_kb:
+            db_path = Path(args.db) if args.db else (
+                PROJECT_ROOT / "results" / organism / "kb" / "amrk.db")
+            if db_path.exists():
+                write_kb_evidence(db_path, summary, logger)
+            else:
+                logger.warning("--write-kb: KB not found at %s (skipped)", db_path)
 
 
 if __name__ == "__main__":

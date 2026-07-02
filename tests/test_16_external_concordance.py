@@ -114,3 +114,39 @@ def test_tokens_helper(mod):
     assert mod._tokens("AMPICILLIN/QUINOLONE") == {"AMPICILLIN", "QUINOLONE"}
     assert mod._tokens("NA") == set()
     assert mod._tokens("") == set()
+
+
+def test_write_kb_evidence(mod, tmp_path):
+    import sqlite3
+    from lib.kb_schema import create_schema
+    from lib import concordance as C
+    from lib.logging_utils import get_logger
+    db = tmp_path / "amrk.db"
+    conn = sqlite3.connect(str(db))
+    create_schema(conn)
+    conn.execute("INSERT INTO pipeline_runs(run_id, organism, antibiotic) VALUES ('R1','ecoli','ampicillin')")
+    conn.execute("INSERT INTO antibiotics(antibiotic) VALUES ('ampicillin')")
+    conn.execute("INSERT INTO models(model_id, run_id, antibiotic) VALUES (1,'R1','ampicillin')")
+    conn.commit(); conn.close()
+
+    yt = [1, 1, 0, 0]
+    summary = {"antibiotics": {"ampicillin": {
+                   "amrfinderplus": C.score_pair(yt, [1, 0, 0, 0]),
+                   "resfinder": C.score_pair(yt, [1, 1, 0, 0])}},
+               "head_to_head_model_test_genomes": {"ampicillin": {
+                   "n_common_test_genomes": 4, "model": C.score_pair(yt, [1, 1, 0, 0])}}}
+    mod.write_kb_evidence(db, summary, get_logger("test"))
+
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute("SELECT evidence_type, pipeline_run_id FROM validation_evidence "
+                        "ORDER BY evidence_type").fetchall()
+    types = [r[0] for r in rows]
+    assert "concordance_amrfinderplus" in types
+    assert "concordance_resfinder" in types
+    assert "head_to_head_model" in types
+    assert all(r[1] == "R1" for r in rows)          # linked to the model's run
+    # idempotent: second call does not duplicate
+    mod.write_kb_evidence(db, summary, get_logger("test"))
+    n = conn.execute("SELECT COUNT(*) FROM validation_evidence").fetchone()[0]
+    assert n == 3
+    conn.close()
