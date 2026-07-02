@@ -81,6 +81,34 @@ def test_resfinder_species_file_preferred(mod, tmp_path):
     assert mod.parse_resfinder(chosen)["ampicillin"] == 1
 
 
+def test_head_to_head_shared_genomes(mod):
+    # 4 model test genomes; tools + phenotype available for all. Model perfect,
+    # AFP over-calls one S->R (a false resistant), RF perfect.
+    genomes = ["g1", "g2", "g3", "g4", "gX"]   # gX has no model pred -> excluded
+    pheno = {g: {"ampicillin": v} for g, v in
+             zip(genomes, [1, 1, 0, 0, 1])}
+    afp = {"g1": {"ampicillin": 1}, "g2": {"ampicillin": 1},
+           "g3": {"ampicillin": 1}, "g4": {"ampicillin": 0}, "gX": {"ampicillin": 1}}
+    rf = {"g1": {"ampicillin": 1}, "g2": {"ampicillin": 1},
+          "g3": {"ampicillin": 0}, "g4": {"ampicillin": 0}, "gX": {"ampicillin": 1}}
+    model_calls = {"ampicillin": {"g1": 1, "g2": 1, "g3": 0, "g4": 0}}  # no gX
+    h = mod.head_to_head(genomes, pheno, afp, rf, model_calls, ["ampicillin"])
+    amp = h["ampicillin"]
+    assert amp["n_common_test_genomes"] == 4                  # gX dropped
+    assert amp["model"]["balanced_accuracy"] == 1.0           # model perfect
+    assert amp["resfinder"]["balanced_accuracy"] == 1.0
+    assert amp["amrfinderplus"]["major_error_rate"] == pytest.approx(0.5)  # g3 S->R
+    # model vs resfinder agree perfectly here
+    assert amp["model_vs_resfinder"]["cohen_kappa"] == 1.0
+
+
+def test_head_to_head_skips_antibiotic_without_model(mod):
+    h = mod.head_to_head(["g1"], {"g1": {"cefotaxime": 1}},
+                         {"g1": {"cefotaxime": 1}}, {"g1": {"cefotaxime": 1}},
+                         {}, ["cefotaxime"])
+    assert h == {}
+
+
 def test_tokens_helper(mod):
     assert mod._tokens("BETA-LACTAM") == {"BETA-LACTAM"}
     assert mod._tokens("AMPICILLIN/QUINOLONE") == {"AMPICILLIN", "QUINOLONE"}

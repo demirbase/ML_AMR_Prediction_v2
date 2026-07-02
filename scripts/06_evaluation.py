@@ -798,7 +798,20 @@ def main():
     print(f"  Applying Threshold: {best_thresh:.4f}")
     
     y_pred_opt = (y_prob >= best_thresh).astype(int)
-    
+
+    # M13: persist held-out test predictions for external-validation concordance
+    # (16_external_concordance.py). These are the config test split — never seen
+    # in training — so the model-vs-tool head-to-head stays leakage-free.
+    try:
+        ev_dir = OUTPUT_DIR.parent.parent / "external_validation"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"Genome ID": ids_test, "y_true": y_test.astype(int),
+                      "model_pred": y_pred_opt.astype(int), "model_prob": y_prob}).to_csv(
+            ev_dir / f"16_model_preds_{TARGET_ANTIBIOTIC}.csv", index=False, encoding="utf-8")
+        print(f"  ✓ Held-out test predictions saved for M13: 16_model_preds_{TARGET_ANTIBIOTIC}.csv")
+    except Exception as e:
+        print(f"  ⚠ Could not save M13 test predictions: {e}")
+
     # Compute comprehensive metrics
     print("\n" + "=" * 80)
     print("FINAL PERFORMANCE METRICS")

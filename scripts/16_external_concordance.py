@@ -148,6 +148,36 @@ def _resfinder_pheno_file(rf_genome_dir):
     return generic if generic.exists() else None
 
 
+def head_to_head(genomes, pheno, afp, rf, model_calls, antibiotics):
+    """3-way concordance on the model's held-out TEST genomes (leakage-free):
+    model vs AMRFinderPlus vs ResFinder vs phenotype on the identical genome set,
+    plus model-vs-tool κ/McNemar. Only antibiotics with model predictions (from
+    06's saved test split) are included; the tools are re-scored on exactly those
+    genomes so all three predictors share one sample."""
+    out = {}
+    for ab in antibiotics:
+        mcall = model_calls.get(ab)
+        if not mcall:
+            continue
+        common = [g for g in genomes if g in mcall and g in afp and g in rf
+                  and pheno.get(g, {}).get(ab) is not None]
+        yt = [pheno[g][ab] for g in common]
+        ym = [mcall[g] for g in common]
+        ya = [afp[g][ab] for g in common]
+        yr = [rf[g][ab] for g in common]
+        out[ab] = {
+            "n_common_test_genomes": len(common),
+            "model": C.score_pair(yt, ym),
+            "amrfinderplus": C.score_pair(yt, ya),
+            "resfinder": C.score_pair(yt, yr),
+            "model_vs_amrfinderplus": {"cohen_kappa": C.cohen_kappa(ym, ya),
+                                       "mcnemar": C.mcnemar(ym, ya)},
+            "model_vs_resfinder": {"cohen_kappa": C.cohen_kappa(ym, yr),
+                                   "mcnemar": C.mcnemar(ym, yr)},
+        }
+    return out
+
+
 def do_post(organism, antibiotics, out_dir, config, logger):
     metadata_file = resolve_path("metadata_file", organism=organism, config=config)
     pheno = load_phenotype(metadata_file, antibiotics)
@@ -195,6 +225,27 @@ def do_post(organism, antibiotics, out_dir, config, logger):
                     _r(ab_doc["amrfinderplus"]["cohen_kappa"]),
                     _r(ab_doc["resfinder"]["balanced_accuracy"]),
                     _r(ab_doc["resfinder"]["cohen_kappa"]))
+
+    # ---- model-vs-tool head-to-head on the model's held-out test genomes ----
+    import pandas as pd
+    model_calls = {}
+    for ab in antibiotics:
+        f = out_dir / f"16_model_preds_{ab}.csv"
+        if f.exists():
+            mp = pd.read_csv(f)
+            model_calls[ab] = dict(zip(mp["Genome ID"].astype(str),
+                                       mp["model_pred"].astype(int)))
+    if model_calls:
+        summary["head_to_head_model_test_genomes"] = head_to_head(
+            genomes, pheno, afp, rf, model_calls, antibiotics)
+        for ab, h in summary["head_to_head_model_test_genomes"].items():
+            logger.info("  H2H %s (n=%d): model bACC=%s κ=%s | AFP bACC=%s | RF bACC=%s",
+                        ab, h["n_common_test_genomes"],
+                        _r(h["model"]["balanced_accuracy"]), _r(h["model"]["cohen_kappa"]),
+                        _r(h["amrfinderplus"]["balanced_accuracy"]),
+                        _r(h["resfinder"]["balanced_accuracy"]))
+    else:
+        logger.info("  (no 16_model_preds_*.csv yet — run 06 to enable model head-to-head)")
 
     csv_path = out_dir / f"16_concordance_{organism}.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as fh:
