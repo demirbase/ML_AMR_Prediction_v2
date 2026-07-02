@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **M15 genome QC executed (CheckM2 + QUAST).** `02d_genome_qc.py` run on all 5470
+  assemblies: **97.1% pass** (5312/5470) at completeness≥95 / contamination≤5 /
+  N50≥50kb / contigs≤500; 158 fails (mostly low N50). Per-genome table + summary
+  JSON + advisory exclusion list. Fails <3% → not retrained (data-quality
+  statement for Methods). Also: `kb_report.py` one-command thesis results summary;
+  `kb_app.py` H3-overlap + M13-concordance tabs; S. aureus taxid fix (927→1280).
 - **KB REST API (S8) + FAIR metadata endpoint (S9).** `scripts/kb_api.py` (FastAPI,
   CORS, auto OpenAPI at `/docs`) over `scripts/lib/kb_queries.py` (pure sqlite3,
   unit-tested without a web server): `/api/v1/kmers` (filter by antibiotic / tier /
