@@ -35,24 +35,49 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from lib.logging_utils import get_logger  # noqa: E402
 
 # Ordered (step-id, script) plan. Step ids are strings to match the file prefixes.
+# NOTE: the canonical (unitig, publication-grade) pipeline is HPC/SLURM-driven
+# and multi-container — see docs/ROADMAP.md §0 and the TRUBA guide. Several steps
+# need a specific container, an env override, --mode prep/post, or internet, so
+# they are NOT runnable by this plain single-container orchestrator (they are
+# listed in HPC_SLURM_STEPS below for visibility). This orchestrator is a local
+# convenience for the single-container Python core; on TRUBA each step is a
+# targeted SLURM job.
 ALL_STEPS: list[tuple[str, str]] = [
     ("00a", "00a_download_bvbrc.py"),
     ("00",  "00_prepare_metadata.py"),
     ("01",  "01_data_validation.py"),
-    ("02",  "02_kmer_extraction.py"),
+    ("02",  "02_kmer_extraction.py"),        # KMC (QC + k-mer baseline)
     ("02b", "02b_global_qc_analysis.py"),
-    ("03",  "03_matrix_construction.py"),
+    ("02c", "02c_lineage_poppunk.py"),       # PopPUNK lineage (amr-pp.sif)
+    ("02d", "02d_genome_qc.py"),             # CheckM2+QUAST QC (M15; --mode, multi-container)
+    ("03",  "03_matrix_construction.py"),    # raw k-mer matrix (baseline)
+    ("03u", "03u_unitig_matrix.py"),         # unitig matrix (CANONICAL; AMR_FEATURE_REPR=unitig)
+    ("03b", "03b_matrix_validation_qc.py"),
     ("04",  "04_optimization.py"),
     ("05",  "05_model_training.py"),
     ("06",  "06_evaluation.py"),
     ("07b", "07b_feature_stability.py"),
     ("07",  "07_explainability.py"),
-    ("08",  "08_blast_annotation.py"),
+    ("08",  "08_blast_annotation.py"),       # CARD local + NCBI remote (internet)
     ("09",  "09_biological_summary.py"),
     ("10",  "10_kmer_background_frequency.py"),
     ("11",  "11_variant_snp_check.py"),
+    ("12",  "12_permutation_test.py"),       # MDA permutation (M9)
+    ("12b", "12b_label_permutation_test.py"),# label-permutation null (M9)
+    ("13",  "13_stability_selection.py"),    # CPSS + SHAP (M4)
+    ("13b", "13b_stable_annotation.py"),
+    ("14",  "14_pyseer_lmm.py"),             # pyseer LMM (M14; --mode, amr-tools.sif)
+    ("15",  "15_cross_antibiotic.py"),       # cross-antibiotic overlap / H3 (S1)
+    ("16",  "16_external_concordance.py"),   # AMRFinderPlus/ResFinder concordance (M13; --mode)
 ]
-# Default plan: the analysis core (skip network/DB-heavy data + BLAST steps).
+# Steps that need SLURM + a specific container / env / --mode / internet and so
+# cannot be launched by this plain orchestrator (run them as SLURM jobs):
+#   02c (amr-pp.sif) · 02d (--mode + amr-checkm2/amr-tools) · 03u (AMR_FEATURE_REPR=unitig)
+#   08-NCBI (internet) · 14 (--mode + amr-tools) · 16 (--mode + amr-tools) · populate_database.py
+HPC_SLURM_STEPS = {"02c", "02d", "14", "16"}
+
+# Default plan: the local single-container analysis core (raw-k-mer baseline).
+# The canonical unitig run uses 03u (+ AMR_FEATURE_REPR=unitig) and runs on HPC.
 DEFAULT_PLAN = ["01", "02", "02b", "03", "04", "05", "06", "07b", "07", "09", "10"]
 
 
@@ -113,6 +138,12 @@ def main() -> None:
     # arguments and argparse would reject unknown options.
     failures = []
     for sid, script in steps:
+        if sid in HPC_SLURM_STEPS and not (args.only and sid in args.only):
+            log.warning("SKIP %s (%s): SLURM / multi-container / --mode step — run it "
+                        "as a SLURM job (see the TRUBA guide), not via this plain "
+                        "orchestrator. (Force by naming it explicitly in --only.)",
+                        sid, script)
+            continue
         # Just-in-time resolution for --antibiotic auto (after metadata is prepared)
         if sid >= "01" and env.get("AMR_ANTIBIOTIC") == "auto":
             try:

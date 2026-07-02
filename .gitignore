@@ -188,3 +188,7 @@ work/
 # INCOMPLETE DOWNLOADS
 # ============================================================================
 *.partial
+
+# Thesis / website drafts (not code)
+WebSite_Icerik_Part_*.txt
+Danisman_Toplanti_Raporu_*.md
