@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **KB REST API (S8) + FAIR metadata endpoint (S9).** `scripts/kb_api.py` (FastAPI,
+  CORS, auto OpenAPI at `/docs`) over `scripts/lib/kb_queries.py` (pure sqlite3,
+  unit-tested without a web server): `/api/v1/kmers` (filter by antibiotic / tier /
+  min_stability / stable_only), `/kmers/{sequence}` (full evidence chain),
+  `/overlap`, `/stats`, and `/metadata` (schema version + Zenodo DOI + CC-BY-4.0
+  license + counts — the FAIR machine-readable access point). Run with
+  `uvicorn scripts.kb_api:app`.
+- **Reification safeguard (S10).** `METHODOLOGY.md §4.4` — associational-not-causal
+  wording policy + three structural safeguards (layered orthogonal evidence,
+  measured confounding incl. the H3 negative finding, provenance-over-assertion).
 - **M13 external-validation concordance.** `scripts/16_external_concordance.py`
   + `scripts/lib/concordance.py` (balanced accuracy, sensitivity, specificity,
   Cohen's κ, McNemar, FDA major/very-major error bands). AMRFinderPlus

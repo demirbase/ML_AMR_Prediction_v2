@@ -226,8 +226,8 @@ Rate limiting (100 req/min per IP), CORS headers, OpenAPI docs otomatik — bunl
 | S5 | P-03 fix: eval_metric config'den oku | 2 saat |
 | S6 | P-04 fix: colsample METHODOLOGY çelişkisi — kodu ya da dokümanı düzelt | 1 saat |
 | S7 | ResFinder cross-database validation | 1 hafta |
-| S8 | FastAPI minimal REST endpoint | 3 gün |
-| S9 | FAIR metadata şeması — `/api/v1/metadata` endpoint üzerinden makine-okunabilir KB metadata (schema.org veya Dublin Core JSON-LD); CC-BY 4.0 lisans beyanı; Database (Oxford) submission için "veri erişim stratejisi" kriteri | 2 gün |
+| S8 | FastAPI minimal REST endpoint ✅ **DONE (2026-07-02)** — `scripts/kb_api.py` (FastAPI + CORS + OpenAPI /docs) over `scripts/lib/kb_queries.py` (pure sqlite3, unit-tested): `/api/v1/kmers` (filter antibiotic/tier/min_stability/stable_only), `/kmers/{sequence}` (full evidence chain), `/overlap`, `/stats`, `/metadata`. `uvicorn scripts.kb_api:app` | 3 gün |
+| S9 | FAIR metadata şeması — `/api/v1/metadata` endpoint üzerinden makine-okunabilir KB metadata (schema.org veya Dublin Core JSON-LD); CC-BY 4.0 lisans beyanı; Database (Oxford) submission için "veri erişim stratejisi" kriteri ✅ **DONE (2026-07-02)** — `/api/v1/metadata` returns `kb_schema_version` + `zenodo_doi` + `license` (CC-BY-4.0) + `card_version` + n_unitigs/n_models + antibiotics as JSON | 2 gün |
 | S10 | Reification fallacy güvencesi notu — confidence tier sisteminin "istatistiksel sinyal ≠ biyolojik nedensellik" ayrımını açıkça belgeleyen metodoloji paragrafı; Methods ve Discussion bölümlerine eklenmeli; Takefuji 2025 eleştirisine yanıt ✅ **DONE (2026-07-02)** — `METHODOLOGY.md §4.4` (associational-not-causal wording policy + 3 yapısal güvence: layered orthogonal evidence, measured confounding/H3 negative finding, provenance-over-assertion) | 1 gün |
 
 ### Nice To Have (Bunlar Gelecek Çalışmaya Kalabilir)

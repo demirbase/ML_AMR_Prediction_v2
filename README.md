@@ -183,6 +183,17 @@ python scripts/13b_stable_annotation.py   # M4: CARD-annotate the stable set (ti
 python scripts/14_pyseer_lmm.py --mode prep   # M14: pyseer LMM (population-structure-corrected); pyseer CLIs run via amr-tools.sif
 python scripts/populate_database.py --antibiotic <ab>   # M8: load everything -> results/{org}/kb/amrk.db (multi-antibiotic, unitig schema 0.4.0)
 streamlit run scripts/kb_app.py           # local queryable KB explorer (pip install streamlit pandas)
+uvicorn scripts.kb_api:app                # REST API (S8/S9): /api/v1/{kmers,kmers/{seq},overlap,stats,metadata} + /docs
+```
+
+**Querying the KB via the REST API** (`scripts/kb_api.py`, FastAPI):
+
+```bash
+pip install fastapi uvicorn
+AMR_KB_DB=results/ecoli/kb/amrk.db uvicorn scripts.kb_api:app   # http://localhost:8000/docs
+# GET /api/v1/kmers?antibiotic=cefotaxime&tier=confirmed&stable_only=true
+# GET /api/v1/kmers/{sequence}     GET /api/v1/overlap?ab1=ampicillin&ab2=cefotaxime
+# GET /api/v1/stats                GET /api/v1/metadata   (FAIR: schema ver, DOI, license)
 ```
 
 > **Feature unit = unitig** (compacted de Bruijn graph; ROADMAP §0). The pipeline
