@@ -1,9 +1,42 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · **Active branch now `main`** (HEAD `3ddc476`, pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). (Earlier work was on `fix/amr-audit-remediation`, since merged to `main`.)
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `6f4d627`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
-> **Last full local run:** 2026-06-15, *E. coli* / ampicillin, 1788 genomes — `00a → 11` end-to-end.
-> **LIVE: real production run on TRUBA (ARF) HPC, 5470 genomes — in progress (see §0 below).**
+
+---
+
+# §0.-1 — LATEST STATE (2026-07-03) — READ FIRST, supersedes older sections
+
+**The thesis is essentially research-complete.** 3 antibiotics in the KB, all must-haves done except the Zenodo deposit, full audit + fixes done. What follows below (§0, §0.0…) is earlier/historical detail; where it conflicts, THIS section wins.
+
+### KB (authoritative, TRUBA `results/ecoli/kb/amrk.db`, schema 0.4.0, deduped)
+3 models, **acquired-gene vs target-SNP showcase across two β-lactam mechanisms + a fluoroquinolone**:
+| antibiotic (model) | genomes R/S | lineage-CV AUC | CPSS stable/PFER | pyseer sig | mechanism (confirmed) |
+|---|---|---|---|---|---|
+| ampicillin (1) | 4373 (2717/1729) | 0.9511±0.011 | 36 / 2.73 | 25/36 | **acquired** TEM β-lactamase; H2 TRUE 47%; SNP 0 |
+| ciprofloxacin (2) | 4150 (1324/2826) | 0.9496±0.007 | 70 / 8.4 | 5/70 | **target SNP** gyrA S83L + parC S80I (step 11) |
+| cefotaxime (3) | 3788 (1009/2779) | 0.9546±0.020 | 83 / 13.2 | 17/83 | **acquired** CTX-M-276/278 + CMY ESBL/AmpC; H2 FALSE 25% (ok) |
+KB provenance complete (git 5b76f47 + seed 42 + config_hash + CARD 4.0.1; n_genomes/min_support backfilled). `validation_evidence` deduped 980→902.
+
+### Roadmap status: **must-have 15/16, should-have ~all**
+- **DONE:** M1-M9, M11, M12, M14, M16, **M13** (concordance + head-to-head), **M15** (CheckM2+QUAST 97.1% pass 5312/5470), M5(minus Zenodo). Should: S1(cross-antibiotic/H3), S4, S5, **S7**(ResFinder), **S8**(FastAPI `scripts/kb_api.py`), **S9**(FAIR /metadata), **S10**(METHODOLOGY §4.4).
+- **REMAINING:** **M10** Zenodo deposit (only external step left — `docs/RELEASE_ZENODO.md`; `.zenodo.json`/CITATION ready; stamp DOI via `AMR_ZENODO_DOI` env; deposit ideally v0.5.0 with all 3 antibiotics). **M13 Track A** temporal/geo hold-out (deferred by user, needs BV-BRC year/geo metadata fetch). **Thesis writing** of audit notes 10/21/22/14 (below).
+
+### Key results (thesis headlines)
+- **H3 REJECTED (biologically substantive negative finding):** within-β-lactam ampicillin~cefotaxime share **no** stable unitig **and no gene family** (ampicillin=TEM vs cefotaxime=CTX-M/CMY — same class, distinct enzymes); the only β-lactamase overlap is cross-class cefotaxime~ciprofloxacin CTX-M **co-carriage**. `scripts/15_cross_antibiotic.py` (unitig + ARO gene-family level). H3 hypergeometric is `--with-test` (deferred, union-universe caveat).
+- **M13 head-to-head (leakage-free, held-out test genomes):** unitig model bACC amp 0.873 / cef 0.925 / cip 0.928 — **matches ResFinder (cef,cip), beats AMRFinderPlus (cip,amp)**. Tool-vs-phenotype κ: ResFinder amp 0.86/cef 0.89/cip 0.76; AMRFinderPlus over-calls amp+cip (naive determinant→class map incl. intrinsic β-lactamase/efflux → ME ~38-40%; cef clean 0.87). All in KB `validation_evidence` (concordance_amrfinderplus/resfinder/head_to_head_model).
+
+### New tooling (this session, all on main)
+`scripts/16_external_concordance.py` (M13, prep/post + `--write-kb`), `scripts/lib/concordance.py` (bACC/sens/spec/κ/McNemar/FDA ME-VME), `scripts/kb_api.py` + `scripts/lib/kb_queries.py` (S8/S9 REST API, `uvicorn scripts.kb_api:app`), `scripts/kb_report.py` (one-command thesis results Markdown), `scripts/kb_app.py` (Streamlit + H3/M13 tabs), `scripts/02d_genome_qc.py` (M15). Tests: 117 pass, 1 skip (fastapi). `pip install fastapi uvicorn` to run the API/its test.
+
+### AUDIT (independent technical audit done 2026-07-03) — fixed vs deferred
+**Fixed+pushed:** High 1 (METHODOLOGY reconciliation banner — it still documents the k-mer *baseline*; unitig/lineage-CV/CPSS is canonical), 2 (README Results), 3/24 (**populate idempotency** — `kb_schema.ensure_unique_indexes()` + `INSERT OR IGNORE`; blast/evidence were double-inserted by 09+13b); Medium 4 (run_metadata n_genomes/min_support), 5 (Genome-ID `dtype=str` in 06/16/lineage — "562.10"→float hazard), 6 (run_pipeline `--antibiotic auto` was broken: value_counts on 0/1 matrix), 8 (16 tool versions env-overridable), 9 (AFP keywords → `antibiotics.yaml` registry); Low 17/23/25/28. **Deferred (gerekçeli):** Medium 7 (`io_utils.run_command` string→list refactor, risky), Medium 10/21/22 + Low 14 = **thesis-writing doc notes** (10: AMRFinderPlus naive determinant→class map over-calls → frame in Methods that ResFinder is the curated-phenotype reference; 21: "recovery rate" = precision-of-stable-set not recall, define precisely; 22: HPO/06 use chunk-split not lineage-aware — only 07b's reported AUC is lineage-CV, note the defense; 14: git_dirty=1 on all runs — document the TRUBA manual patches to 02p/02b/03/config). Low deferred: 11 (kmer column name = unitig seq, rename is breaking), 12 (`same_class` = registry class, add `same_drug_family`?), 13 (API rate-limit), 15 (ampicillin 12b nulls csv missing), 18/19/26/29 (documented low-impact). **No critical/data-corrupting bug found; code quality high.**
+
+### Operational (unchanged, critical)
+- **Push:** ONLY when the user asks + pastes a fresh fine-grained PAT (Contents:write). **No `Co-Authored-By` trailer.** Push via `git push "https://demirbase:<PAT>@github.com/demirbase/ML_AMR_Prediction_v2.git" main`. The auto-mode classifier blocks pushes unless the user explicitly authorized this turn. **The repo is a FORK of `iumobg/ML_AMR_Prediction_v2` → commits DON'T count toward the contribution graph** (make it standalone / detach fork to fix — pending user decision).
+- **TRUBA:** no `git pull` — targeted `git checkout origin/main -- <file>` (never `config.yaml`/`02p`/`02b`/`03`). Submit from `$AMR_WORK`, `APPTAINER_BINDPATH=/arf`, **`--exclude=barbun45,barbun46`** (Apptainer `lookup userid` glitch nodes) + **`apptainer exec --no-home`** (the real fix for the glitch). barbun min 20 cores/node. Containers: `amr.sif` (core), `amr-tools.sif` (pyseer/quast/amrfinderplus 4.2.7/resfinder 4.5.0), `amr-checkm2.sif`, `amr-pp.sif` (poppunk). Env overrides: `AMR_FEATURE_REPR=unitig AMR_EXTERNAL_MEMORY=false AMR_OPTUNA_PATIENCE=15 AMR_CARD_VERSION=4.0.1 AMR_ENTREZ_EMAIL AMR_ZENODO_DOI`.
+- **Drive backup:** `rclone` to `gdrive:TRUBA_25626/scratch_amr` on transfer host **arf-ui4 (172.16.6.14)** in `screen`. **NEVER `rclone copy $AMR_WORK` whole-tree** (OOM-killed ~1h walking 100GB+). Copy small subdirs individually (KB/results/models/runs); exclude regenerable big data (`unitigs.rtab`, `matrix_unitig/X_*.npz`, `kmc_outputs`, `genomes/*.fna`, `*_db`). Latest science outputs already backed up.
+- **CheckM2 DB:** at `$AMR_WORK/data/external/checkm2_db/CheckM2_database/uniref100.KO.1.dmnd` (pass `--database_path`; the download's json-write fails on read-only FS but the .dmnd lands fine). AMRFinderPlus DB `amrfinder_update -d $AMR_WORK/data/external/amrfinder_db`; ResFinder DBs cloned to `$AMR_WORK/data/external/{resfinder,pointfinder}_db`.
 
 ---
 
