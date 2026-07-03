@@ -184,3 +184,33 @@ def create_schema(conn):
     """Create all tables/indexes on an open sqlite3 connection (idempotent)."""
     conn.executescript(SCHEMA_SQL)
     conn.commit()
+
+
+# Natural-key dedup + UNIQUE indexes (audit Issue 3/24). blast_annotations and
+# validation_evidence have autoincrement PKs and were written with plain INSERTs,
+# so populate_candidates + populate_cpss both writing the same unitig, or a
+# re-populate, duplicated rows. The keys below distinguish genuine multi-HSP /
+# multi-source rows (they differ in identity/coverage/evalue or evidence_score)
+# from true duplicates (identical content), so deduping keeps every distinct hit.
+_DEDUP_KEYS = [
+    ("blast_annotations", "annotation_id",
+     "unitig_id, model_id, source_db, gene_symbol, identity_pct, coverage, evalue"),
+    ("validation_evidence", "evidence_id",
+     "unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id"),
+]
+
+
+def ensure_unique_indexes(conn):
+    """Deduplicate any legacy duplicate rows (keep the lowest id) then add UNIQUE
+    indexes so future `INSERT OR IGNORE` writes cannot duplicate. Idempotent and
+    safe on already-clean DBs. Must run before the populate inserts."""
+    for tbl, pk, keys in _DEDUP_KEYS:
+        conn.execute(f"DELETE FROM {tbl} WHERE {pk} NOT IN "
+                     f"(SELECT MIN({pk}) FROM {tbl} GROUP BY {keys})")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_blast_natural ON "
+                 "blast_annotations(unitig_id, model_id, source_db, gene_symbol, "
+                 "identity_pct, coverage, evalue)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_evidence_natural ON "
+                 "validation_evidence(unitig_id, evidence_type, evidence_source, "
+                 "evidence_score, pipeline_run_id)")
+    conn.commit()

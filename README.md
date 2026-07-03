@@ -113,21 +113,27 @@ Paths are resolved through `scripts/lib/config.py:resolve_path()` from the
 
 ---
 
-## Results (E. coli, single stratified split)
+## Results (E. coli, unitig features, 3 antibiotics)
 
-Test-set ROC-AUC, using an unbiased training-derived threshold (no test-set
-tuning); evaluation also reports bootstrap 95% CIs.
+**Lineage-aware cross-validation** ROC-AUC (PopPUNK + StratifiedGroupKFold — the
+honest, non-inflated estimate; an entire lineage stays on one CV side) alongside
+the single-split test AUC. The KB currently holds three antibiotics spanning the
+two AMR mechanism classes (acquired gene vs target-SNP).
 
-| Antibiotic | Test ROC-AUC |
-| :--- | :--- |
-| Ampicillin | 0.927 |
-| Cefotaxime | 0.925 |
-| Ciprofloxacin | 0.990 |
-| Gentamicin | 0.930 |
+| Antibiotic | Mechanism (confirmed) | Lineage-CV ROC-AUC | Single-split AUC |
+| :--- | :--- | :--- | :--- |
+| Ampicillin | acquired gene — *TEM* β-lactamase | 0.951 ± 0.011 | 0.924 |
+| Cefotaxime | acquired gene — *CTX-M* / *CMY* ESBL/AmpC | 0.955 ± 0.020 | 0.969 |
+| Ciprofloxacin | target-gene SNP — *gyrA* S83L + *parC* S80I | 0.950 ± 0.007 | 0.980 |
 
-The framework rediscovers known mechanisms reference-free (e.g. *TEM-1*,
-*AAC(3)-IId*, *gyrA*). Cross-validation, feature-stability and external
-validation are tracked as future work in `docs/ROADMAP.md`.
+Validation done (see `docs/ROADMAP.md` / `python scripts/kb_report.py`):
+lineage-aware CV (M2), CPSS stability selection + PFER bound (M4), permutation
+tests (M9), pyseer LMM population-structure-corrected significance (M14), CARD
+variant-model SNP allele check (M11), genome QC (CheckM2 + QUAST, 97.1% pass, M15),
+and **external validation** — AMRFinderPlus/ResFinder concordance + a leakage-free
+model-vs-tool head-to-head on held-out genomes (M13), where the unitig model
+matches ResFinder and beats AMRFinderPlus for ciprofloxacin. Remaining: Zenodo
+DOI (M10) and an optional temporal/geographic hold-out.
 
 ---
 

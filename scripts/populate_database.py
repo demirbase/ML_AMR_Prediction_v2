@@ -35,7 +35,7 @@ from pathlib import Path
 import pandas as pd
 
 from lib.config import load_config, resolve_path
-from lib.kb_schema import KB_SCHEMA_VERSION, create_schema
+from lib.kb_schema import KB_SCHEMA_VERSION, create_schema, ensure_unique_indexes
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -188,7 +188,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
         # CARD BLAST annotation (best hit recorded in the candidate row)
         if str(r.get("card_gene", "")).strip():
             conn.execute(
-                """INSERT INTO blast_annotations
+                """INSERT OR IGNORE INTO blast_annotations
                    (unitig_id, model_id, source_db, gene_symbol, identity_pct,
                     evalue, tier, aro_accession, aro_gene_family, aro_drug_class,
                     aro_resistance_mechanism)
@@ -200,7 +200,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
                  _s(r.get("aro_drug_class")), _s(r.get("aro_resistance_mechanism"))),
             )
             conn.execute(
-                """INSERT INTO validation_evidence
+                """INSERT OR IGNORE INTO validation_evidence
                    (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "blast", f"CARD {card_version}", _f(r.get("card_evalue")), run_id),
@@ -218,7 +218,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
                  _f(r.get("fisher_p")), _b(r.get("discriminative"))),
             )
             conn.execute(
-                """INSERT INTO validation_evidence
+                """INSERT OR IGNORE INTO validation_evidence
                    (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "background_frequency", "R-vs-S Fisher exact",
@@ -246,7 +246,7 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
              str(r.get("allele_class", ""))),
         )
         conn.execute(
-            """INSERT INTO validation_evidence
+            """INSERT OR IGNORE INTO validation_evidence
                (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (kid, "snp", "CARD variant model", None, run_id),
@@ -279,7 +279,7 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
         )
         if str(r.get("card_gene", "")).strip():
             conn.execute(
-                """INSERT INTO blast_annotations
+                """INSERT OR IGNORE INTO blast_annotations
                    (unitig_id, model_id, source_db, gene_symbol, identity_pct,
                     coverage, evalue, tier, aro_accession, aro_gene_family,
                     aro_drug_class, aro_resistance_mechanism)
@@ -291,7 +291,7 @@ def populate_cpss(conn, model_id, run_id, k, cpss_df):
                  _s(r.get("aro_drug_class")), _s(r.get("aro_resistance_mechanism"))),
             )
         conn.execute(
-            """INSERT INTO validation_evidence
+            """INSERT OR IGNORE INTO validation_evidence
                (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (kid, "stability_selection", "CPSS (B=100, pi>=0.6, PFER-bounded)",
@@ -319,7 +319,7 @@ def populate_pyseer(conn, run_id, sig_df, threshold):
         if not row:
             continue
         conn.execute(
-            """INSERT INTO validation_evidence
+            """INSERT OR IGNORE INTO validation_evidence
                (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (row[0], "pyseer_lmm", src, _f(r.get(pcol)), run_id),
@@ -342,7 +342,7 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
                 continue
             kid = unitig_id(conn, seq, k)
             conn.execute(
-                """INSERT INTO validation_evidence
+                """INSERT OR IGNORE INTO validation_evidence
                    (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                    VALUES (?,?,?,?,?)""",
                 (kid, "permutation_mda", "MDA test ROC-AUC drop (100 perms, BH-FDR)",
@@ -354,7 +354,7 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
                f"real_auc={labelperm.get('real_roc_auc')}, "
                f"null_max={labelperm.get('null_auc_max')})")
         conn.execute(
-            """INSERT INTO validation_evidence
+            """INSERT OR IGNORE INTO validation_evidence
                (unitig_id, evidence_type, evidence_source, evidence_score, pipeline_run_id)
                VALUES (?,?,?,?,?)""",
             (None, "label_permutation", src, _f(labelperm.get("empirical_p")), run_id),
@@ -446,6 +446,9 @@ def main():
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
     create_schema(conn)
+    # Dedup any legacy duplicates + add UNIQUE indexes so the blast/evidence
+    # INSERT OR IGNOREs below are idempotent (audit Issue 3/24).
+    ensure_unique_indexes(conn)
     try:
         run_id = populate_run(conn, organism, antibiotic, run_meta, card_version, min_support)
         model_id = populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout)

@@ -2,6 +2,19 @@
 
 > **A rigorous technical exposition of the biological, mathematical, and statistical foundations of the AMR prediction pipeline.**
 
+> ⚠️ **Canonical pipeline (2026-07, schema 0.4.0) vs this document.** After the
+> literature-review pivot (`docs/ROADMAP.md` §0), the *canonical* feature unit is
+> the **unitig** (compacted de Bruijn graph, `bcalm2`/`unitig-caller`; step 03u),
+> the *canonical* validation is **lineage-aware CV** (PopPUNK + StratifiedGroupKFold,
+> step 07b), stability is **CPSS** (B=100, π≥0.6, PFER-bounded; step 13) with
+> **TreeSHAP** importance, and biomarkers additionally carry pyseer-LMM significance
+> (step 14), CARD SNP-allele checks (step 11), genome QC (CheckM2+QUAST; step 02d)
+> and external AMRFinderPlus/ResFinder concordance (step 16, M13). **Sections 1–3
+> below describe the raw-k-mer / Gain / single-split *baseline* (still a valid,
+> runnable path) — read them as the foundation, not the current canonical method;**
+> §4.4 and `docs/ROADMAP.md` §0 are authoritative where they differ. A full rewrite
+> to unitig-first is tracked (audit Issue 1).
+
 ---
 
 ## Table of Contents
@@ -321,4 +334,4 @@ This makes the KB's epistemic status auditable: it is a ranked, confidence-tiere
 
 ---
 
-*Document version: March 2026. Maintained alongside `scripts/` as the canonical mathematical reference for the pipeline.*
+*Document version: July 2026 (§4.4 + canonical-pipeline banner added; KB schema 0.4.0). Sections 1–3 document the raw-k-mer baseline; the canonical unitig / lineage-CV / CPSS pipeline is authoritative per `docs/ROADMAP.md` §0. Maintained alongside `scripts/` as the mathematical reference for the pipeline.*
