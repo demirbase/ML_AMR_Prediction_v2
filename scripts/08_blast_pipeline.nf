@@ -31,7 +31,10 @@ nextflow.enable.dsl = 2
 params.fasta      = ""
 params.card_db    = ""
 params.antibiotic = "unknown"
-params.outdir     = "results/${params.antibiotic}/05_explainability"
+params.organism   = "ecoli"
+// organism-scoped default (audit Issue 28); 08_blast_annotation.py passes the
+// fully-resolved --outdir, so this default only affects a standalone `nextflow run`.
+params.outdir     = "results/${params.organism}/${params.antibiotic}/05_explainability"
 params.threads    = 8
 params.evalue     = 10
 params.word_size  = 11

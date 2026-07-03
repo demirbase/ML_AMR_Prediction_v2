@@ -33,6 +33,8 @@ from Bio import Entrez, SeqIO
 # GLOBAL CONSTANTS
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+from lib.config import load_config  # noqa: E402  (canonical loader; audit Issue 23)
 
 # NCBI Entrez identification (email / optional api_key) is configured at runtime
 # from config.yaml in configure_entrez(); see main(). A fake/placeholder email
@@ -139,20 +141,6 @@ def configure_entrez(config):
     if api_key:
         Entrez.api_key = api_key
         print("  ✓ NCBI api_key configured (higher rate limit enabled).")
-
-
-# ============================================================================
-# CONFIGURATION LOADER
-# ============================================================================
-def load_config(config_path=None):
-    if config_path is None:
-        config_path = PROJECT_ROOT / "config" / "config.yaml"
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        sys.exit(1)
 
 
 # ============================================================================

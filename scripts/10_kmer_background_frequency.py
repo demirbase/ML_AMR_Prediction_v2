@@ -166,7 +166,9 @@ def main():
         return
 
     # feature index from 'feature_id' (e.g. "f19862101")
-    kb['feature_index'] = kb['feature_id'].astype(str).str.lstrip('f').astype(int)
+    # drop the 'f' prefix (feature ids are 'f<index>'); str[1:] not lstrip('f')
+    # which would also strip any further leading 'f' chars (audit Issue 25).
+    kb['feature_index'] = kb['feature_id'].astype(str).str[1:].astype(int)
 
     y_path = matrix_dir / f"y_{antibiotic}.csv"
     chunk_files = sorted(matrix_dir.glob(f"X_{antibiotic}_part_*.npz"),
