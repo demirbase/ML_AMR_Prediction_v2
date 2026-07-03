@@ -151,3 +151,16 @@ aliases:
   "ticarcillin/clavulanic acid": ["ticarcillin_clavulanate"]
   "meropenem/vaborbactam": ["meropenem-vaborbactam"]
   "cefepime/taniborbactam": ["cefepime_taniborbactam"]
+
+# ============================================================================
+# AMRFinderPlus Class/Subclass -> antibiotic keyword map (M13 concordance;
+# scripts/16_external_concordance.py, audit Issue 9). A genome is genotypic-R
+# for an antibiotic if any AMR-type AMRFinderPlus row's Class/Subclass tokens
+# intersect this set. Add an antibiotic here (no code change) to include it in
+# the concordance. Note the biology: a narrow BETA-LACTAM (TEM-1) implies
+# ampicillin-R but NOT cefotaxime-R (that needs an ESBL/AmpC -> CEPHALOSPORIN).
+# ============================================================================
+amrfinder_keywords:
+  ampicillin:    [AMPICILLIN, BETA-LACTAM]
+  cefotaxime:    [CEFOTAXIME, CEPHALOSPORIN]
+  ciprofloxacin: [CIPROFLOXACIN, FLUOROQUINOLONE, QUINOLONE]

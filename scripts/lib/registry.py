@@ -45,6 +45,15 @@ def _antibiotics_doc():
     return _read_yaml(ANTIBIOTICS_FILE)
 
 
+def load_amrfinder_keywords():
+    """Return {antibiotic: set(UPPER keyword)} — the AMRFinderPlus Class/Subclass
+    tokens that map to each antibiotic for M13 concordance (registry-driven so
+    adding an antibiotic needs no code change; audit Issue 9). {} if the section
+    is absent (caller falls back to its built-in defaults)."""
+    raw = _antibiotics_doc().get("amrfinder_keywords", {}) or {}
+    return {str(ab): {str(k).upper() for k in kws} for ab, kws in raw.items()}
+
+
 def load_organisms():
     """Return the raw {organism_id: {...}} mapping from organisms.yaml."""
     return _organisms_doc().get("organisms", {})

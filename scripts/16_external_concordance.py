@@ -38,6 +38,7 @@ import argparse
 import csv
 import datetime
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -47,16 +48,28 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from lib import concordance as C  # noqa: E402
 from lib.config import load_config, resolve_path  # noqa: E402
 from lib.logging_utils import get_logger  # noqa: E402
+from lib.registry import load_amrfinder_keywords  # noqa: E402
 
 # Antibiotic -> AMRFinderPlus Class/Subclass keyword set (upper-case tokens).
-# A narrow β-lactamase (Subclass BETA-LACTAM) implies ampicillin-R but NOT
-# cefotaxime-R (which needs an ESBL/AmpC -> Subclass CEPHALOSPORIN).
-AFP_KEYWORDS = {
+# Registry-driven (config/registry/antibiotics.yaml `amrfinder_keywords`; audit
+# Issue 9) so adding an antibiotic needs no code change; a built-in fallback keeps
+# the script runnable if the registry section is absent. A narrow β-lactamase
+# (Subclass BETA-LACTAM) implies ampicillin-R but NOT cefotaxime-R (that needs an
+# ESBL/AmpC -> Subclass CEPHALOSPORIN).
+_AFP_FALLBACK = {
     "ampicillin":    {"AMPICILLIN", "BETA-LACTAM"},
     "cefotaxime":    {"CEFOTAXIME", "CEPHALOSPORIN"},
     "ciprofloxacin": {"CIPROFLOXACIN", "FLUOROQUINOLONE", "QUINOLONE"},
 }
-DEFAULT_ANTIBIOTICS = ["ampicillin", "cefotaxime", "ciprofloxacin"]
+AFP_KEYWORDS = load_amrfinder_keywords() or _AFP_FALLBACK
+DEFAULT_ANTIBIOTICS = list(AFP_KEYWORDS)
+
+# Tool versions for provenance (audit Issue 8) — env-overridable so a re-run with
+# updated DBs records the real version rather than a stale literal; defaults are
+# the 2026-07 canonical-run versions. The M13 SLURM can export these from
+# `amrfinder --version` / `python -m resfinder --version`.
+AFP_SOURCE = os.environ.get("AMR_AFP_VERSION", "AMRFinderPlus 2026-05-15.1")
+RF_SOURCE = os.environ.get("AMR_RF_VERSION", "ResFinder 4.5.0")
 
 
 def _tokens(field):
@@ -282,8 +295,8 @@ def write_kb_evidence(db_path, summary, logger):
         for ab, doc in summary["antibiotics"].items():
             rid = runs.get(ab)
             for caller, et, src in (
-                    ("amrfinderplus", "concordance_amrfinderplus", "AMRFinderPlus 2026-05-15.1"),
-                    ("resfinder", "concordance_resfinder", "ResFinder 4.5.0")):
+                    ("amrfinderplus", "concordance_amrfinderplus", AFP_SOURCE),
+                    ("resfinder", "concordance_resfinder", RF_SOURCE)):
                 s = doc[caller]
                 conn.execute(
                     "INSERT INTO validation_evidence(unitig_id, evidence_type, "

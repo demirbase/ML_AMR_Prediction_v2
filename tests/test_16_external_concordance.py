@@ -109,6 +109,16 @@ def test_head_to_head_skips_antibiotic_without_model(mod):
     assert h == {}
 
 
+def test_amrfinder_keywords_from_registry(mod):
+    # Issue 9: keywords + default antibiotics are registry-driven, not hardcoded.
+    from lib.registry import load_amrfinder_keywords
+    reg = load_amrfinder_keywords()
+    assert reg["cefotaxime"] == {"CEFOTAXIME", "CEPHALOSPORIN"}   # UPPER token set
+    assert "BETA-LACTAM" in reg["ampicillin"]
+    assert set(mod.AFP_KEYWORDS) == set(reg)                       # module uses the registry
+    assert mod.DEFAULT_ANTIBIOTICS == list(mod.AFP_KEYWORDS)
+
+
 def test_tokens_helper(mod):
     assert mod._tokens("BETA-LACTAM") == {"BETA-LACTAM"}
     assert mod._tokens("AMPICILLIN/QUINOLONE") == {"AMPICILLIN", "QUINOLONE"}

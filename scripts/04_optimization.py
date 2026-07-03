@@ -879,6 +879,19 @@ def main():
                 run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
                 run_dir = resolve_path('run_dir', organism=organism,
                                        antibiotic=TARGET_ANTIBIOTIC, run_id=run_id, config=config)
+                # Provenance completeness (audit Issue 4): record the total genome
+                # count + effective min_support so pipeline_runs isn't left NULL.
+                n_genomes = None
+                try:
+                    _yp = (resolve_path('matrix_dir', organism=organism,
+                                        antibiotic=TARGET_ANTIBIOTIC, config=config)
+                           / f"y_{TARGET_ANTIBIOTIC}.csv")
+                    if _yp.exists():
+                        n_genomes = sum(1 for _ in open(_yp, encoding='utf-8')) - 1
+                except Exception:
+                    pass
+                min_support = ((config.get('unitig', {}) or {}).get('min_support')
+                               or (config.get('preprocessing', {}) or {}).get('min_support'))
                 meta = rm.build_run_metadata(
                     organism=organism,
                     antibiotic=TARGET_ANTIBIOTIC,
@@ -889,7 +902,9 @@ def main():
                     config=config,
                     extra={"stage": "04_optimization",
                            "best_score": float(study.best_value),
-                           "n_trials": len(study.trials)},
+                           "n_trials": len(study.trials),
+                           "n_genomes": n_genomes,
+                           "min_support": min_support},
                 )
                 if rm.write_json(run_dir / "run_metadata.json", meta):
                     print(f"  ✓ Run metadata written: runs/.../{run_id}/run_metadata.json")
