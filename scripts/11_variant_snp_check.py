@@ -34,6 +34,7 @@ Output:
     results/{org}/{ab}/05_explainability/11_variant_snp_check_{ab}.csv
 """
 
+import io
 import json
 import os
 import re
@@ -249,7 +250,7 @@ def main():
                               "observed_codon", "observed_aa", "allele_class"]).to_csv(out_path, index=False)
         print(f"  Saved (empty): {out_path.name}")
         return
-    hits = pd.read_csv(pd.io.common.StringIO(r.stdout), sep="\t", names=OUTFMT_COLS)
+    hits = pd.read_csv(io.StringIO(r.stdout), sep="\t", names=OUTFMT_COLS)
 
     # 3) CARD SNP annotations
     print("  Parsing CARD variant SNP annotations...")

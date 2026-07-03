@@ -169,9 +169,13 @@ def main() -> None:
                     best_score = -1
                     for ab in candidates:
                         if ab in df.columns:
-                            counts = df[df[ab].notna()][ab].value_counts()
-                            r = counts.get("Resistant", 0)
-                            s = counts.get("Susceptible", 0)
+                            # amr_phenotypes.csv is binary 0/1 (00_prepare_metadata),
+                            # NOT the strings "Resistant"/"Susceptible" (audit Issue 6:
+                            # the old value_counts lookup always scored 0 -> auto always
+                            # picked candidates[0]).
+                            col = df[df[ab].notna()][ab]
+                            r = int((col == 1).sum())
+                            s = int((col == 0).sum())
                             score = min(r, s)  # Maximize the minority class size
                             if score > best_score:
                                 best_score = score

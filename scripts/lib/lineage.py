@@ -51,8 +51,11 @@ def load_lineage(genomes_csv: str | Path, clusters_csv: str | Path, *,
     a missing genome means PopPUNK never saw it (re-run clustering). With
     ``allow_missing`` the gaps get ``missing_label`` (each treated as one group).
     """
-    genomes = pd.read_csv(genomes_csv, encoding="utf-8")[genome_col].astype(str).tolist()
-    cl = pd.read_csv(clusters_csv, encoding="utf-8")
+    # dtype=str at read time (audit Issue 5): a Genome ID like "562.10" parsed as
+    # float becomes 562.1 -> "562.1"; astype(str) after the fact cannot recover it.
+    genomes = pd.read_csv(genomes_csv, encoding="utf-8",
+                          dtype={genome_col: str})[genome_col].astype(str).tolist()
+    cl = pd.read_csv(clusters_csv, encoding="utf-8", dtype={clusters_genome_col: str})
     for c in (clusters_genome_col, cluster_col):
         if c not in cl.columns:
             raise KeyError(

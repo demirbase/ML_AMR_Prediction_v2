@@ -240,7 +240,9 @@ def load_test_data(y_all, all_chunk_files, test_filenames):
         if not genomes_file.exists():
             raise FileNotFoundError(f"Genome ID file not found: {genomes_file}")
         
-        genomes_df = pd.read_csv(genomes_file, encoding='utf-8')
+        # dtype=str (audit Issue 5): keep Genome IDs exact so 16_model_preds joins
+        # against the phenotype/tools by the same string key (no float mangling).
+        genomes_df = pd.read_csv(genomes_file, encoding='utf-8', dtype={'Genome ID': str})
         all_genome_ids = genomes_df['Genome ID'].values
         
     except FileNotFoundError as e:

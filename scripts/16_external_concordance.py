@@ -103,8 +103,10 @@ def parse_resfinder(pheno_table_path, antibiotics=DEFAULT_ANTIBIOTICS):
 def load_phenotype(metadata_file, antibiotics):
     """{genome_id: {antibiotic: 0/1/None}} from amr_phenotypes.csv (blank -> None)."""
     import pandas as pd
-    df = pd.read_csv(metadata_file, encoding="utf-8")
-    gid_col = df.columns[0]
+    # Genome ID as str at read time (audit Issue 5): "562.10" parsed as float ->
+    # 562.1 would mismatch the {gid}.fna filename and the model_preds join.
+    gid_col = pd.read_csv(metadata_file, nrows=0).columns[0]
+    df = pd.read_csv(metadata_file, encoding="utf-8", dtype={gid_col: str})
     pheno = {}
     for _, r in df.iterrows():
         gid = str(r[gid_col])
