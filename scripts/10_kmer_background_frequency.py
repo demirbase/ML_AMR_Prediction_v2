@@ -37,7 +37,7 @@ import pandas as pd
 from scipy.sparse import load_npz
 from scipy.stats import fisher_exact
 
-from lib.config import load_config, resolve_path
+from lib.config import load_config, resolve_path, get_target
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -142,8 +142,8 @@ def count_presence_by_label(indices, chunk_files, y_all):
 
 def main():
     config = load_config()
-    antibiotic = config['project']['target_antibiotic']
-    organism = config.get('project', {}).get('organism', 'ecoli')
+    antibiotic = get_target(config=config)[1]
+    organism = get_target(config=config)[0]
 
     matrix_dir = resolve_path('matrix_dir', organism=organism, antibiotic=antibiotic, config=config)
     explain_dir = resolve_path('dir_05_explainability', organism=organism,

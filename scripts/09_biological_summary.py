@@ -34,7 +34,7 @@ from Bio import Entrez, SeqIO
 # ============================================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-from lib.config import load_config  # noqa: E402  (canonical loader; audit Issue 23)
+from lib.config import load_config, get_target  # noqa: E402  (canonical loader; audit Issue 23)
 
 # NCBI Entrez identification (email / optional api_key) is configured at runtime
 # from config.yaml in configure_entrez(); see main(). A fake/placeholder email
@@ -438,7 +438,7 @@ def build_kb_candidates(df_features, df_card, stability_threshold, aro_index=Non
 def main():
     print("Loading configuration...")
     config = load_config()
-    antibiotic = config['project']['target_antibiotic']
+    antibiotic = get_target(config=config)[1]
     top_n = config.get('analysis', {}).get('top_n_features', 50)
     tiers, report_max_evalue, weak_min_ident, weak_min_cov, k_length, stability_threshold = load_tiers(config)
 
@@ -450,7 +450,7 @@ def main():
     # Resolve paths (organism-aware — SCALE_MLOPS_PLAN §4.2)
     # ------------------------------------------------------------------
     from lib.config import resolve_path
-    organism = config.get('project', {}).get('organism', 'ecoli')
+    organism = get_target(config=config)[0]
     explain_dir = resolve_path('dir_05_explainability', organism=organism,
                                antibiotic=antibiotic, config=config)
     if not explain_dir.exists():

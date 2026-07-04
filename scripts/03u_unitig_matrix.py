@@ -53,7 +53,7 @@ from utils import run_command
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 
-from lib.config import resolve_path, resolve_tool  # noqa: E402
+from lib.config import resolve_path, resolve_tool, get_target  # noqa: E402
 
 
 def _load_config():
@@ -349,8 +349,8 @@ def subset_store_to_antibiotic(store_dir, out_dir, antibiotic, valid_genomes,
 def main():
     config = _load_config()
     unitig_cfg = config.get("unitig", {}) or {}
-    default_org = config.get("project", {}).get("organism", "ecoli")
-    default_ab = config["project"]["target_antibiotic"]
+    default_org = get_target(config=config)[0]
+    default_ab = get_target(config=config)[1]
     # unitig.threads overrides preprocessing.threads when set (null -> fall back).
     default_threads = unitig_cfg.get("threads") or config["preprocessing"].get("threads", 8)
     # chunk_size MUST match the value 04/05/06 use (they slice y_{ab}.csv by it via

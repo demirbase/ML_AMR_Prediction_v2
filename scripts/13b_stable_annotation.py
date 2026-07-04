@@ -36,7 +36,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from lib.config import load_config, resolve_path, resolve_tool  # noqa: E402
+from lib.config import load_config, resolve_path, resolve_tool, get_target  # noqa: E402
 
 _b = importlib.import_module("09_biological_summary")  # reuse tiering + ARO
 
@@ -103,8 +103,7 @@ def main():
     args = ap.parse_args()
 
     config = load_config()
-    organism = args.organism or config["project"].get("organism", "ecoli")
-    antibiotic = args.antibiotic or config["project"]["target_antibiotic"]
+    organism, antibiotic = get_target(args, config=config)
 
     out_dir = resolve_path("dir_05_explainability", organism=organism,
                            antibiotic=antibiotic, config=config)

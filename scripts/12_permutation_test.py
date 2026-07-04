@@ -49,7 +49,7 @@ from sklearn.metrics import roc_auc_score
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from lib.config import load_config, resolve_path  # noqa: E402
+from lib.config import load_config, resolve_path, get_target  # noqa: E402
 
 # Reuse 06's EXACT held-out test-set loaders (single source of truth for the
 # split) — importing by a digit-leading module name needs importlib.
@@ -112,8 +112,7 @@ def main():
     args = ap.parse_args()
 
     config = load_config()
-    organism = args.organism or config["project"].get("organism", "ecoli")
-    antibiotic = args.antibiotic or config["project"]["target_antibiotic"]
+    organism, antibiotic = get_target(args, config=config)
     R = args.n_permutations
     rng = np.random.default_rng(args.seed)
 

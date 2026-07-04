@@ -51,7 +51,7 @@ from scipy.sparse import load_npz
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedShuffleSplit
 
-from lib.config import load_config, resolve_path, env_bool
+from lib.config import load_config, resolve_path, env_bool, get_target
 from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 
 SEEDS = [42, 123, 777, 1024, 2025]
@@ -59,8 +59,8 @@ TEST_SIZE = 0.20
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 config = load_config()
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
-ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+TARGET_ANTIBIOTIC = get_target(config=config)[1]
+ORGANISM = get_target(config=config)[0]
 TOP_N = config['analysis']['top_n_features']
 CHUNK_SIZE = config['preprocessing']['chunk_size']
 

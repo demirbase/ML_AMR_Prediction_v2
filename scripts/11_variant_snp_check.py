@@ -44,7 +44,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from lib.config import load_config, resolve_path, resolve_tool
+from lib.config import load_config, resolve_path, resolve_tool, get_target
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -188,8 +188,8 @@ def gene_from_sseqid(sseqid):
 # --------------------------------------------------------------------------
 def main():
     config = load_config()
-    antibiotic = config['project']['target_antibiotic']
-    organism = config.get('project', {}).get('organism', 'ecoli')
+    antibiotic = get_target(config=config)[1]
+    organism = get_target(config=config)[0]
     top_n = config.get('analysis', {}).get('top_n_features', 50)
     blast_cfg = config.get('blast', {})
 

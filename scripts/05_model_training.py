@@ -50,7 +50,7 @@ from utils import get_y_chunk
 from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 # MLOps model registry (SCALE_MLOPS_PLAN.md §7.2) — additive, best-effort.
 from lib import run_metadata as rm
-from lib.config import resolve_path, env_bool
+from lib.config import resolve_path, env_bool, get_target
 
 
 # ============================================================================
@@ -71,7 +71,7 @@ with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Extract configuration values
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+TARGET_ANTIBIOTIC = get_target(config=config)[1]
 CHUNK_SIZE = config['preprocessing']['chunk_size']
 RANDOM_SEED = config['training'].get('random_seed', 42)
 
@@ -86,7 +86,7 @@ BASE_PARAMS = {
 }
 
 # Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
-ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+ORGANISM = get_target(config=config)[0]
 MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 MODELS_DIR = resolve_path('models_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
@@ -592,7 +592,7 @@ def main():
     # Best-effort — never break a successful training run.
     # ------------------------------------------------------------------------
     try:
-        organism = config.get('project', {}).get('organism', 'unknown')
+        organism = get_target(config=config)[0]
         run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
         manifest = {
             "run_id": run_id,

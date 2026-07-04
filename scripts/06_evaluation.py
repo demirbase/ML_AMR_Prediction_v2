@@ -63,7 +63,7 @@ from sklearn.calibration import calibration_curve
 from utils import get_y_chunk
 # MLOps run provenance (SCALE_MLOPS_PLAN.md §7) — additive, best-effort.
 from lib import run_metadata as rm
-from lib.config import resolve_path
+from lib.config import resolve_path, get_target
 
 
 # ============================================================================
@@ -83,8 +83,8 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Extract configuration values
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
-ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+TARGET_ANTIBIOTIC = get_target(config=config)[1]
+ORGANISM = get_target(config=config)[0]
 CHUNK_SIZE = config['preprocessing']['chunk_size']
 N_JOBS = config['xgboost_params'].get('n_jobs', -1)
 
@@ -858,7 +858,7 @@ def main():
     # MLOps: write metrics.json (run provenance). Best-effort — never break eval.
     # ------------------------------------------------------------------------
     try:
-        organism = config.get('project', {}).get('organism', 'unknown')
+        organism = get_target(config=config)[0]
         run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
         metrics_payload = {
             "run_id": run_id,

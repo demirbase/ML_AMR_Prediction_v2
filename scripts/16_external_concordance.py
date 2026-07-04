@@ -46,7 +46,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from lib import concordance as C  # noqa: E402
-from lib.config import load_config, resolve_path  # noqa: E402
+from lib.config import load_config, resolve_path, get_target  # noqa: E402
 from lib.logging_utils import get_logger  # noqa: E402
 from lib.registry import load_amrfinder_keywords  # noqa: E402
 
@@ -324,7 +324,7 @@ def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="External-validation concordance (M13).")
     ap.add_argument("--mode", choices=["prep", "post"], required=True)
-    ap.add_argument("--organism", default=config.get("project", {}).get("organism", "ecoli"))
+    ap.add_argument("--organism", default=get_target(config=config)[0])
     ap.add_argument("--antibiotics", default=",".join(DEFAULT_ANTIBIOTICS),
                     help="comma-separated (default: ampicillin,cefotaxime,ciprofloxacin)")
     ap.add_argument("--write-kb", action="store_true",

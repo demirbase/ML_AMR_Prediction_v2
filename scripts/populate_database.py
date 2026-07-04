@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from lib.config import load_config, resolve_path
+from lib.config import load_config, resolve_path, get_target
 from lib.kb_schema import KB_SCHEMA_VERSION, create_schema, ensure_unique_indexes
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -388,8 +388,8 @@ def update_metadata(conn, card_version):
 def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="Populate the AMRK-DB knowledge base.")
-    ap.add_argument("--organism", default=config.get("project", {}).get("organism", "ecoli"))
-    ap.add_argument("--antibiotic", default=config["project"]["target_antibiotic"])
+    ap.add_argument("--organism", default=get_target(config=config)[0])
+    ap.add_argument("--antibiotic", default=get_target(config=config)[1])
     ap.add_argument("--db", default=None, help="SQLite path (default: results/{org}/kb/amrk.db)")
     args = ap.parse_args()
     organism, antibiotic = args.organism, args.antibiotic

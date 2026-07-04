@@ -67,9 +67,11 @@ if not CONFIG_PATH.exists():
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
+from lib.config import get_target  # early: env>config target before module globals
+
 # Extract project-level identifiers
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
-ORGANISM          = config.get('project', {}).get('organism', 'ecoli')
+TARGET_ANTIBIOTIC = get_target(config=config)[1]
+ORGANISM          = get_target(config=config)[0]
 TOP_N             = config['analysis']['top_n_features']
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)

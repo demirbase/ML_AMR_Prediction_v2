@@ -60,7 +60,7 @@ import shutil
 from utils import get_y_chunk
 # MLOps run provenance (SCALE_MLOPS_PLAN.md §7.1) — additive, best-effort.
 from lib import run_metadata as rm
-from lib.config import resolve_path
+from lib.config import resolve_path, get_target
 
 
 # ============================================================================
@@ -81,7 +81,7 @@ with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Extract configuration values
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
+TARGET_ANTIBIOTIC = get_target(config=config)[1]
 CHUNK_SIZE = config['preprocessing']['chunk_size']
 
 # Load fractional splitting parameters (fallback to defaults if undefined)
@@ -131,7 +131,7 @@ BASE_PARAMS = {
 }
 
 # Organism-aware paths (SCALE_MLOPS_PLAN §4.2)
-ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+ORGANISM = get_target(config=config)[0]
 MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 
 # Output directories (organism + antibiotic-specific)
@@ -875,7 +875,7 @@ def main():
             # data fingerprint). Best-effort — never break optimization.
             # ----------------------------------------------------------------
             try:
-                organism = config.get('project', {}).get('organism', 'unknown')
+                organism = get_target(config=config)[0]
                 run_id = rm.make_run_id(organism, TARGET_ANTIBIOTIC)
                 run_dir = resolve_path('run_dir', organism=organism,
                                        antibiotic=TARGET_ANTIBIOTIC, run_id=run_id, config=config)
