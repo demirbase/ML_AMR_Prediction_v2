@@ -15,8 +15,8 @@ classes:
     members:
       - ampicillin
       - amoxicillin
-      - "amoxicillin/clavulanic acid"
-      - "piperacillin/tazobactam"
+      - amoxicillin_clavulanic_acid
+      - piperacillin_tazobactam
       - "ampicillin/sulbactam"
       - penicillin
       - carbenicillin
@@ -83,7 +83,7 @@ classes:
   folate_pathway_inhibitors:
     display_name: "Folate Pathway Inhibitors"
     members:
-      - "trimethoprim/sulfamethoxazole"
+      - trimethoprim_sulfamethoxazole
       - trimethoprim
       - sulfamethoxazole
       - sulfisoxazole
@@ -127,7 +127,7 @@ classes:
 # NOTE: co-trimoxazole == trimethoprim/sulfamethoxazole (same drug) — merged into
 # one canonical to avoid an ambiguous alias mapping.
 aliases:
-  "amoxicillin/clavulanic acid": ["amoxicillin-clavulanic acid", "amoxicillin_clavulanic_acid", "amoxicillin_clavulanat"]
+  amoxicillin_clavulanic_acid: ["amoxicillin/clavulanic acid", "amoxicillin-clavulanic acid", "amoxicillin_clavulanat"]
   "ampicillin/sulbactam": ["ampicillin_sulbactam", "amipicillin_sulbactam"]
   cephalothin: ["cefalotin", "cefalothin"]
   cefpirome: ["cefpirom"]
@@ -136,17 +136,17 @@ aliases:
   "ceftolozane/tazobactam": ["ceftolozane-tazobactam"]
   fosfomycin: ["phosphomycin"]
   gentamicin: ["geamycin"]
-  "piperacillin/tazobactam": ["piperacillin-tazobactam", "tazobactam_piperacillin"]
+  piperacillin_tazobactam: ["piperacillin/tazobactam", "piperacillin-tazobactam", "tazobactam_piperacillin"]
   "polymyxin B": ["polymyxin b", "polymyxin_b"]
   rifampin: ["rifampicin"]
   tetracycline: ["tetracyklin"]
   tigecycline: ["tigecyklin"]
   trimethoprim: ["trimotheprim"]
-  "trimethoprim/sulfamethoxazole":
+  trimethoprim_sulfamethoxazole:
+    - "trimethoprim/sulfamethoxazole"
     - "co-trimoxazole"
     - "co_trimoxazole"
     - "trimethoprim-sulfamethoxazole"
-    - "trimethoprim_sulfamethoxazole"
     - "sulfamethoxazole/trimethoprim"
   "ticarcillin/clavulanic acid": ["ticarcillin_clavulanate"]
   "meropenem/vaborbactam": ["meropenem-vaborbactam"]

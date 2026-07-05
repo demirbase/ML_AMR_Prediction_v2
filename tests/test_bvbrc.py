@@ -26,15 +26,15 @@ def test_normalize_aliases_and_typos():
     assert n("rifampicin") == "rifampin"
     assert n("cefalotin") == "cephalothin"
     assert n("tigecyklin") == "tigecycline"
-    assert n("amoxicillin_clavulanat") == "amoxicillin/clavulanic acid"
+    assert n("amoxicillin_clavulanat") == "amoxicillin_clavulanic_acid"
 
 
 @pytest.mark.unit
 def test_normalize_cotrimoxazole_merged():
     n = registry.normalize_antibiotic
-    # co-trimoxazole and its variants all fold to one canonical
-    assert n("co-trimoxazole") == "trimethoprim/sulfamethoxazole"
-    assert n("sulfamethoxazole/trimethoprim") == "trimethoprim/sulfamethoxazole"
+    # co-trimoxazole and its variants all fold to one canonical (path-safe underscore)
+    assert n("co-trimoxazole") == "trimethoprim_sulfamethoxazole"
+    assert n("sulfamethoxazole/trimethoprim") == "trimethoprim_sulfamethoxazole"
 
 
 @pytest.mark.unit

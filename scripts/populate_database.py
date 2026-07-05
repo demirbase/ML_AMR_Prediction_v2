@@ -390,7 +390,8 @@ def main():
     ap = argparse.ArgumentParser(description="Populate the AMRK-DB knowledge base.")
     ap.add_argument("--organism", default=get_target(config=config)[0])
     ap.add_argument("--antibiotic", default=get_target(config=config)[1])
-    ap.add_argument("--db", default=None, help="SQLite path (default: results/{org}/kb/amrk.db)")
+    ap.add_argument("--db", default=None, help="SQLite path (default: results/kb/amrk.db — "
+                    "unified multi-organism KB; models.organism distinguishes rows)")
     args = ap.parse_args()
     organism, antibiotic = args.organism, args.antibiotic
 
@@ -427,7 +428,10 @@ def main():
     # Adaptive min_support actually used (from pipeline_runs if present, else config)
     min_support = (run_meta or {}).get("min_support")
 
-    db_path = Path(args.db) if args.db else (PROJECT_ROOT / "results" / organism / "kb" / "amrk.db")
+    # Unified multi-organism KB (schema tags each model with organism). Per-organism
+    # KBs are deprecated; pass --db to override. results_root above stays
+    # organism/antibiotic-scoped because the per-run artefacts live there.
+    db_path = Path(args.db) if args.db else (PROJECT_ROOT / "results" / "kb" / "amrk.db")
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
