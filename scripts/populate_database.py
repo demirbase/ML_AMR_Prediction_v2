@@ -36,6 +36,7 @@ import pandas as pd
 
 from lib.config import load_config, resolve_path, get_target
 from lib.kb_schema import KB_SCHEMA_VERSION, create_schema, ensure_unique_indexes
+from lib.registry import antibiotic_to_class
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -400,7 +401,7 @@ def main():
     # HPC can record it without editing the (manually-tuned) config. May be None.
     card_version = (os.environ.get("AMR_CARD_VERSION")
                     or (config.get("blast", {}) or {}).get("card_version"))
-    drug_class = None  # filled from the antibiotics registry if available later
+    drug_class = antibiotic_to_class(antibiotic)  # registry class_id (e.g. 'penicillins')
 
     # Resolve roots (organism/antibiotic-scoped) and glob the artefacts.
     models_dir = resolve_path("models_dir", organism=organism, antibiotic=antibiotic, config=config)
