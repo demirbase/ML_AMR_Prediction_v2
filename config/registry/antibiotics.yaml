@@ -19,6 +19,7 @@ classes:
       - piperacillin_tazobactam
       - "ampicillin/sulbactam"
       - penicillin
+      - oxacillin
       - carbenicillin
       - piperacillin
       - "ticarcillin/clavulanic acid"
@@ -97,19 +98,27 @@ classes:
       - minocycline
       - oxytetracycline
 
+  macrolides:
+    display_name: "Macrolides"
+    members:
+      - erythromycin
+      - azithromycin
+      - clarithromycin
+
+  lincosamides:
+    display_name: "Lincosamides"
+    members:
+      - clindamycin
+      - lincomycin
+
   others:
     display_name: "Others"
     members:
       - chloramphenicol
       - nitrofurantoin
-      - azithromycin
       - colistin
       - fosfomycin
-      - erythromycin
-      - lincomycin
       - rifampin
-      - clindamycin
-      - clarithromycin
       - daptomycin
       - linezolid
       - polymyxin B
@@ -171,11 +180,16 @@ amrfinder_keywords:
   cefotaxime:                    [CEFOTAXIME, CEPHALOSPORIN]
   ceftazidime:                   [CEFTAZIDIME, CEPHALOSPORIN]
   cefepime:                      [CEFEPIME, CEPHALOSPORIN]
-  cefoxitin:                     [CEFOXITIN, CEPHALOSPORIN, CEPHAMYCIN]
+  cefoxitin:                     [CEFOXITIN, CEPHALOSPORIN, CEPHAMYCIN, METHICILLIN]
   meropenem:                     [MEROPENEM, CARBAPENEM]
   imipenem:                      [IMIPENEM, CARBAPENEM]
   ciprofloxacin:                 [CIPROFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
   gentamicin:                    [GENTAMICIN, AMINOGLYCOSIDE]
   tobramycin:                    [TOBRAMYCIN, AMINOGLYCOSIDE]
+  amikacin:                      [AMIKACIN, AMINOGLYCOSIDE]
+  levofloxacin:                  [LEVOFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
   tetracycline:                  [TETRACYCLINE]
   trimethoprim_sulfamethoxazole: [TRIMETHOPRIM, SULFAMETHOXAZOLE, SULFONAMIDE]
+  oxacillin:                     [OXACILLIN, METHICILLIN]
+  erythromycin:                  [ERYTHROMYCIN, MACROLIDE]
+  clindamycin:                   [CLINDAMYCIN, LINCOSAMIDE]

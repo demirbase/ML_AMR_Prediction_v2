@@ -47,8 +47,8 @@ organisms:
     source: "BV-BRC"
     download_date: null
     filter_criteria: null
-    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
-    enabled: false
+    antibiotics: [cefoxitin, oxacillin, ciprofloxacin, gentamicin, tetracycline, trimethoprim_sulfamethoxazole, erythromycin, clindamycin]
+    enabled: true
 
   Pseudomonas_aeruginosa:
     display_name: "Pseudomonas aeruginosa"
