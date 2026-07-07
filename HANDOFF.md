@@ -1,11 +1,56 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `6f4d627`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `2528437`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
 
 ---
 
-# §0.-1 — LATEST STATE (2026-07-03) — READ FIRST, supersedes older sections
+# §0.-2 — LATEST STATE (2026-07-07) — MULTI-ORGANISM KB COMPLETE — READ FIRST, supersedes §0.-1 and all below
+
+**The KB is now a unified, 2-organism, 17-model AMR biomarker knowledge base.** Scaled from 3 E. coli antibiotics to **E. coli (7) + Klebsiella pneumoniae (10) = 17 models**, one unified DB at `results/kb/amrk.db` (`models.organism` distinguishes rows). All 17 ran the full pipeline (03u→04→05→06→07b→07→08→09→10→11→12→12b→13→13b→14→populate) with lineage-CV, CPSS+PFER, MDA, label-permutation, pyseer LMM, and CARD/NCBI ARO biology. Every mechanism recovered is biologically correct (below).
+
+### KB — 17 models (unified `results/kb/amrk.db`, schema 0.4.0)
+| # | organism | antibiotic | class | confirmed mechanism |
+|---|---|---|---|---|
+| m1 | ecoli | ampicillin | penicillin | TEM |
+| m2 | ecoli | ciprofloxacin | quinolone | gyrA/parC (SNP, step 11) |
+| m3 | ecoli | cefotaxime | cephalosporin | CTX-M / CMY (ESBL/AmpC) |
+| m4 | ecoli | gentamicin | aminoglycoside | AAC(3)-II |
+| m10 | ecoli | trimethoprim_sulfamethoxazole | folate | sul2 + dfrA15 |
+| m12 | ecoli | ceftazidime | cephalosporin | CTX-M (ESBL) |
+| m17 | ecoli | amoxicillin_clavulanic_acid | penicillin+inh | OXA-1 |
+| m5 | kpneumoniae | gentamicin | aminoglycoside | AAC(3)-II |
+| m6 | kpneumoniae | tobramycin | aminoglycoside | (AAC/ANT) |
+| m7 | kpneumoniae | meropenem | carbapenem | **KPC** |
+| m8 | kpneumoniae | ciprofloxacin | quinolone | gyrA/parC |
+| m9 | kpneumoniae | imipenem | carbapenem | **KPC** |
+| m11 | kpneumoniae | cefoxitin | cephalosporin(cephamycin) | (AmpC) |
+| m13 | kpneumoniae | cefepime | cephalosporin | (ESBL/AmpC; hardest, lineage-CV ~0.74) |
+| m14 | kpneumoniae | tetracycline | tetracycline | tet(A) |
+| m15 | kpneumoniae | piperacillin_tazobactam | penicillin+inh | TEM |
+| m16 | kpneumoniae | trimethoprim_sulfamethoxazole | folate | dfrA14 |
+
+**KB stats (verified 2026-07-07):** 17 models, 2008 unitigs, 1902 blast_annotations, 4832 validation_evidence, 17 pipeline_runs; DB 2.2 MB. **7 drug classes** (penicillin, cephalosporin, carbapenem, quinolone, aminoglycoside, folate, tetracycline).
+**Cross-organism concordance (same drug, both species → same mechanism):** gentamicin=AAC(3)-II (both), ciprofloxacin=gyrA/parC (both), trimethoprim/sulfa=dfr (both). **K. pneumoniae flagship: KPC carbapenemase** recovered for both meropenem & imipenem (100% id, E≈1e-23…1e-80).
+**Signal concentration (PFER) tracks biology:** carbapenem/quinolone/ESBL = concentrated (cip PFER 0.10, mero 2.96, amox-clav 1.03); aminoglycoside = diffuse/co-carried (gent 50.6/35.7). K. pneu genomes = 4615 (2nd organism, this session), E. coli = 5470.
+
+### Infrastructure built this session (all pushed to `main`, HEAD `2528437`)
+1. **Parallelism refactor (`a23dc40`):** 15 pipeline scripts (03u,04,05,06,07,07b,08,09,10,11,12,13b,14,16,populate) now resolve (organism,antibiotic) via `lib.config.get_target()` — precedence **CLI-arg > `AMR_ORGANISM`/`AMR_ANTIBIOTIC` env > config.yaml**, backward-compatible. 12b/13 inherit 05's globals. **Removes the config.yaml mutex → many (organism,antibiotic) pipelines run in PARALLEL via per-job env**, no config edits. 117 pytest pass.
+2. **Unified multi-organism KB (`2528437`):** `populate_database.py` default DB → `results/kb/amrk.db` (was per-organism `results/{org}/kb`); schema already carries `models.organism`. Pass `--db` to override.
+3. **Slash-safe antibiotics (`2528437`):** `antibiotics.yaml` slash canonicals → underscore (`trimethoprim_sulfamethoxazole`, `amoxicillin_clavulanic_acid`, `piperacillin_tazobactam`) with slash spellings kept as aliases; class mapping unchanged. Fixes path/filename breakage so combo drugs run as ML targets. **After deploy, metadata was rebuilt** (re-normalise `amr_cleaned_long.csv` → `00_prepare_metadata.py`) for both organisms so columns are underscore.
+4. **Genome backup:** E. coli + K. pneu assemblies (~52 GB, 10085 `.fna`) tar.gz'd on a compute node (gzip needs no CPU-ulimit-limited login node → do it via SLURM, NOT `tar czf|rclone rcat` on a UI/transfer node which gets killed at ~394 MB) → `rclone copy` the 15.5 GB tarball to `gdrive:TRUBA_25626/scratch_amr/backup/`.
+
+### Env-parametric SLURM workflow (the per-antibiotic recipe — REUSE THIS)
+Generic env-driven scripts in `$AMR_HOME/slurm/`: `run_03u_env.slurm`, `run_ml_env.slurm` (04-07b), `run_bio_env.slurm` (10-13b), `run_pyseer_env.slurm` (two-container 14). Submit with `sbatch --export=ALL,AMR_ORGANISM=<o>,AMR_ANTIBIOTIC=<a> <script>`. Interactive-only step = **2a (07→08→09)** on the UI node (08 NCBI needs internet; run in `screen` — it survives SSH drops; NCBI is SLOW ~20 min for some, not hung). `populate` + `rm unitigs.rtab` after each antibiotic's pyseer (rtab is pyseer-only, ~40-70 GB, regenerable → delete to free disk). **Guard: never start an antibiotic's next phase until its current SLURM job leaves `squeue`** (same `results/{org}/{ab}/` dir). Full audit anytime: KB `SELECT model_id,antibiotic,run_id FROM models` + filesystem stage scan (features.txt/config_{ab}.yaml/05_final_biological_report.md/13_stability_summary/14_pyseer_summary).
+
+### Remaining / next
+- **Docs:** fold the 17-model panel + cross-org story into `docs/ROADMAP.md` §0.5 (showcase) and METHODOLOGY (multi-organism scale-out, unified KB, per-antibiotic PFER/mechanism table). Novelty reframe now supports "**cross-organism, multi-class, PFER-bounded, lineage-validated open AMR biomarker KB**".
+- **M13/M10 still open:** external concordance (16) for the new antibiotics needs their `amrfinder_keywords` in `antibiotics.yaml` (only amp/cef/cip present); Zenodo deposit (M10) still the last must-have — deposit the unified 17-model KB.
+- **Disk:** all per-antibiotic `unitigs.rtab` deleted after pyseer. K. pneu raw `.fna` present; genome backup on Drive.
+
+---
+
+# §0.-1 — LATEST STATE (2026-07-03) — superseded by §0.-2 above (historical)
 
 **The thesis is essentially research-complete.** 3 antibiotics in the KB, all must-haves done except the Zenodo deposit, full audit + fixes done. What follows below (§0, §0.0…) is earlier/historical detail; where it conflicts, THIS section wins.
 

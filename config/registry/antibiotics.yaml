@@ -160,7 +160,22 @@ aliases:
 # the concordance. Note the biology: a narrow BETA-LACTAM (TEM-1) implies
 # ampicillin-R but NOT cefotaxime-R (that needs an ESBL/AmpC -> CEPHALOSPORIN).
 # ============================================================================
+# NOTE (2026-07-07): tokens below cover the 17-model KB panel. They are
+# AMRFinderPlus Class/Subclass approximations — VERIFY against actual AFP output
+# when running M13 (16_external_concordance) on the new antibiotics; refine if a
+# determinant maps too broadly (see the narrow-vs-broad beta-lactam caveat above).
 amrfinder_keywords:
-  ampicillin:    [AMPICILLIN, BETA-LACTAM]
-  cefotaxime:    [CEFOTAXIME, CEPHALOSPORIN]
-  ciprofloxacin: [CIPROFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
+  ampicillin:                    [AMPICILLIN, BETA-LACTAM]
+  amoxicillin_clavulanic_acid:   [AMOXICILLIN, BETA-LACTAM]
+  piperacillin_tazobactam:       [PIPERACILLIN, BETA-LACTAM]
+  cefotaxime:                    [CEFOTAXIME, CEPHALOSPORIN]
+  ceftazidime:                   [CEFTAZIDIME, CEPHALOSPORIN]
+  cefepime:                      [CEFEPIME, CEPHALOSPORIN]
+  cefoxitin:                     [CEFOXITIN, CEPHALOSPORIN, CEPHAMYCIN]
+  meropenem:                     [MEROPENEM, CARBAPENEM]
+  imipenem:                      [IMIPENEM, CARBAPENEM]
+  ciprofloxacin:                 [CIPROFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
+  gentamicin:                    [GENTAMICIN, AMINOGLYCOSIDE]
+  tobramycin:                    [TOBRAMYCIN, AMINOGLYCOSIDE]
+  tetracycline:                  [TETRACYCLINE]
+  trimethoprim_sulfamethoxazole: [TRIMETHOPRIM, SULFAMETHOXAZOLE, SULFONAMIDE]

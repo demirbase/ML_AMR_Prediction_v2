@@ -88,6 +88,20 @@ Mevcut analizlerde yeterince vurgulanmamış: Gentamicin Rank 4 ve 5'teki k-mer'
 3. *Feature kararsızlığı:* "5 seed gürültü" → CPSS B=100 + SHAP.
 4. *Agresif filtreleme:* "%1 nadir plazmidi siler" → mutlak ≥10 + unitig collapse (oransal eşik değil).
 
+### 0.8 GERÇEKLEŞTİ — Çok-organizmalı KB tamamlandı (2026-07-07)
+
+Showcase, tek-organizma iki-antibiyotikten **iki-organizma 17-modele** ölçeklendi. Tek unified KB (`results/kb/amrk.db`, `models.organism` ayırır): **E. coli 7 + Klebsiella pneumoniae 10 = 17 model, 7 ilaç sınıfı** (penisilin, sefalosporin, karbapenem, kinolon, aminoglikozid, folat, tetrasiklin). Her model tam boru hattından geçti (soy-CV + CPSS/PFER + MDA + etiket-permütasyon + pyseer LMM + CARD/NCBI ARO).
+
+**Özgünlük çerçevesi güncellendi (§0.4'ü genişletir):** artık *"**çok-organizmalı, çok-sınıflı**, PFER-sınırlı (CPSS), soy-farkında doğrulanmış, unitig-çözünürlüklü, şeffaf + FAIR ilk açık AMR biyobelirteç bilgi tabanı."* Cross-organism konkordans yeni bir farklılaştırıcı.
+
+**Cross-organism mekanizma konkordansı (aynı ilaç, iki tür → aynı biyolojik mekanizma — hesaplı-tekrarlanan pozitif kontrol):**
+- gentamicin → **AAC(3)-II** (her ikisi); ciprofloxacin → **gyrA/parC** (her ikisi); trimethoprim/sulfa → **dfr** (E. coli sul2+dfrA15, K. pneu dfrA14).
+- K. pneumoniae amiral: **KPC karbapenemaz** — hem meropenem hem imipenem için (%100 id, E≈1e-23…1e-80); E. coli 3. kuşak sefalosporin: **CTX-M/CMY** (cefotaxime, ceftazidime).
+
+**PFER biyolojiyi yansıtıyor (yeni tez-gözlemi):** konsantre mekanizmalar düşük PFER (cip 0.10, meropenem 2.96, amox-clav 1.03 = OXA-1); dağınık/ko-taşınan aminoglikozid direnci yüksek PFER (gentamicin 50.6/35.7). Bu, "PFER-sınırlı KB" iddiasını her antibiyotik için sayısal ve biyolojik olarak destekler.
+
+**Altyapı (hepsi `main`'de):** (1) env-parallelism refactor — `get_target()` ile CLI>env>config, config-mutex kalktı, çok-antibiyotik/organizma paralel; (2) unified çok-organizma KB; (3) slash-güvenli kombo antibiyotikler (underscore canonical); (4) genom yedeği (Drive). Kalan: METHODOLOGY'ye panel + Zenodo (M10) deposit; yeni antibiyotikler için M13 concordance (`amrfinder_keywords` eklendi, AFP çıktısına karşı doğrulanmalı).
+
 ---
 
 ## 1. Knowledge Base Mimarisi
