@@ -80,16 +80,18 @@ def fill_drug_classes(conn, logger):
     return classes
 
 
-def stable_sets(conn):
+def stable_sets(conn, organism=None):
     """Return {antibiotic: set(unitig_id)} of stable unitigs (any selection
-    method) per antibiotic, joining through the model. Only antibiotics that
-    actually have a model + stable unitigs appear."""
-    rows = conn.execute(
-        """SELECT m.antibiotic, s.unitig_id
-             FROM unitig_model_scores s
-             JOIN models m ON m.model_id = s.model_id
-            WHERE s.stable = 1"""
-    ).fetchall()
+    method) per antibiotic for ONE organism, joining through the model. Only
+    antibiotics with a model + stable unitigs in that organism appear."""
+    q = ("SELECT m.antibiotic, s.unitig_id FROM unitig_model_scores s "
+         "JOIN models m ON m.model_id = s.model_id "
+         "JOIN pipeline_runs p ON p.run_id = m.run_id WHERE s.stable = 1")
+    params = ()
+    if organism:
+        q += " AND p.organism = ?"
+        params = (organism,)
+    rows = conn.execute(q, params).fetchall()
     sets = {}
     for ab, uid in rows:
         sets.setdefault(ab, set()).add(uid)
@@ -107,18 +109,22 @@ def gene_for_unitig(conn, unitig_id):
     return ";".join(sorted({r[0] for r in rows if r[0]}))
 
 
-def gene_family_sets(conn, tiers=("confirmed", "candidate")):
-    """{antibiotic: set(aro_gene_family)} — the resistance gene families each
-    antibiotic's confirmed/candidate BLAST hits map to. This is the biologically
-    meaningful level for H3: unitig-SEQUENCE overlap is confounded by genome-set-
-    dependent unitig segmentation (two antibiotics can share a mechanism yet no
-    exact unitig), whereas a shared gene FAMILY is the real cross-antibiotic signal."""
+def gene_family_sets(conn, organism=None, tiers=("confirmed", "candidate")):
+    """{antibiotic: set(aro_gene_family)} for ONE organism — the resistance gene
+    families each antibiotic's confirmed/candidate BLAST hits map to. This is the
+    biologically meaningful level for H3: unitig-SEQUENCE overlap is confounded by
+    genome-set-dependent unitig segmentation (two antibiotics can share a mechanism
+    yet no exact unitig), whereas a shared gene FAMILY is the real signal."""
     ph = ",".join("?" * len(tiers))
-    rows = conn.execute(
-        f"""SELECT m.antibiotic, b.aro_gene_family
-              FROM blast_annotations b JOIN models m ON m.model_id = b.model_id
-             WHERE b.tier IN ({ph}) AND b.aro_gene_family IS NOT NULL""",
-        tuple(tiers)).fetchall()
+    q = (f"SELECT m.antibiotic, b.aro_gene_family FROM blast_annotations b "
+         f"JOIN models m ON m.model_id = b.model_id "
+         f"JOIN pipeline_runs p ON p.run_id = m.run_id "
+         f"WHERE b.tier IN ({ph}) AND b.aro_gene_family IS NOT NULL")
+    params = list(tiers)
+    if organism:
+        q += " AND p.organism = ?"
+        params.append(organism)
+    rows = conn.execute(q, tuple(params)).fetchall()
     sets = {}
     for ab, fam in rows:
         if fam:
@@ -145,11 +151,12 @@ def hypergeom_sf(k, N, K, n):
         return float(p)
 
 
-def populate_overlap(conn, sets, classes, logger):
-    """Recompute ``unitig_antibiotic_overlap`` for every antibiotic pair.
+def populate_overlap(conn, sets, classes, organism, logger):
+    """Recompute ``unitig_antibiotic_overlap`` for every antibiotic pair of ONE
+    organism (other organisms' rows are left intact).
 
     Returns a list of per-pair summary dicts (descriptive)."""
-    conn.execute("DELETE FROM unitig_antibiotic_overlap")  # full recompute (idempotent)
+    conn.execute("DELETE FROM unitig_antibiotic_overlap WHERE organism = ?", (organism,))
     abs_sorted = sorted(sets)
     pairs = list(itertools.combinations(abs_sorted, 2))
     union_all = set().union(*sets.values()) if sets else set()
@@ -164,9 +171,9 @@ def populate_overlap(conn, sets, classes, logger):
         for uid in shared:
             conn.execute(
                 """INSERT OR REPLACE INTO unitig_antibiotic_overlap
-                       (unitig_id, antibiotic_a, antibiotic_b, same_class)
-                   VALUES (?,?,?,?)""",
-                (uid, a, b, same_class),
+                       (unitig_id, organism, antibiotic_a, antibiotic_b, same_class)
+                   VALUES (?,?,?,?,?)""",
+                (uid, organism, a, b, same_class),
             )
         jaccard = len(shared) / len(union) if union else 0.0
         summaries.append({
@@ -236,15 +243,15 @@ def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="Cross-antibiotic stable-unitig overlap (S1/H3).")
     ap.add_argument("--organism", default=config.get("project", {}).get("organism", "ecoli"))
-    ap.add_argument("--db", default=None, help="SQLite path (default: results/{org}/kb/amrk.db)")
+    ap.add_argument("--db", default=None, help="SQLite path (default: results/kb/amrk.db — unified KB)")
     ap.add_argument("--with-test", action="store_true",
                     help="Also compute the (preliminary) hypergeometric p per pair. "
                          "DEFERRED by default — see module docstring / ROADMAP §1.6.")
     args = ap.parse_args()
     organism = args.organism
 
-    db_path = Path(args.db) if args.db else (PROJECT_ROOT / "results" / organism / "kb" / "amrk.db")
-    out_dir = db_path.parent
+    db_path = Path(args.db) if args.db else (PROJECT_ROOT / "results" / "kb" / "amrk.db")
+    out_dir = PROJECT_ROOT / "results" / organism / "kb"
     logger = get_logger("s1-cross-antibiotic")
 
     if not db_path.exists():
@@ -259,20 +266,20 @@ def main():
     conn.execute("PRAGMA foreign_keys = ON")
     try:
         classes = fill_drug_classes(conn, logger)
-        sets = stable_sets(conn)
+        sets = stable_sets(conn, organism)
         if len(sets) < 2:
             logger.warning("only %d antibiotic(s) with stable unitigs in the KB — "
                            "need >=2 for any overlap. Nothing to do.", len(sets))
             conn.commit()
             return
-        summaries, union_all = populate_overlap(conn, sets, classes, logger)
+        summaries, union_all = populate_overlap(conn, sets, classes, organism, logger)
 
         # Attach shared-unitig gene annotations for the report.
         for s in summaries:
             s["shared_genes"] = {uid: gene_for_unitig(conn, uid) for uid in s["shared_unitig_ids"]}
 
         # Gene-family (ARO) overlap — the biologically meaningful H3 level.
-        gfam = gene_family_sets(conn)
+        gfam = gene_family_sets(conn, organism)
         for s in summaries:
             fa, fb = gfam.get(s["antibiotic_a"], set()), gfam.get(s["antibiotic_b"], set())
             shared_fam = sorted(fa & fb)

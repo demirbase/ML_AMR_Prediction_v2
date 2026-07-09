@@ -29,7 +29,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.5.0"
+KB_SCHEMA_VERSION = "0.6.0"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -145,10 +145,11 @@ CREATE TABLE IF NOT EXISTS variant_snp_check (
 -- Cross-antibiotic stable-unitig overlap (step S1 / H3). --------------------
 CREATE TABLE IF NOT EXISTS unitig_antibiotic_overlap (
     unitig_id       INTEGER NOT NULL REFERENCES unitigs(unitig_id),
+    organism        TEXT NOT NULL,           -- 0.6.0: keep overlaps per-organism
     antibiotic_a    TEXT NOT NULL,
     antibiotic_b    TEXT NOT NULL,
     same_class      INTEGER,                 -- 0/1 within-class pair?
-    PRIMARY KEY (unitig_id, antibiotic_a, antibiotic_b)
+    PRIMARY KEY (unitig_id, organism, antibiotic_a, antibiotic_b)
 );
 
 -- Generic evidence ledger — every validation result, fully attributed (M11). -
@@ -223,6 +224,13 @@ def create_schema(conn):
     _add_column(conn, "antibiotics", "mechanism_type", "TEXT")   # acquired | target_snp | mixed
     _add_column(conn, "antibiotics", "who_aware", "TEXT")         # Access | Watch | Reserve
     _add_column(conn, "models", "n_features", "INTEGER")          # # unitigs in the model's matrix
+    # 0.6.0: unitig_antibiotic_overlap gains `organism` (the unified KB must not
+    # merge e.g. gentamicin across organisms). It's a derived cache (rebuilt by
+    # step 15), so if the old organism-less shape exists, recreate it empty.
+    ov = {r[1] for r in conn.execute("PRAGMA table_info(unitig_antibiotic_overlap)")}
+    if ov and "organism" not in ov:
+        conn.execute("DROP TABLE unitig_antibiotic_overlap")
+        conn.executescript(SCHEMA_SQL)   # re-creates only the dropped table (others IF NOT EXISTS)
     conn.commit()
 
 
