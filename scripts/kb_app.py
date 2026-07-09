@@ -11,7 +11,8 @@ stability, permutation, pyseer LMM), and see the run provenance.
 Run locally (not part of the HPC pipeline / container):
     pip install streamlit pandas
     streamlit run scripts/kb_app.py
-Then point the sidebar at your amrk.db (default: results/<org>/kb/amrk.db).
+Then point the sidebar at your amrk.db (default: results/kb/amrk.db — the
+unified multi-organism KB).
 """
 
 import sqlite3
@@ -24,7 +25,7 @@ st.set_page_config(page_title="AMRK-DB — AMR Unitig Knowledge Base",
                    page_icon="🧬", layout="wide")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB = PROJECT_ROOT / "results" / "ecoli" / "kb" / "amrk.db"
+DEFAULT_DB = PROJECT_ROOT / "results" / "kb" / "amrk.db"  # unified multi-organism KB
 
 
 @st.cache_data(show_spinner=False)
@@ -155,6 +156,12 @@ with tab2:
         st.write(f"**{len(ev)} kanıt satırı / {ev['evidence_type'].nunique()} tür**")
 
 with tab3:
+    orgs = T.get("organisms", pd.DataFrame())
+    if not orgs.empty:
+        used = set(runs["organism"].dropna()) if not runs.empty else set()
+        st.subheader("Organizmalar")
+        st.dataframe(orgs[orgs["organism"].isin(used)] if used else orgs,
+                     use_container_width=True)
     st.subheader("Modeller")
     if not models.empty:
         st.dataframe(models, use_container_width=True)
@@ -194,18 +201,23 @@ with tab4:
         st.info("Overlap tablosu boş / <2 antibiyotik. `15_cross_antibiotic.py` çalıştır.")
 
 with tab5:
-    st.caption("AMRFinderPlus/ResFinder concordance + model head-to-head (M13). "
-               "Model run'ına bağlı; evidence_source bACC/κ/n içerir.")
-    m13_types = ["concordance_amrfinderplus", "concordance_resfinder", "head_to_head_model"]
-    if not evidence.empty and evidence["evidence_type"].isin(m13_types).any():
-        e = evidence[evidence["evidence_type"].isin(m13_types)].copy()
+    st.caption("Dış doğrulama (M13, şema 0.5.0 `external_concordance` tablosu): "
+               "AMRFinderPlus / ResFinder (ve varsa model) vs EUCAST/CLSI fenotip — "
+               "held-out test genomlarında dengeli doğruluk (bACC), Cohen κ, FDA ME/VME.")
+    ext = T.get("external_concordance", pd.DataFrame())
+    if not ext.empty:
+        e = ext.copy()
         if not models.empty:
-            run_ab = dict(zip(models["run_id"], models["antibiotic"]))
-            e["antibiyotik"] = e["pipeline_run_id"].map(run_ab)
-        st.dataframe(e[[c for c in ["antibiyotik", "evidence_type", "evidence_source",
-                     "evidence_score"] if c in e.columns]], use_container_width=True)
+            e["antibiyotik"] = e["model_id"].map(dict(zip(models["model_id"], models["antibiotic"])))
+        cols = [c for c in ["antibiyotik", "caller", "reference", "n_test", "sensitivity",
+                            "specificity", "balanced_accuracy", "cohen_kappa",
+                            "major_error_rate", "very_major_error_rate"] if c in e.columns]
+        st.dataframe(e[cols].sort_values([c for c in ["antibiyotik", "caller"] if c in cols]),
+                     use_container_width=True, height=320)
+        st.caption(f"{e['model_id'].nunique()} model × {e['caller'].nunique()} araç. "
+                   "(Model bACC + K. pneu için `16_external_concordance.py`'yi o modellerde çalıştır.)")
     else:
-        st.info("M13 concordance kanıtı yok. `16_external_concordance.py --mode post "
-                "--write-kb` çalıştır.")
+        st.info("`external_concordance` tablosu boş. `16_external_concordance.py` çalıştır + "
+                "`migrate_kb_050.py` ile KB'ye yükle.")
 
 st.sidebar.caption("ROADMAP S8/N1 · CC-BY-4.0")
