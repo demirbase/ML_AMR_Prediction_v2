@@ -336,7 +336,47 @@ def fig_significance(tables, out, db):
     _save(fig, out, "05_significance_real_vs_null")
 
 
+def fig_external_concordance(tables, out, db):
+    """M13: reference genotype tools (AMRFinderPlus, ResFinder) vs EUCAST/CLSI
+    phenotype on held-out TEST genomes — balanced accuracy (bars) + Cohen's kappa."""
+    import sqlite3
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute(
+        "SELECT m.antibiotic, e.caller, e.balanced_accuracy, e.cohen_kappa "
+        "FROM external_concordance e JOIN models m USING(model_id) "
+        "ORDER BY m.antibiotic, e.caller").fetchall()
+    conn.close()
+    if not rows:
+        print("  (external_concordance: no rows — skipped)")
+        return
+    df = pd.DataFrame(rows, columns=["antibiotic", "caller", "bacc", "kappa"])
+    abs_ = sorted(df.antibiotic.unique())
+    callers = sorted(df.caller.unique())
+    cmap = {"amrfinderplus": "#e6550d", "resfinder": "#756bb1", "model": "#31a354"}
+    nice = {"amrfinderplus": "AMRFinderPlus", "resfinder": "ResFinder", "model": "our model"}
+    x = np.arange(len(abs_)); w = 0.8 / max(1, len(callers))
+    fig, ax = plt.subplots(figsize=(1.9 * len(abs_) + 3, 4.6))
+    for i, cl in enumerate(callers):
+        vals = [df[(df.antibiotic == a) & (df.caller == cl)]["bacc"].mean() for a in abs_]
+        ks = [df[(df.antibiotic == a) & (df.caller == cl)]["kappa"].mean() for a in abs_]
+        bars = ax.bar(x + i * w, vals, w, label=nice.get(cl, cl), color=cmap.get(cl, "#888"),
+                      edgecolor="black", lw=0.4)
+        for b, k in zip(bars, ks):
+            if not np.isnan(b.get_height()):
+                ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.008, f"κ={k:.2f}",
+                        ha="center", va="bottom", fontsize=7.5)
+    ax.set_xticks(x + w * (len(callers) - 1) / 2)
+    ax.set_xticklabels([_short(a) for a in abs_])
+    ax.set_ylim(0.5, 1.03); ax.axhline(0.5, ls="--", c="grey", lw=0.8)
+    ax.set_ylabel("Balanced accuracy vs EUCAST/CLSI phenotype")
+    ax.set_title("External concordance (M13): reference genotype tools on held-out test genomes\n"
+                 "(E. coli; bars = bACC, κ = Cohen's kappa)", fontsize=10)
+    ax.legend(fontsize=9, loc="lower right")
+    _save(fig, out, "07_external_concordance")
+
+
 FIGS = {"overview": lambda t, r, o, db: fig_overview(t, o, db),
+        "external": lambda t, r, o, db: fig_external_concordance(t, o, db),
         "performance": lambda t, r, o, db: fig_performance(t, o),
         "cpss_pfer": lambda t, r, o, db: fig_cpss_pfer(t, o),
         "cross_org": lambda t, r, o, db: fig_cross_org(t, o),
