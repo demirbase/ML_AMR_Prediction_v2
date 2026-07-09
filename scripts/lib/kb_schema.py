@@ -29,7 +29,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.4.0"
+KB_SCHEMA_VERSION = "0.5.0"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -173,6 +173,34 @@ CREATE TABLE IF NOT EXISTS kb_metadata (
     n_models          INTEGER
 );
 
+-- Organism reference (gram stain / phylum) for cross-phylum generalisation. --
+-- Added 0.5.0. pipeline_runs.organism is the slug that keys here.
+CREATE TABLE IF NOT EXISTS organisms (
+    organism      TEXT PRIMARY KEY,       -- slug: ecoli, kpneumoniae, saureus
+    display_name  TEXT,
+    taxid         INTEGER,
+    gram_stain    TEXT,                   -- 'negative' | 'positive'
+    phylum        TEXT
+);
+
+-- External-validation concordance (M13): the model AND reference genotype tools
+-- (AMRFinderPlus, ResFinder) scored vs EUCAST/CLSI phenotype on the model's
+-- held-out TEST genomes (leakage-free). FDA ME/VME + Cohen's kappa + bACC.
+-- Added 0.5.0; feeds the 'external validation' reviewer question directly.
+CREATE TABLE IF NOT EXISTS external_concordance (
+    model_id              INTEGER NOT NULL REFERENCES models(model_id),
+    caller                TEXT NOT NULL,  -- 'model' | 'AMRFinderPlus' | 'ResFinder'
+    reference             TEXT,           -- phenotype standard, e.g. 'EUCAST/CLSI'
+    n_test                INTEGER,
+    sensitivity           REAL,
+    specificity           REAL,
+    balanced_accuracy     REAL,
+    cohen_kappa           REAL,
+    major_error_rate      REAL,           -- FDA ME  (false-resistant)
+    very_major_error_rate REAL,           -- FDA VME (false-susceptible)
+    PRIMARY KEY (model_id, caller)
+);
+
 CREATE INDEX IF NOT EXISTS idx_unitigs_sequence    ON unitigs(sequence);
 CREATE INDEX IF NOT EXISTS idx_blast_gene          ON blast_annotations(gene_symbol);
 CREATE INDEX IF NOT EXISTS idx_scores_stability    ON unitig_model_scores(selection_frequency);
@@ -180,9 +208,21 @@ CREATE INDEX IF NOT EXISTS idx_models_antibiotic   ON models(antibiotic);
 """
 
 
+def _add_column(conn, table, col, decl):
+    """Idempotent ALTER TABLE ADD COLUMN (SQLite has no ADD COLUMN IF NOT EXISTS)."""
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if col not in have:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def create_schema(conn):
     """Create all tables/indexes on an open sqlite3 connection (idempotent)."""
     conn.executescript(SCHEMA_SQL)
+    # Additive migrations 0.4.0 -> 0.5.0: new columns on pre-existing tables
+    # (CREATE TABLE IF NOT EXISTS won't alter an already-created table).
+    _add_column(conn, "antibiotics", "mechanism_type", "TEXT")   # acquired | target_snp | mixed
+    _add_column(conn, "antibiotics", "who_aware", "TEXT")         # Access | Watch | Reserve
+    _add_column(conn, "models", "n_features", "INTEGER")          # # unitigs in the model's matrix
     conn.commit()
 
 

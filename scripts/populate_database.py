@@ -386,6 +386,83 @@ def update_metadata(conn, card_version):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 0.5.0 reference/meta populators.
+# ---------------------------------------------------------------------------
+_ORG_META = {  # slug -> (display_name, taxid, gram_stain, phylum)
+    "ecoli": ("Escherichia coli", 562, "negative", "Pseudomonadota"),
+    "kpneumoniae": ("Klebsiella pneumoniae", 573, "negative", "Pseudomonadota"),
+    "saureus": ("Staphylococcus aureus", 1280, "positive", "Bacillota"),
+    "staphylococcus_aureus": ("Staphylococcus aureus", 1280, "positive", "Bacillota"),
+}
+_AWARE = {  # WHO AWaRe 2023 category
+    "ampicillin": "Access", "amoxicillin": "Access", "amoxicillin_clavulanic_acid": "Access",
+    "piperacillin_tazobactam": "Watch", "cefotaxime": "Watch", "ceftazidime": "Watch",
+    "ceftriaxone": "Watch", "cefepime": "Watch", "cefoxitin": "Watch", "cefazolin": "Watch",
+    "meropenem": "Watch", "imipenem": "Watch", "ciprofloxacin": "Watch", "levofloxacin": "Watch",
+    "gentamicin": "Access", "amikacin": "Access", "tobramycin": "Access", "tetracycline": "Access",
+    "trimethoprim_sulfamethoxazole": "Access", "trimethoprim": "Access", "penicillin": "Access",
+    "colistin": "Reserve", "oxacillin": "Access", "erythromycin": "Watch", "clindamycin": "Access",
+}
+_MECH = {  # dominant confirmed-mechanism style: acquired gene vs target SNP
+    "quinolones": "target_snp",
+    "penicillins": "acquired", "cephalosporins": "acquired",
+    "beta_lactams_carbapenems_others": "acquired", "aminoglycosides": "acquired",
+    "tetracyclines": "acquired", "folate_pathway_inhibitors": "acquired",
+    "macrolides": "acquired", "lincosamides": "acquired",
+}
+
+
+def populate_organisms(conn):
+    for slug, (dn, tx, gram, phy) in _ORG_META.items():
+        conn.execute("INSERT OR REPLACE INTO organisms(organism, display_name, taxid, gram_stain, phylum) "
+                     "VALUES (?,?,?,?,?)", (slug, dn, tx, gram, phy))
+
+
+def populate_antibiotics_meta(conn):
+    """Backfill AWaRe + mechanism_type on whatever antibiotic rows exist so far."""
+    for ab, cls in conn.execute("SELECT antibiotic, drug_class FROM antibiotics").fetchall():
+        conn.execute("UPDATE antibiotics SET mechanism_type=?, who_aware=? WHERE antibiotic=?",
+                     (_MECH.get(cls), _AWARE.get(ab), ab))
+
+
+def _count_features(matrix_dir):
+    f = Path(matrix_dir) / "features.txt"
+    if f.exists():
+        with open(f, encoding="utf-8") as fh:
+            return sum(1 for _ in fh)
+    return None
+
+
+def populate_external_concordance(conn, model_id, organism, antibiotic):
+    """M13 concordance rows (model + AMRFinderPlus + ResFinder vs phenotype) for
+    this antibiotic from 16_concordance_{organism}.csv, if present. Column names
+    are matched case-insensitively so minor header drift is tolerated."""
+    csv = _find(PROJECT_ROOT / "results" / organism, f"16_concordance_{organism}.csv")
+    if csv is None:
+        return 0
+    df = pd.read_csv(csv)
+    lc = {c.lower(): c for c in df.columns}
+    ab_col, caller_col = lc.get("antibiotic"), (lc.get("caller") or lc.get("tool"))
+    if not ab_col or not caller_col:
+        return 0
+    g = lambda r, k: (_f(r[lc[k]]) if k in lc and pd.notna(r[lc[k]]) else None)  # noqa: E731
+    n = 0
+    for _, r in df[df[ab_col].astype(str).str.lower() == antibiotic.lower()].iterrows():
+        conn.execute(
+            """INSERT OR REPLACE INTO external_concordance
+               (model_id, caller, reference, n_test, sensitivity, specificity,
+                balanced_accuracy, cohen_kappa, major_error_rate, very_major_error_rate)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (model_id, str(r[caller_col]),
+             str(r[lc["reference"]]) if "reference" in lc else "EUCAST/CLSI",
+             int(r[lc["n"]]) if "n" in lc and pd.notna(r[lc["n"]]) else None,
+             g(r, "sensitivity"), g(r, "specificity"), g(r, "balanced_accuracy"),
+             g(r, "cohen_kappa"), g(r, "major_error_rate"), g(r, "very_major_error_rate")))
+        n += 1
+    return n
+
+
 def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="Populate the AMRK-DB knowledge base.")
@@ -454,7 +531,9 @@ def main():
     # Dedup any legacy duplicates + add UNIQUE indexes so the blast/evidence
     # INSERT OR IGNOREs below are idempotent (audit Issue 3/24).
     ensure_unique_indexes(conn)
+    matrix_dir = resolve_path("matrix_dir", organism=organism, antibiotic=antibiotic, config=config)
     try:
+        populate_organisms(conn)                                  # 0.5.0 reference table
         run_id = populate_run(conn, organism, antibiotic, run_meta, card_version, min_support)
         model_id = populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout)
         n_k = populate_candidates(conn, model_id, run_id, k_length, cand, card_version)
@@ -463,6 +542,11 @@ def main():
         n_c = populate_cpss(conn, model_id, run_id, k_length, cpss)
         n_l = populate_pyseer(conn, run_id, pyseer_sig,
                               (pyseer_sum or {}).get("bonferroni_threshold"))
+        # 0.5.0: model feature count + antibiotic meta + external concordance
+        nf = _count_features(matrix_dir)
+        conn.execute("UPDATE models SET n_features=? WHERE model_id=?", (nf, model_id))
+        populate_antibiotics_meta(conn)                           # after the ab row exists
+        n_ext = populate_external_concordance(conn, model_id, organism, antibiotic)
         update_metadata(conn, card_version)
         conn.commit()
     finally:
@@ -470,7 +554,7 @@ def main():
 
     print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | unitigs loaded: {n_k} "
           f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c} "
-          f"| pyseer LMM evidence: {n_l}")
+          f"| pyseer LMM evidence: {n_l} | n_features: {nf} | external concordance: {n_ext}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
 
 
