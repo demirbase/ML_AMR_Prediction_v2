@@ -435,32 +435,34 @@ def _count_features(matrix_dir):
 
 
 def populate_external_concordance(conn, model_id, organism, antibiotic):
-    """M13 concordance rows (model + AMRFinderPlus + ResFinder vs phenotype) for
-    this antibiotic from 16_concordance_{organism}.csv, if present. Column names
-    are matched case-insensitively so minor header drift is tolerated."""
-    csv = _find(PROJECT_ROOT / "results" / organism, f"16_concordance_{organism}.csv")
-    if csv is None:
+    """M13 leakage-free head-to-head: our MODEL vs AMRFinderPlus vs ResFinder,
+    all scored vs EUCAST/CLSI phenotype on the model's held-out TEST genomes
+    (identical genome set for all three), from 16_concordance_summary_{org}.json.
+    Replaces this model's rows so re-runs are idempotent."""
+    conn.execute("DELETE FROM external_concordance WHERE model_id=?", (model_id,))
+    summ = _read_json(_find(PROJECT_ROOT / "results" / organism,
+                            f"16_concordance_summary_{organism}.json"))
+    if not summ:
         return 0
-    df = pd.read_csv(csv)
-    lc = {c.lower(): c for c in df.columns}
-    ab_col, caller_col = lc.get("antibiotic"), (lc.get("caller") or lc.get("tool"))
-    if not ab_col or not caller_col:
+    d = (summ.get("head_to_head_model_test_genomes") or {}).get(antibiotic)
+    if not isinstance(d, dict):
         return 0
-    g = lambda r, k: (_f(r[lc[k]]) if k in lc and pd.notna(r[lc[k]]) else None)  # noqa: E731
-    n = 0
-    for _, r in df[df[ab_col].astype(str).str.lower() == antibiotic.lower()].iterrows():
+    n_test = d.get("n_common_test_genomes")
+    cnt = 0
+    for caller in ("model", "amrfinderplus", "resfinder"):
+        s = d.get(caller)
+        if not isinstance(s, dict):
+            continue
         conn.execute(
             """INSERT OR REPLACE INTO external_concordance
                (model_id, caller, reference, n_test, sensitivity, specificity,
                 balanced_accuracy, cohen_kappa, major_error_rate, very_major_error_rate)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (model_id, str(r[caller_col]),
-             str(r[lc["reference"]]) if "reference" in lc else "EUCAST/CLSI",
-             int(r[lc["n"]]) if "n" in lc and pd.notna(r[lc["n"]]) else None,
-             g(r, "sensitivity"), g(r, "specificity"), g(r, "balanced_accuracy"),
-             g(r, "cohen_kappa"), g(r, "major_error_rate"), g(r, "very_major_error_rate")))
-        n += 1
-    return n
+            (model_id, caller, "EUCAST/CLSI (held-out test)", n_test,
+             _f(s.get("sensitivity")), _f(s.get("specificity")), _f(s.get("balanced_accuracy")),
+             _f(s.get("cohen_kappa")), _f(s.get("major_error_rate")), _f(s.get("very_major_error_rate"))))
+        cnt += 1
+    return cnt
 
 
 def main():
