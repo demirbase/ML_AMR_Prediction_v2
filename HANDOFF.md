@@ -1,11 +1,56 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `2528437`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `4946883`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
 
 ---
 
-# §0.-2 — LATEST STATE (2026-07-07) — MULTI-ORGANISM KB COMPLETE — READ FIRST, supersedes §0.-1 and all below
+# §0.-3 — LATEST STATE (2026-07-07 evening) — 3rd ORGANISM (S. aureus) + K. pneu BREADTH IN FLIGHT — READ FIRST, supersedes §0.-2 and all below
+
+> **Repo HEAD `4946883`** (pushed). Two commits since §0.-2 (HEAD `2528437`): `ac041e4` (populate now fills `antibiotics.drug_class` from registry — was hardcoded `None`) + `4946883` (`scripts/kb_tables.py` tidy-CSV export + `scripts/kb_figures.py` thesis figures). Local untracked: `backup/`, `figures/`; `TRUBA_Proje_Kurulum_Rehberi.md` staged as deleted.
+
+**This session = SCALE-OUT: adding a 3rd organism (Staphylococcus aureus) + widening K. pneumoniae to more antibiotics.** Everything in §0.-2 (17-model KB, env-parametric SLURM workflow, per-antibiotic recipe) still holds — this section only tracks the NEW in-flight work. KB is still the unified `results/kb/amrk.db`; new models APPEND (`populate_database.py` with env `AMR_ORGANISM`/`AMR_ANTIBIOTIC`, no `rm`).
+
+### IN-FLIGHT jobs — UPDATED 2026-07-07 late-evening (all survive laptop shutdown)
+- **K. pneu 4× `03u` ALL DONE** (COMPLETED 0:0): ceftazidime (6041988), amikacin (6042214), cefotaxime (6042215), levofloxacin (6042216). Matrices in `data/processed/kpneumoniae/{ab}/matrix_unitig/` (rtabs 8–15 GB each, still on disk → `rm` after each pyseer).
+- **K. pneu 4× Faz1 (04→05→06→07b) RUNNING**: cefotaxime (6043613), levofloxacin (6043614), amikacin (6043616), ceftazidime (6043617). Next per-ab step after each leaves `squeue` = **Faz2a 07→08→09** (UI/`screen`, NCBI internet).
+- **S. aureus FASTA download DONE**: 2494 usable `.fna` in `data/raw/staphylococcus_aureus/genomes/` (162 failed, the low-ID `1280.9xx` cluster). `00_prepare_metadata.py` built `amr_phenotypes.csv` = 2494 genomes × 41 antibiotics.
+- **S. aureus cefoxitin FLAGSHIP `03u` RUNNING** (job **6043622**). First staph antibiotic → builds the organism-level `unitig_all` store once (all 2494 genomes; later staph antibiotics reuse it cheaply), then subsets to cefoxitin's 1692.
+- **Registry curation DONE + pushed** (commit **`cfd9dc5`**, deployed to TRUBA via `git checkout origin/main -- config/registry/{antibiotics,organisms}.yaml`): added `oxacillin` (penicillins); split **macrolides** + **lincosamides** classes out of `others` (KB classes **7→9**); AFP keywords for amikacin/levofloxacin/oxacillin `[OXACILLIN,METHICILLIN]`/erythromycin/clindamycin + `METHICILLIN` on cefoxitin; staph `antibiotics:` = curated 8-set `[cefoxitin, oxacillin, ciprofloxacin, gentamicin, tetracycline, trimethoprim_sulfamethoxazole, erythromycin, clindamycin]`, `enabled: true`.
+- **⚠️ SLURM submit gotcha (NEW):** TRUBA rejects jobs whose WorkDir is not under `/arf/scratch` (`$AMR_HOME` is `/arf/home/...` → "Lütfen /arf/scratch altında" surfaced as a QOS error). `run_03u_env.slurm` carries an internal scratch chdir, but `run_ml_env.slurm` does not. **Fix: submit with `sbatch --chdir=$AMR_WORK --export=ALL,... $AMR_HOME/slurm/<script>.slurm`** (full path to the script in `$AMR_HOME`, WorkDir forced to scratch; the script `cd`s to `$AMR_HOME` internally at runtime).
+
+### 3rd organism = Staphylococcus aureus (taxid 1280, slug `staphylococcus_aureus`) — GRAM-POSITIVE, cross-phylum
+Chosen over P. aeruginosa for the strongest "organism-agnostic" claim: gram-positive vs the two gram-negatives (E. coli, K. pneu) → best cross-phylum generalisation story.
+- **`organisms.yaml` was MISSING the staph block on TRUBA** (only had ecoli+kpneumoniae → "Unknown organism" error). Fixed with `git fetch origin && git checkout origin/main -- config/registry/organisms.yaml` (origin/main HAS the staph+pseudo blocks; the `enabled` flag is irrelevant to our env-parametric workflow — 00a only needs the taxid). Verified `grep -c staphylococcus_aureus` = 3.
+- **Metadata fetched** (00a `--skip-download`): `data/external/staphylococcus_aureus/metadata/amr_cleaned_long.csv` = **2656 genomes × 41 antibiotics, 24857 R/S pairs** (raw 45876 rows, 114 conflicts dropped).
+- **S. aureus R/S (minority = min(R,S), with registry class):**
+  | antibiotic | R | S | minority | class | note |
+  |---|---|---|---|---|---|
+  | ciprofloxacin | 1097 | 1119 | **1097** | quinolone | **cross-org** (E.coli+K.pneu) |
+  | erythromycin | 1155 | 860 | 860 | macrolide (others) | **NEW class** (erm/msr) |
+  | oxacillin | 588 | 592 | 588 | **UNREG** | **direct MRSA/mecA marker** — add to antibiotics.yaml |
+  | clindamycin | 734 | 567 | 567 | lincosamide (others) | new class |
+  | cefoxitin | 1258 | 543 | 543 | cephalosporin | **MRSA surrogate → mecA (FLAGSHIP, registered)** |
+  | tetracycline | 454 | 1503 | 454 | tetracycline | **cross-org** (K.pneu) |
+  | gentamicin | 314 | 1636 | 314 | aminoglycoside | **cross-org** (both) |
+  | trimethoprim_sulfamethoxazole | 264 | 943 | 264 | folate | **cross-org** (both) |
+  | penicillin | 965 | 80 | 80 | penicillin | near-universal R (imbalanced) |
+  (also: fusidic acid 261 UNREG, chloramphenicol 122, daptomycin 78, rifampin 41, tigecycline 12…)
+- **Planned S. aureus targets:** flagship **cefoxitin** (mecA/MRSA, registered, ready) + **oxacillin** (add to registry = direct methicillin marker) + cross-organism **ciprofloxacin / gentamicin / tetracycline / trimethoprim_sulfamethoxazole** (3-organism concordance) + new-class **erythromycin** (macrolide) / **clindamycin** (lincosamide).
+- **Registry curation NEEDED before the S. aureus pipeline** (do locally + push, then `git checkout` on TRUBA): (1) `organisms.yaml` staph `antibiotics:` list is a placeholder — replace with the curated target set; (2) `antibiotics.yaml` ADD **oxacillin** (class `penicillins`, `amrfinder_keywords: [OXACILLIN, METHICILLIN, mecA]`) + confirm erythromycin/clindamycin mapping (currently "others").
+
+### K. pneu breadth — remaining candidates (minority ≥150, NOT yet done)
+Already done (11): gentamicin, tobramycin, meropenem, ciprofloxacin, imipenem, cefoxitin, cefepime, tetracycline, piperacillin_tazobactam, trimethoprim_sulfamethoxazole, **+ ceftazidime (03u running now)**. Plus amikacin/cefotaxime/levofloxacin (03u running). **Next tier after these finish** (slash-free, minority): colistin 263, cefazolin 241, tigecycline 234, ceftriaxone 225, aztreonam 216, amoxicillin_clavulanic_acid 188, trimethoprim 187. **DROP junk** `extended spectrum beta lactamase` (170 — phenotype label, not a drug).
+
+### NEXT SESSION — resume order
+1. **Check the 4 K. pneu 03u jobs** (`squeue -u $USER`; 6041988/6042214/6042215/6042216). As each leaves the queue → run its per-antibiotic chain (§0.-2 / §0.0 recipe): Faz1 `04→05→06→07b` → Faz2a `07→08→09` (UI/screen, internet) → bio `10→11` → `12→12b→13→13b` → pyseer `14` → `populate_database.py` (env `AMR_ORGANISM=kpneumoniae AMR_ANTIBIOTIC=<ab>`) → **`rm` that antibiotic's `unitigs.rtab`** to free disk. **Guard: never start an antibiotic's next phase until its SLURM job leaves `squeue`.**
+2. **Check S. aureus download** (`screen -r sa_dl`; expect ~2600 usable `.fna`). When done → `00_prepare_metadata.py --organism staphylococcus_aureus` → curate registry (oxacillin + staph antibiotics list; push; checkout on TRUBA) → `03u` for cefoxitin (flagship) via env → full chain → populate.
+3. **Disk:** 4 K. pneu `unitigs.rtab` in flight (~50-70 GB each). `lfs quota -u $USER /arf/scratch` before/after; delete each rtab right after its pyseer/populate. Only start the next K. pneu tier once these clear.
+4. Fold new models into docs (ROADMAP §0.5 showcase, METHODOLOGY multi-organism) + eventually the Zenodo deposit (M10, still the last must-have).
+
+---
+
+# §0.-2 — LATEST STATE (2026-07-07) — MULTI-ORGANISM KB COMPLETE — supersedes §0.-1 and all below
 
 **The KB is now a unified, 2-organism, 17-model AMR biomarker knowledge base.** Scaled from 3 E. coli antibiotics to **E. coli (7) + Klebsiella pneumoniae (10) = 17 models**, one unified DB at `results/kb/amrk.db` (`models.organism` distinguishes rows). All 17 ran the full pipeline (03u→04→05→06→07b→07→08→09→10→11→12→12b→13→13b→14→populate) with lineage-CV, CPSS+PFER, MDA, label-permutation, pyseer LMM, and CARD/NCBI ARO biology. Every mechanism recovered is biologically correct (below).
 

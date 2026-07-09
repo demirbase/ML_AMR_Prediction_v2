@@ -32,6 +32,18 @@ PALETTE = {"ecoli": "#2c7fb8", "kpneumoniae": "#de2d26",
            "paeruginosa": "#31a354", "saureus": "#756bb1"}
 _EXTRA = ["#e6ab02", "#a6761d", "#666666"]
 
+# The 7 orthogonal validation layers (evidence_type in the KB) in pipeline order,
+# biological → statistical. Label used on the evidence-layer heatmap (fig 06).
+EVIDENCE_ORDER = [
+    ("blast",                "BLAST\n(CARD/NCBI)"),
+    ("background_frequency", "Prevalence\nR vs S"),
+    ("snp",                  "SNP allele\n(CARD var.)"),
+    ("permutation_mda",      "MDA\npermutation"),
+    ("label_permutation",    "Label-perm\n(model)"),
+    ("stability_selection",  "CPSS\nstability"),
+    ("pyseer_lmm",           "pyseer LMM\n(lineage)"),
+]
+
 
 def _colour(org, _cache={}):
     if org in PALETTE:
@@ -101,42 +113,125 @@ def fig_cpss_pfer(tables, out):
     _save(fig, out, "02_cpss_pfer")
 
 
+_FAM_MAP = {
+    "16S rRNA methyltransferase (G1405)": "16S-RMTase",
+    "General Bacterial Porin with reduced permeability to beta-lactams": "porin loss",
+    "aminoglycoside bifunctional resistance protein": "AAC(6')-APH",
+    "major facilitator superfamily (MFS) antibiotic efflux pump": "MFS efflux",
+    "OXA beta-lactamase;OXA-48-like beta-lactamase": "OXA-48-like",
+    "sulfonamide resistant sul": "sul",
+    "trimethoprim resistant dihydrofolate reductase dfr": "dfr",
+}
+
+
+def _fam(s):
+    """Short, human gene-family label for figures."""
+    s = str(s).strip()
+    if s in _FAM_MAP:
+        return _FAM_MAP[s]
+    if "beta-lactamase" in s:
+        return s.replace(" beta-lactamase", "").strip()
+    return s.split()[-1] if s else s
+
+
+CLASS_SHORT = {"beta_lactams_carbapenems_others": "carbapenems / others",
+               "folate_pathway_inhibitors": "folate inhibitors"}
+
+
+def fig_overview(tables, out, db):
+    """Cover slide: scope of the KB (models / organisms / classes / genomes) +
+    models-per-drug-class stacked by organism."""
+    ms = pd.read_csv(tables / "models_summary.csv")
+    order = [c for c in CLASS_ORDER if c in set(ms.drug_class)]
+    orgs = list(ms.organism.unique())
+    fig = plt.figure(figsize=(13, 4.8))
+    gs = fig.add_gridspec(1, 2, width_ratios=[0.85, 1.7], wspace=0.28)
+    a0 = fig.add_subplot(gs[0]); a1 = fig.add_subplot(gs[1])
+    a0.axis("off")
+    cards = [(str(len(ms)), "AMR models"),
+             (str(ms.organism.nunique()), "organisms  (E. coli, K. pneumoniae)"),
+             (str(len(order)), "drug classes"),
+             (f"{int(ms.n_genomes.sum()):,}", "genome–phenotype pairs")]
+    for k, (num, lab) in enumerate(cards):
+        cy = 0.86 - 0.25 * k
+        a0.text(0.02, cy, num, fontsize=30, fontweight="800", color="#222", transform=a0.transAxes)
+        a0.text(0.03, cy - 0.085, lab, fontsize=10.5, color="#666", transform=a0.transAxes)
+    a0.set_title("Unified AMR biomarker knowledge base", fontsize=12, loc="left")
+    piv = ms.groupby(["drug_class", "organism"]).size().unstack(fill_value=0).reindex(order).fillna(0)
+    y = np.arange(len(order)); left = np.zeros(len(order))
+    for org in orgs:
+        vals = piv[org].values if org in piv.columns else np.zeros(len(order))
+        a1.barh(y, vals, left=left, color=_colour(org), edgecolor="white",
+                label={"ecoli": "E. coli", "kpneumoniae": "K. pneumoniae"}.get(org, org))
+        left += vals
+    a1.set_yticks(y); a1.set_yticklabels([CLASS_SHORT.get(c, c.replace("_", " ")) for c in order], fontsize=9.5)
+    a1.invert_yaxis(); a1.set_xlabel("models"); a1.legend(fontsize=9, loc="lower right")
+    a1.set_title("Models per drug class")
+    _save(fig, out, "00_kb_overview")
+
+
 def fig_cross_org(tables, out):
-    """Drugs assayed in ≥2 organisms → do the confirmed on-target genes agree?"""
+    """Drugs assayed in ≥2 organisms → SHARED (concordant) gene family highlighted."""
     mech = pd.read_csv(tables / "mechanisms.csv")
     ot = mech[mech["on_target"] == True]  # noqa: E712
-    shared = [ab for ab, g in ot.groupby("antibiotic") if g["organism"].nunique() >= 2]
-    if not shared:
+    abs_ = sorted(ab for ab, g in ot.groupby("antibiotic") if g["organism"].nunique() >= 2)
+    if not abs_:
         print("  (cross_org: no drug shared across organisms yet — skipped)")
         return
-    fig, ax = plt.subplots(figsize=(10, 0.5 + 0.5 * len(shared)))
-    for i, ab in enumerate(sorted(shared)):
-        for org, g in ot[ot.antibiotic == ab].groupby("organism"):
-            fams = sorted(set(g["aro_gene_family"].dropna()))[:4]
-            ax.text(0.02 if org == "ecoli" else 0.52, i, f"{_abbr(org)}: {', '.join(fams) or '—'}",
-                    fontsize=8, va="center", color=_colour(org))
-        ax.text(-0.01, i, _short(ab), fontsize=8, va="center", ha="right", fontweight="bold")
-    ax.set_ylim(-0.5, len(shared) - 0.5)
+    fig, ax = plt.subplots(figsize=(11, 1.0 + 1.0 * len(abs_)))
     ax.axis("off")
-    ax.set_title("Cross-organism mechanism concordance (on-target confirmed gene families)")
+    for i, ab in enumerate(abs_):
+        yy = len(abs_) - 1 - i
+        sub = ot[ot.antibiotic == ab]
+        fam = {o: set(_fam(x) for x in g["aro_gene_family"].dropna()) for o, g in sub.groupby("organism")}
+        ec, kp = fam.get("ecoli", set()), fam.get("kpneumoniae", set())
+        shared = sorted(ec & kp); eo = sorted(ec - kp); ko = sorted(kp - ec)
+        ax.text(0.0, yy, _short(ab), fontsize=12, fontweight="bold", va="center")
+        ax.text(0.24, yy, "   ".join(shared) or "—", fontsize=13, fontweight="bold",
+                color="#2ca25f", va="center")
+        extra = []
+        if eo: extra.append("Ec-only: " + ", ".join(eo))
+        if ko: extra.append("Kp-only: " + ", ".join(ko))
+        ax.text(0.24, yy - 0.30, "     ".join(extra), fontsize=8.5, color="#888", va="center")
+    ax.text(0.24, len(abs_) - 0.30, "SHARED gene family — recovered in BOTH organisms (concordant)",
+            fontsize=9.5, color="#2ca25f", fontweight="bold", va="center")
+    ax.set_xlim(-0.02, 1.0); ax.set_ylim(-0.6, len(abs_) - 0.05)
+    ax.set_title("Cross-organism concordance: same drug → same resistance gene family", fontsize=12.5)
     _save(fig, out, "03_cross_organism")
 
 
 def fig_mechanism(tables, out):
+    """Heatmap: on-target confirmed gene family (rows) × model (cols),
+    cell = # supporting unitigs. Reveals which family drives which drug."""
+    from matplotlib.colors import LogNorm
     mech = pd.read_csv(tables / "mechanisms.csv")
-    ot = mech[mech["on_target"] == True]  # noqa: E712
-    top = (ot.sort_values("n_unitigs", ascending=False)
-             .groupby(["model_id", "organism", "antibiotic", "drug_class"], as_index=False)
-             .agg(genes=("gene_symbol", lambda s: ", ".join(sorted(set(s))[:3]))))
-    top = _sortkey(top)
-    fig, ax = plt.subplots(figsize=(11, 0.4 + 0.42 * len(top)))
-    for i, r in enumerate(top.itertuples()):
-        ax.text(0.0, i, f"{_short(r.antibiotic)} ({_abbr(r.organism)})", fontsize=8.5, va="center", fontweight="bold", color=_colour(r.organism))
-        ax.text(0.42, i, r.genes or "—", fontsize=8.5, va="center")
-    ax.set_ylim(-0.5, len(top) - 0.5)
-    ax.axis("off")
-    ax.set_title("On-target confirmed resistance mechanism per model (class-filtered)")
-    _save(fig, out, "04_mechanism_panel")
+    ot = mech[mech["on_target"] == True].copy()  # noqa: E712
+    ot["fam"] = ot["aro_gene_family"].map(_fam)
+    ot["col"] = ot["organism"] + "||" + ot["antibiotic"]
+    ms = _sortkey(pd.read_csv(tables / "models_summary.csv"))
+    order_cols = [f"{o}||{a}" for o, a in zip(ms.organism, ms.antibiotic)]
+    piv = ot.groupby(["fam", "col"])["n_unitigs"].sum().unstack(fill_value=0)
+    cols = [c for c in order_cols if c in piv.columns]
+    piv = piv[cols]
+    piv = piv.loc[piv.sum(axis=1).sort_values(ascending=False).index]
+    M = piv.values.astype(float)
+    disp = np.where(M > 0, M, np.nan)
+    fig, ax = plt.subplots(figsize=(0.52 * len(cols) + 3, 0.42 * len(piv) + 2))
+    im = ax.imshow(disp, aspect="auto", cmap="YlOrRd", norm=LogNorm(vmin=1, vmax=np.nanmax(disp)))
+    ax.set_xticks(range(len(cols)))
+    ax.set_xticklabels([f"{_short(c.split('||')[1])} ({_abbr(c.split('||')[0])})" for c in cols],
+                       rotation=90, fontsize=7.5)
+    ax.set_yticks(range(len(piv))); ax.set_yticklabels(piv.index, fontsize=8.5)
+    thr = np.nanmax(disp) ** 0.5
+    for i in range(len(piv)):
+        for j in range(len(cols)):
+            v = M[i, j]
+            if v > 0:
+                ax.text(j, i, f"{int(v)}", ha="center", va="center", fontsize=6,
+                        color="white" if v > thr else "black")
+    ax.set_title("On-target confirmed resistance gene families across models (cell = # unitigs)", fontsize=11)
+    fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02, label="unitigs (log)")
+    _save(fig, out, "04_mechanism_heatmap")
 
 
 def fig_null_hist(tables, results, out):
@@ -169,17 +264,93 @@ def fig_null_hist(tables, results, out):
     _save(fig, out, "05_label_permutation_nulls")
 
 
-FIGS = {"performance": lambda t, r, o: fig_performance(t, o),
-        "cpss_pfer": lambda t, r, o: fig_cpss_pfer(t, o),
-        "cross_org": lambda t, r, o: fig_cross_org(t, o),
-        "mechanism": lambda t, r, o: fig_mechanism(t, o),
-        "null_hist": lambda t, r, o: fig_null_hist(t, r, o)}
+def fig_evidence_layers(tables, out, db):
+    """THE backbone figure: every model is filtered through 7 orthogonal
+    validation layers. Heatmap = evidence units (unitigs, or 1 for the
+    model-level label-permutation) supporting each model in each layer."""
+    import sqlite3
+    ms = _sortkey(pd.read_csv(tables / "models_summary.csv")).reset_index(drop=True)
+    conn = sqlite3.connect(str(db))
+    counts = {}  # run_id -> {evidence_type: n}
+    for run_id, et, n in conn.execute(
+            "SELECT pipeline_run_id, evidence_type, COUNT(*) FROM validation_evidence "
+            "GROUP BY pipeline_run_id, evidence_type"):
+        counts.setdefault(run_id, {})[et] = n
+    conn.close()
+    types = [t for t, _ in EVIDENCE_ORDER]
+    M = np.array([[counts.get(r, {}).get(t, 0) for t in types] for r in ms["run_id"]], float)
+    disp = np.where(M > 0, M, np.nan)  # 0 = layer not applicable (e.g. no SNP) → blank
+    fig, ax = plt.subplots(figsize=(8.5, 0.45 * len(ms) + 1.6))
+    from matplotlib.colors import LogNorm
+    im = ax.imshow(disp, aspect="auto", cmap="YlGnBu",
+                   norm=LogNorm(vmin=1, vmax=np.nanmax(disp)))
+    ax.set_xticks(range(len(types)))
+    ax.set_xticklabels([lab for _, lab in EVIDENCE_ORDER], fontsize=8)
+    ax.set_yticks(range(len(ms)))
+    ax.set_yticklabels([f"{_short(a)} ({_abbr(o)})" for a, o in zip(ms.antibiotic, ms.organism)], fontsize=7.5)
+    for i in range(len(ms)):
+        for j in range(len(types)):
+            v = M[i, j]
+            if v > 0:
+                ax.text(j, i, f"{int(v)}", ha="center", va="center", fontsize=6.5,
+                        color="white" if v > np.nanmax(disp) ** 0.5 else "black")
+    ax.set_title("Every biomarker is filtered through 7 orthogonal validation layers\n"
+                 "(cell = supporting evidence units; blank = layer not applicable)", fontsize=10)
+    fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="evidence units (log)")
+    _save(fig, out, "06_evidence_layers")
+
+
+def fig_significance(tables, out, db):
+    """05 redesign — single panel: REAL lineage-CV AUC vs label-shuffle null_max
+    per model (parsed from the KB's label_permutation evidence_source). Shows the
+    gap = model-level significance, far clearer than 20 tiny histograms."""
+    import re, sqlite3
+    ms = _sortkey(pd.read_csv(tables / "models_summary.csv")).reset_index(drop=True)
+    conn = sqlite3.connect(str(db))
+    real, nullmax, pval = {}, {}, {}
+    for run_id, src, score in conn.execute(
+            "SELECT pipeline_run_id, evidence_source, evidence_score FROM validation_evidence "
+            "WHERE evidence_type='label_permutation'"):
+        m = re.search(r"real_auc=([0-9.]+).*null_max=([0-9.]+)", src or "")
+        if m:
+            real[run_id] = float(m.group(1)); nullmax[run_id] = float(m.group(2)); pval[run_id] = score
+    conn.close()
+    ms = ms[ms["run_id"].isin(real)].reset_index(drop=True)
+    y = np.arange(len(ms))
+    r = [real[i] for i in ms["run_id"]]
+    nm = [nullmax[i] for i in ms["run_id"]]
+    col = [_colour(o) for o in ms["organism"]]
+    fig, ax = plt.subplots(figsize=(9, 0.42 * len(ms) + 1.2))
+    for yi, ri, ni, ci in zip(y, r, nm, col):
+        ax.plot([ni, ri], [yi, yi], color="lightgrey", lw=2, zorder=1)
+        ax.scatter(ni, yi, color="#999999", s=28, zorder=2)
+        ax.scatter(ri, yi, color=ci, s=46, zorder=3)
+    ax.axvline(0.5, ls="--", c="grey", lw=0.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels([f"{_short(a)} ({_abbr(o)})" for a, o in zip(ms.antibiotic, ms.organism)], fontsize=7.5)
+    ax.set_xlim(0.4, 1.0)
+    ax.set_xlabel("ROC-AUC")
+    ax.set_title("Model-level significance: REAL lineage-CV AUC (colour) ≫ "
+                 "label-shuffle null max (grey)\nall p ≈ 0.02 (N=50 permutations)", fontsize=10)
+    ax.invert_yaxis()
+    _save(fig, out, "05_significance_real_vs_null")
+
+
+FIGS = {"overview": lambda t, r, o, db: fig_overview(t, o, db),
+        "performance": lambda t, r, o, db: fig_performance(t, o),
+        "cpss_pfer": lambda t, r, o, db: fig_cpss_pfer(t, o),
+        "cross_org": lambda t, r, o, db: fig_cross_org(t, o),
+        "mechanism": lambda t, r, o, db: fig_mechanism(t, o),
+        "evidence": lambda t, r, o, db: fig_evidence_layers(t, o, db),
+        "significance": lambda t, r, o, db: fig_significance(t, o, db),
+        "null_hist": lambda t, r, o, db: fig_null_hist(t, r, o)}
 
 
 def main():
     ap = argparse.ArgumentParser(description="Thesis figures from the AMR-KB tidy tables.")
     ap.add_argument("--tables", default="results/tables")
     ap.add_argument("--results", default="results")
+    ap.add_argument("--db", default="results/kb/amrk.db", help="KB (for evidence/significance figs)")
     ap.add_argument("--out", default="figures")
     ap.add_argument("--only", default=None, help="comma list: " + ",".join(FIGS))
     args = ap.parse_args()
@@ -189,7 +360,7 @@ def main():
         if name not in FIGS:
             print(f"  ! unknown figure '{name}'")
             continue
-        FIGS[name](tables, args.results, out)
+        FIGS[name](tables, args.results, out, args.db)
     print("DONE.")
 
 
