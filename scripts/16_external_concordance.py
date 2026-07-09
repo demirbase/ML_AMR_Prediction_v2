@@ -175,7 +175,10 @@ def head_to_head(genomes, pheno, afp, rf, model_calls, antibiotics):
         if not mcall:
             continue
         common = [g for g in genomes if g in mcall and g in afp and g in rf
+                  and ab in afp[g] and ab in rf[g]
                   and pheno.get(g, {}).get(ab) is not None]
+        if not common:
+            continue
         yt = [pheno[g][ab] for g in common]
         ym = [mcall[g] for g in common]
         ya = [afp[g][ab] for g in common]
