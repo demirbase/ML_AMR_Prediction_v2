@@ -3,9 +3,9 @@
 """
 BLAST Annotation Orchestrator — Step 08
 
-This script coordinates the biological validation of the top k-mer features
-identified in Step 07 (07_explainability.py) by delegating to a Nextflow
-pipeline (08_blast_pipeline.nf) that runs two parallel BLAST searches:
+This script coordinates the biological validation of the top unitig/k-mer
+features identified in Step 07 (07_explainability.py) by running blastn directly
+via subprocess (no Nextflow) in two BLAST searches:
 
   1. CARD Local BLAST:
      Queries the Comprehensive Antibiotic Resistance Database (CARD).

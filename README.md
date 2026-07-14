@@ -3,7 +3,6 @@
 ![CI](https://github.com/demirbase/ML_AMR_Prediction_v2/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)
 ![ML](https://img.shields.io/badge/ML-XGBoost-orange.svg)
-![Pipeline](https://img.shields.io/badge/pipeline-Nextflow-brightgreen.svg)
 ![Tests](https://img.shields.io/badge/tests-pytest-green.svg)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)

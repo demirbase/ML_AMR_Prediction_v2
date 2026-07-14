@@ -54,8 +54,7 @@ dependencies:
 
   # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
   - kmc>=3.2          # k-mer counting (02/02b QC + raw-k-mer 03 baseline)
-  - blast>=2.12
-  - nextflow>=22.10
+  - blast>=2.12       # step 08 BLAST (blastn via 08_blast_annotation.py subprocess; no Nextflow)
 
   # ── Unitig representation (ROADMAP §0.1 M12 — replaces raw k-mers) ─────────
   # bcalm builds the compacted de Bruijn graph (unitigs); unitig-caller (pyseer
