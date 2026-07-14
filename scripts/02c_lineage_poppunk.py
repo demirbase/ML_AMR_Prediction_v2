@@ -84,10 +84,14 @@ def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: i
 
     Uses the canonical single-dir PopPUNK pattern (--output == --ref-db, with
     --overwrite so a batch job never blocks on a prompt). ``refine`` chains a
-    boundary-refinement step after the initial ``model`` fit — REQUIRED for
-    strain-level resolution: bgmm/dbscan alone collapse E. coli into one giant
-    cluster (~94 %), useless for GroupKFold. ``reuse_db`` skips the expensive
-    re-sketching when the database (created on a previous run) is still present.
+    boundary-refinement step after the initial ``model`` fit. Empirically on this
+    data (E. coli / K. pneumoniae) **dbscan alone gives good strain-level
+    resolution** (~324 clusters, largest ~15 %), so the validated config uses
+    ``model: dbscan`` with ``refine: false``; bgmm instead collapsed into one
+    ~94 % mega-cluster AND its refine step failed (degenerate NaN boundary).
+    For a NEW organism, verify the resolution (n_clusters >= n_splits) — the
+    optimal model/refine may differ by population structure. ``reuse_db`` skips
+    the expensive re-sketching when a prior run's database is still present.
     """
     db = work_dir / "db"
     has_sketch = db.exists() and any(db.glob("*.h5"))

@@ -48,8 +48,9 @@ try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-    from lib.config import resolve_path, resolve_tool
-    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    from lib.config import get_target, resolve_path, resolve_tool
+    # AMR_ORGANISM env overrides config (parallel per-organism QC, like 03u).
+    ORGANISM = get_target(config=config)[0]
 
     K_LENGTH = config['preprocessing']['k_length']
     KMC_MEMORY_GB = config['preprocessing']['kmc_mem']

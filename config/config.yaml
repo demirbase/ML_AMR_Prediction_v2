@@ -29,59 +29,13 @@ registry:
   antibiotics_file: "config/registry/antibiotics.yaml"
 
 # ----------------------------------------------------------------------------
-# DIRECTORY PATHS (Relative to project root)
+# DIRECTORY PATHS — organism-aware templates ({organism}/{antibiotic})
 # ----------------------------------------------------------------------------
-# All paths use forward slashes for cross-platform compatibility
-# Absolute paths or ~ (home directory) can also be used
-#
-# MULTI-ANTIBIOTIC ARCHITECTURE:
-# Changing 'target_antibiotic' automatically creates isolated directory structures:
-# - data/processed/{antibiotic}/matrix/
-# - models/{antibiotic}/
-# - results/{antibiotic}/
-# - logs/{antibiotic}/
-#
-# Cookiecutter Data Science layout:
-# - data/raw/raw_genomes/       — original, immutable genome assemblies
-# - data/external/metadata/     — AMR phenotype labels
-# - data/external/blast_db/     — third-party databases (CARD)
-# - data/interim/               — intermediate transformations (k-mer DBs)
-# - data/processed/             — final, canonical feature matrices
-# - results/                    — all analysis outputs (replaces analysis_results/)
-paths:
-  # ── Global (shared across all antibiotics) ────────────────────────────────
-  data_dir:         "data"
-  raw_genomes_dir:  "data/raw/raw_genomes"              # Immutable genome assemblies
-  metadata_file:    "data/external/metadata/genome_amr_matrix.csv"  # AMR phenotype labels
-  kmc_outputs_dir:  "data/interim/global_kmc_outputs"   # KMC binary databases
-  dir_global_exploration: "results/global_exploration"  # Global QC and validation outputs
-
-  # ── Antibiotic-specific (resolved with {antibiotic} placeholder) ───────────
-  matrix_dir:           "data/processed/{antibiotic}/matrix"  # Feature matrices & labels
-  logs_dir:             "logs/{antibiotic}"                    # Processing logs
-  models_dir:           "models/{antibiotic}"                  # Trained models
-  analysis_results_dir: "results/{antibiotic}"                 # Analysis outputs
-
-  # Standardised, numbered analysis sub-directories (created on demand by each script)
-  # Sequentially numbered so output folders sort naturally and reproduce the pipeline order.
-  dir_01_data_exploration:   "results/{antibiotic}/01_data_exploration"
-  dir_02_matrix_qc:          "results/{antibiotic}/02_matrix_qc"
-  dir_03_model_optimization: "results/{antibiotic}/03_model_optimization"
-  dir_04_evaluation:         "results/{antibiotic}/04_evaluation"
-  dir_05_explainability:     "results/{antibiotic}/05_explainability"
-
-  # ── External tool paths (system-specific) ─────────────────────────────────
-  kmc_bin:       "bin/bin/kmc"        # Relative to project root
-  kmc_tools_bin: "bin/bin/kmc_tools"  # Relative to project root
-
-# ----------------------------------------------------------------------------
-# ORGANISM-AWARE PATH TEMPLATES (SCALE_MLOPS_PLAN.md §4) — ADDITIVE / FORWARD
-# ----------------------------------------------------------------------------
-# These {organism}-scoped templates are consumed ONLY by scripts/lib/config.py
-# (resolve_path) and scripts/migrate_to_organism_layout.py. The legacy `paths:`
-# keys above are intentionally left untouched so the current numbered scripts
-# keep working on the existing single-organism layout. Once you run the
-# migration script and cut a script over to resolve_path(), it reads from here.
+# Consumed by scripts/lib/config.py resolve_path(). Every numbered script now
+# resolves its paths from here. (The legacy single-organism `paths:` block was
+# removed 2026-07-13 — it was dead: paths_organism is a superset and resolve_path
+# checks it first, so the fallback never triggered.) External tools (kmc) prefer
+# PATH via resolve_tool; the kmc_bin entries are a Darwin-only bundled fallback.
 paths_organism:
   # ── Global / shared (organism-independent — NOT moved by the migration) ────
   data_dir:               "data"

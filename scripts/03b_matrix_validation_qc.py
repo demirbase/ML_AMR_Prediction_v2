@@ -49,9 +49,9 @@ try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-    from lib.config import resolve_path
-    TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
-    ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+    from lib.config import get_target, resolve_path
+    # AMR_ORGANISM/AMR_ANTIBIOTIC env overrides config (parallel runs, like 03u).
+    ORGANISM, TARGET_ANTIBIOTIC = get_target(config=config)
 
     MATRIX_DIR = resolve_path('matrix_dir', organism=ORGANISM, antibiotic=TARGET_ANTIBIOTIC, config=config)
 

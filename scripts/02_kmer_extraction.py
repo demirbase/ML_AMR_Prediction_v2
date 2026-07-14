@@ -58,8 +58,10 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-from lib.config import resolve_path, resolve_tool
-ORGANISM = config.get('project', {}).get('organism', 'ecoli')
+from lib.config import get_target, resolve_path, resolve_tool
+# AMR_ORGANISM env overrides config (parallel per-organism QC without a config
+# edit — same mechanism as 03u). Organism-level step: antibiotic not needed.
+ORGANISM = get_target(config=config)[0]
 
 # Extract configuration values
 K_LENGTH = config['preprocessing']['k_length']

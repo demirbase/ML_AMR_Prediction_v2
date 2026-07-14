@@ -28,12 +28,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from lib.config import load_config, resolve_path, resolve_tool  # noqa: E402
+from lib.config import get_target, load_config, resolve_path, resolve_tool  # noqa: E402
 
 
 def main() -> None:
     cfg = load_config()
-    organism = cfg.get("project", {}).get("organism", "ecoli")
+    # AMR_ORGANISM env overrides config (parallel per-organism KMC, like 03u).
+    organism = get_target(config=cfg)[0]
     k_length = cfg["preprocessing"]["k_length"]
     workers = int(cfg["preprocessing"]["threads"])
 

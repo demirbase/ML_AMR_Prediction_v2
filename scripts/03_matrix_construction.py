@@ -66,11 +66,11 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-from lib.config import resolve_path, resolve_tool
+from lib.config import get_target, resolve_path, resolve_tool
 
-# Extract configuration values
-TARGET_ANTIBIOTIC = config['project']['target_antibiotic']
-ORGANISM          = config.get('project', {}).get('organism', 'ecoli')
+# Extract target via get_target: CLI-arg > AMR_ORGANISM/AMR_ANTIBIOTIC env >
+# config (parallel per-(organism,antibiotic) runs without a config edit, like 03u).
+ORGANISM, TARGET_ANTIBIOTIC = get_target(config=config)
 K_LENGTH          = config['preprocessing']['k_length']   # Must match 02_kmer_extraction.py
 # Data-adaptive minimum support (see config comments). MIN_SUPPORT is an optional
 # hard override; when null the effective value is derived from the genome count
