@@ -102,6 +102,53 @@ def test_clean_conflict_tie_no_year_dropped():
 
 
 @pytest.mark.unit
+def test_clean_conflict_tie_partial_nan_year():
+    # tie with a partially-missing year: the row that HAS a year must win
+    # (regression for the np.argmax->np.nanargmax fix; argmax would pick the NaN row).
+    df = _df([
+        ("562.6", "gentamicin", "Resistant", "EUCAST", 2015),
+        ("562.6", "gentamicin", "Susceptible", "CLSI", np.nan),
+    ])
+    cleaned, _ = clean_amr_table(df)
+    assert cleaned.iloc[0]["label"] == 1          # 2015 Resistant wins, not the NaN-year S
+    # and the reverse orientation
+    df2 = _df([
+        ("562.7", "gentamicin", "Resistant", "EUCAST", np.nan),
+        ("562.7", "gentamicin", "Susceptible", "CLSI", 2018),
+    ])
+    cleaned2, _ = clean_amr_table(df2)
+    assert cleaned2.iloc[0]["label"] == 0          # 2018 Susceptible wins
+
+
+@pytest.mark.unit
+def test_clean_unknown_antibiotic_reported_and_optionally_dropped():
+    df = _df([
+        ("562.8", "ampicillin", "Resistant", "EUCAST", 2020),
+        ("562.8", "fluoroquinolones", "Resistant", "EUCAST", 2020),  # class label, not a drug
+    ])
+    cleaned, rep = clean_amr_table(df)                 # default: keep + report
+    assert "fluoroquinolones" in rep["unknown_antibiotics"]
+    assert set(cleaned["antibiotic"]) == {"ampicillin", "fluoroquinolones"}
+    cleaned_s, rep_s = clean_amr_table(df, strict_antibiotics=True)   # strict: drop it
+    assert set(cleaned_s["antibiotic"]) == {"ampicillin"}
+    assert rep_s["n_unknown_antibiotic_names"] == 1
+
+
+@pytest.mark.unit
+def test_clean_intermediate_policy():
+    df = _df([
+        ("562.9", "ciprofloxacin", "Intermediate", "EUCAST", 2021),
+    ])
+    # default drop -> nothing survives
+    cleaned_drop, rep_d = clean_amr_table(df)
+    assert cleaned_drop.empty
+    assert rep_d["phenotype_dropped"].get("intermediate") == 1
+    # policy 'resistant' -> Intermediate folds into R (label 1)
+    cleaned_r, _ = clean_amr_table(df, intermediate_policy="resistant")
+    assert cleaned_r.iloc[0]["label"] == 1
+
+
+@pytest.mark.unit
 def test_clean_cli_prefixed_headers_and_evidence_filter():
     # Simulates BV-BRC CLI output: table-prefixed headers + an evidence column.
     df = pd.DataFrame({

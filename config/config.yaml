@@ -126,6 +126,17 @@ provenance:
   # (entrez_email / api_key); it is the single source for Step 09.
 
 # ----------------------------------------------------------------------------
+# METADATA / PHENOTYPE LABELLING (step 00a cleaning — lib/bvbrc.clean_amr_table)
+# ----------------------------------------------------------------------------
+metadata:
+  # How to treat the Intermediate / Non-susceptible / SDD phenotype family:
+  #   drop        -> binary R/S only (default, most common + defensible)
+  #   resistant   -> fold Intermediate into Resistant (CLSI-cautious)
+  #   susceptible -> fold Intermediate into Susceptible
+  # The chosen policy is stamped into download_manifest.json for provenance.
+  intermediate_policy: "drop"
+
+# ----------------------------------------------------------------------------
 # DATA PREPROCESSING PARAMETERS
 # ----------------------------------------------------------------------------
 preprocessing:

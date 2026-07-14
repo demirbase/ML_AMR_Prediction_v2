@@ -117,7 +117,7 @@ def fetch_amr_table(taxid):
         f'eq(evidence,"Laboratory Method"))'
         f"&select({','.join(SELECT_FIELDS)})&sort(+genome_id)"
     )
-    frames, start = [], 0
+    frames, start, complete = [], 0, True
     while True:
         rql = f"{base_rql}&limit({API_BATCH},{start})"
         url = _api_url(rql)
@@ -127,6 +127,7 @@ def fetch_amr_table(taxid):
         except Exception as e:
             log.error(f"API request failed at start={start}: {e}")
             log.error("If the table is large, use the website DOWNLOAD and pass --raw-csv.")
+            complete = False          # partial pagination -> caller must not treat as full
             break
         batch = pd.read_csv(io.StringIO(text)) if text.strip() else pd.DataFrame()
         if batch.empty:
@@ -136,8 +137,8 @@ def fetch_amr_table(taxid):
             break
         start += API_BATCH
     if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+        return pd.DataFrame(), complete
+    return pd.concat(frames, ignore_index=True), complete
 
 
 # ---- CLI backend (BV-BRC p3-* tools; handles large result sets) -----------
@@ -388,7 +389,11 @@ def main():
         log.info("Retry complete. Re-run 00_prepare_metadata.py to refresh the matrix.")
         return
 
+    # Intermediate-phenotype policy (config-driven; default binary R/S).
+    intermediate_policy = (config.get("metadata", {}) or {}).get("intermediate_policy", "drop")
+
     # 1) obtain raw table
+    fetch_complete = True
     if args.raw_csv:
         log.info(f"Loading raw table from {args.raw_csv}")
         raw = pd.read_csv(args.raw_csv, sep=None, engine="python", dtype=str)
@@ -404,15 +409,19 @@ def main():
         log.info(f"Raw table saved: {raw_csv} ({len(raw)} rows)")
     else:
         log.info("Fetching genome_amr from BV-BRC HTTP API...")
-        raw = fetch_amr_table(taxid)
+        raw, fetch_complete = fetch_amr_table(taxid)
         if raw.empty:
             log.error("No rows fetched. Provide --raw-csv from the website DOWNLOAD instead.")
             sys.exit(1)
+        if not fetch_complete:
+            log.warning("API fetch was TRUNCATED (a page request failed) — the raw table "
+                        "may be INCOMPLETE. Prefer the website DOWNLOAD + --raw-csv for a "
+                        "reproducible full table. (recorded as complete=false in the manifest)")
         standardise_columns(raw).to_csv(raw_csv, index=False)
         log.info(f"Raw table saved: {raw_csv} ({len(raw)} rows)")
 
     # 2) clean
-    cleaned, report = clean_amr_table(raw)
+    cleaned, report = clean_amr_table(raw, intermediate_policy=intermediate_policy)
     cleaned.to_csv(cleaned_csv, index=False)
     (logs_dir / "cleaning_report.json").write_text(json.dumps(report, indent=2))
     log.info(f"Cleaning report: {report}")
@@ -432,6 +441,8 @@ def main():
         "filter": 'eq(public,true) & eq(evidence,"Laboratory Method")',
         "cleaning": "EUCAST/CLSI only; Resistant/Susceptible only; name-normalised; "
                     "majority->newest-year conflict resolution",
+        "intermediate_policy": intermediate_policy,
+        "fetch_complete": fetch_complete,
         "downloaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "n_candidate_genomes": len(genome_ids),
         "cleaning_report": report,

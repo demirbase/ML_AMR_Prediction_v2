@@ -21,13 +21,18 @@ Cleaning rules (agreed):
 import numpy as np
 import pandas as pd
 
+from lib.registry import antibiotic_to_class
 from lib.registry import normalize_antibiotic as _default_normalize
 
 # Accepted testing-standard substrings (case-insensitive)
 _ALLOWED_STANDARD_SUBSTRINGS = ("eucast", "clsi")
 
-# Phenotype text -> binary label
+# Phenotype text -> binary label. The Intermediate / Non-susceptible family is
+# handled by the `intermediate_policy` argument to clean_amr_table (default
+# 'drop' = binary R/S only).
 _PHENOTYPE_MAP = {"resistant": 1, "susceptible": 0}
+_INTERMEDIATE_TERMS = ("intermediate", "non-susceptible", "nonsusceptible",
+                       "susceptible-dose dependent", "susceptible dose dependent", "sdd")
 
 # Map raw column headers (API snake_case OR web-export Title Case) -> canonical
 _COLUMN_ALIASES = {
@@ -73,39 +78,57 @@ def _resolve_group(labels, years):
     Returns (label_or_nan, conflicted_bool). conflicted is True when the group
     contained both classes (regardless of whether the tie-break succeeded).
     """
-    labels = pd.Series(labels).dropna().astype(int)
-    if labels.empty:
+    lab = pd.Series(labels)
+    yr = pd.to_numeric(pd.Series(years).reset_index(drop=True), errors="coerce")
+    lab = lab.reset_index(drop=True)
+    mask = lab.notna()
+    lab = lab[mask].astype(int)
+    yr = yr[mask]                       # keep labels and years positionally aligned
+    if lab.empty:
         return np.nan, False
-    counts = labels.value_counts()
+    counts = lab.value_counts()
     if len(counts) == 1:
         return int(counts.index[0]), False
     # both classes present -> conflict
     n1, n0 = int(counts.get(1, 0)), int(counts.get(0, 0))
     if n1 != n0:
         return (1 if n1 > n0 else 0), True
-    # tie -> most recent year
-    yr = pd.to_numeric(pd.Series(years), errors="coerce")
+    # tie -> most recent year. nanargmax (NOT argmax): a partially-missing year
+    # column would otherwise make np.argmax return the NaN row and pick the wrong
+    # label. Ignore NaN years; drop the cell if no year is available at all.
     if yr.notna().any():
-        return int(pd.Series(labels.values)[int(np.argmax(yr.values))]), True
+        idx = int(np.nanargmax(yr.to_numpy(dtype=float)))
+        return int(lab.to_numpy()[idx]), True
     return np.nan, True  # unresolved -> drop the cell
 
 
-def clean_amr_table(df, normalize_fn=None):
+def clean_amr_table(df, normalize_fn=None, intermediate_policy="drop",
+                    strict_antibiotics=False):
     """
     Clean a raw BV-BRC genome_amr frame into a one-row-per-(genome, antibiotic)
     long table with a binary `label`.
 
     Args:
-        df:            raw frame (API or web-export columns).
-        normalize_fn:  antibiotic name normaliser (default: registry).
+        df:                 raw frame (API or web-export columns).
+        normalize_fn:       antibiotic name normaliser (default: registry).
+        intermediate_policy: how to treat the Intermediate / Non-susceptible / SDD
+            family — 'drop' (default, binary R/S only), 'resistant' (fold into R,
+            CLSI-cautious), or 'susceptible'.
+        strict_antibiotics: if True, drop rows whose (normalised) antibiotic is not
+            a known registry drug (default False: keep + report, so genuinely new
+            drugs are never silently lost).
 
     Returns:
         (cleaned_long_df, report_dict)
         cleaned_long_df columns: ['genome_id', 'antibiotic', 'label']
-        report_dict: row/pair counts at each step (for the cleaning report).
+        report_dict: row/pair counts at each step + intermediate_policy,
+        phenotype_dropped, unknown_antibiotics.
     """
     normalize_fn = normalize_fn or _default_normalize
-    report = {}
+    if intermediate_policy not in ("drop", "resistant", "susceptible"):
+        raise ValueError(
+            f"intermediate_policy must be drop|resistant|susceptible, got {intermediate_policy!r}")
+    report = {"intermediate_policy": intermediate_policy}
     df = standardise_columns(df)
     report["rows_raw"] = len(df)
 
@@ -134,16 +157,32 @@ def clean_amr_table(df, normalize_fn=None):
         report["warning"] = "no testing_standard column — standard filter skipped"
     report["rows_after_standard"] = len(df)
 
-    # 2) phenotype filter + label
+    # 2) phenotype filter + label. intermediate_policy folds the Intermediate /
+    #    Non-susceptible / SDD family into R (or S), or drops it (default).
     pheno = df["resistant_phenotype"].astype(str).str.strip().str.lower()
-    df = df.assign(label=pheno.map(_PHENOTYPE_MAP))
+    pmap = dict(_PHENOTYPE_MAP)
+    if intermediate_policy in ("resistant", "susceptible"):
+        tgt = 1 if intermediate_policy == "resistant" else 0
+        for term in _INTERMEDIATE_TERMS:
+            pmap[term] = tgt
+    # transparency (Methods): what phenotype strings get dropped, and how many
+    report["phenotype_dropped"] = pheno[~pheno.isin(pmap)].value_counts().to_dict()
+    df = df.assign(label=pheno.map(pmap))
     df = df[df["label"].notna()].copy()
     df["label"] = df["label"].astype(int)
     report["rows_after_phenotype"] = len(df)
 
-    # 3) normalise antibiotic
+    # 3) normalise antibiotic names to the registry's canonical spelling.
     df["antibiotic"] = df["antibiotic"].apply(normalize_fn)
     df = df[df["antibiotic"].notna() & (df["antibiotic"].astype(str).str.len() > 0)]
+    # data hygiene: surface (and optionally drop) names that are NOT a known
+    # registry drug — usually phenotype labels ("fluoroquinolones", "extended
+    # spectrum beta lactamase"), never real ML targets.
+    unknown = sorted({a for a in df["antibiotic"].unique() if antibiotic_to_class(a) is None})
+    report["unknown_antibiotics"] = unknown
+    report["n_unknown_antibiotic_names"] = len(unknown)
+    if strict_antibiotics and unknown:
+        df = df[df["antibiotic"].apply(lambda a: antibiotic_to_class(a) is not None)]
 
     # 4) conflict resolution per (genome_id, antibiotic)
     if "testing_standard_year" not in df.columns:

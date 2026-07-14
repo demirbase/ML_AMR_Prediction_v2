@@ -55,10 +55,12 @@ if config:
     GENOMES_DIR = resolve_path('raw_genomes_dir', organism=ORGANISM, config=config)
     REPORT_PATH = resolve_path('dir_global_exploration', organism=ORGANISM, config=config) / "validation_report.txt"
 else:
+    # Config failed to load — fall back to a best-effort E. coli path so the
+    # script can still be imported; a real run requires config.yaml.
     BASE_DIR = PROJECT_ROOT / "data"
-    MATRIX_FILE = BASE_DIR / "metadata" / "genome_amr_matrix.csv"
-    GENOMES_DIR = BASE_DIR / "raw_genomes"
-    REPORT_PATH = BASE_DIR / "metadata" / "validation_report.txt"
+    MATRIX_FILE = BASE_DIR / "external" / "ecoli" / "metadata" / "amr_phenotypes.csv"
+    GENOMES_DIR = BASE_DIR / "raw" / "ecoli" / "genomes"
+    REPORT_PATH = BASE_DIR / "external" / "ecoli" / "metadata" / "validation_report.txt"
 
 # ============================================================================
 # HELPER FUNCTIONS
