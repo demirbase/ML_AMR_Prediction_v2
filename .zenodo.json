@@ -1,9 +1,9 @@
 {
-  "title": "AMRK-DB: a stability-filtered, lineage-validated, unitig-resolution AMR biomarker Knowledge Base for Escherichia coli",
+  "title": "AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base for ESKAPEE pathogens (E. coli & K. pneumoniae)",
   "upload_type": "dataset",
   "access_right": "open",
   "license": "cc-by-4.0",
-  "version": "0.4.0",
+  "version": "0.6.1",
   "language": "eng",
   "description": "<p>AMRK-DB is a queryable, confidence-tiered, FAIR knowledge base of machine-learning-derived genomic biomarkers of antimicrobial resistance (AMR) in <em>Escherichia coli</em>. Unitig (compacted de Bruijn graph) presence/absence features are ranked by XGBoost, filtered for reproducibility with Complementary Pairs Stability Selection (CPSS, B=100, &pi;&ge;0.6, PFER-bounded) and lineage-aware cross-validation (PopPUNK + GroupKFold), then reverse-translated into biology via CARD/NCBI BLAST confidence tiering, ARO ontology mapping, resistant-vs-susceptible discriminativeness (Fisher + BH-FDR), CARD variant-model SNP allele checks, MDA/label permutation tests, and pyseer LMM population-structure-corrected significance. Every record carries full provenance (git commit, seed, config hash, CARD version) in a pipeline_runs table.</p><p>This deposit contains the SQLite knowledge base (amrk.db, schema 0.4.0) plus the per-antibiotic candidate/evidence tables and run metadata. Raw genome assemblies are obtained from BV-BRC; the full pipeline reproduces the unitig matrices from those assemblies. Statistical association is not biological causation (confidence tiers are evidence, not mechanism claims).</p>",
   "keywords": [
@@ -37,5 +37,5 @@
       "scheme": "url"
     }
   ],
-  "notes": "KB schema version 0.4.0. Software released under the MIT License; this data record under CC-BY-4.0. CARD 4.0.1. Bump `version` per release and mint a new Zenodo version DOI."
+  "notes": "KB schema version 0.6.1 (21 models, 2 organisms). Software released under the MIT License; this data record under CC-BY-4.0. CARD 4.0.1. Bump `version` per release and mint a new Zenodo version DOI."
 }

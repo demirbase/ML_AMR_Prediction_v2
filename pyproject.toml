@@ -13,8 +13,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amr-kmer-kb"
-version = "0.1.0"
-description = "Stability-filtered, biologically validated AMR k-mer knowledge-base pipeline for E. coli"
+version = "0.6.1"
+description = "Explainable, FAIR, multi-organism AMR unitig-biomarker knowledge-base pipeline (ESKAPEE; currently E. coli + K. pneumoniae)"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { file = "LICENSE" }

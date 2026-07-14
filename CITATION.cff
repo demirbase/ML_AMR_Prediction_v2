@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software or the AMRK-DB knowledge base, please cite it using these metadata."
-title: "ML_AMR_Prediction_v2 / AMRK-DB: a stability-filtered, lineage-validated, unitig-resolution AMR biomarker Knowledge Base pipeline for Escherichia coli"
+title: "ML_AMR_Prediction_v2 / AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base pipeline for ESKAPEE pathogens (E. coli, K. pneumoniae)"
 abstract: >-
   An alignment-free, out-of-core machine-learning pipeline that predicts
   antimicrobial resistance (AMR) in Escherichia coli from whole-genome
@@ -19,7 +19,7 @@ authors:
     email: "eren0demirbas@gmail.com"
 repository-code: "https://github.com/demirbase/ML_AMR_Prediction_v2"
 license: MIT
-version: "0.4.0"
+version: "0.6.1"
 date-released: "2026-07-01"
 keywords:
   - antimicrobial resistance
