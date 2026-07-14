@@ -30,8 +30,8 @@ def kb(tmp_path):
             VALUES (1,1,0.9,0.1,0.8,1);
         INSERT INTO variant_snp_check(unitig_id,model_id,card_model,snp,allele_class)
             VALUES (1,1,'x','S83L','wildtype');
-        INSERT INTO unitig_antibiotic_overlap(unitig_id,antibiotic_a,antibiotic_b,same_class)
-            VALUES (1,'ampicillin','cefotaxime',0);
+        INSERT INTO unitig_antibiotic_overlap(unitig_id,organism,antibiotic_a,antibiotic_b,same_class)
+            VALUES (1,'ecoli','ampicillin','cefotaxime',0);
         INSERT INTO validation_evidence(unitig_id,evidence_type,evidence_source,evidence_score,pipeline_run_id)
             VALUES (1,'blast','CARD 4.0.1',1e-40,'R1');
         INSERT INTO kb_metadata(id,kb_schema_version,card_version,zenodo_doi,license,n_unitigs,n_models)

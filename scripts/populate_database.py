@@ -148,22 +148,25 @@ def populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, hold
     m = (metrics or {}).get("metrics", metrics or {})
     ci = m.get("roc_auc_ci") or [None, None]
     auc_mean = auc_std = None
+    cv_method = None
     if holdout is not None and "seed" in holdout.columns:
         idx = holdout.set_index("seed")["roc_auc"]
         auc_mean = _f(idx.get("MEAN"))
         auc_std = _f(idx.get("STD"))
+        if "cv_method" in holdout.columns and len(holdout):
+            cv_method = str(holdout["cv_method"].iloc[0])  # constant per model (07b)
     man = manifest or {}
     conn.execute(
         """INSERT OR REPLACE INTO models
            (run_id, antibiotic, n_trees, operating_threshold, roc_auc,
             roc_auc_ci_low, roc_auc_ci_high, pr_auc, mcc, balanced_accuracy,
-            accuracy, auc_mean_seeds, auc_std_seeds)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            accuracy, auc_mean_seeds, auc_std_seeds, cv_method)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (run_id, antibiotic, _i(man.get("n_trees")),
          _f((metrics or {}).get("operating_threshold") or man.get("threshold")),
          _f(m.get("roc_auc")), _f(ci[0]), _f(ci[1]), _f(m.get("pr_auc")),
          _f(m.get("mcc")), _f(m.get("balanced_accuracy")), _f(m.get("accuracy")),
-         auc_mean, auc_std),
+         auc_mean, auc_std, cv_method),
     )
     return conn.execute("SELECT model_id FROM models WHERE run_id=? AND antibiotic=?",
                         (run_id, antibiotic)).fetchone()[0]

@@ -29,7 +29,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.6.0"
+KB_SCHEMA_VERSION = "0.6.1"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS models (
     accuracy        REAL,
     auc_mean_seeds  REAL,                    -- lineage-CV / 5-seed mean
     auc_std_seeds   REAL,                    -- lineage-CV / 5-seed std
+    cv_method       TEXT,                    -- lineage_group_kfold_Nfold (honest) | repeated_holdout_5seed (fallback)
     UNIQUE(run_id, antibiotic)
 );
 

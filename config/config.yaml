@@ -75,7 +75,7 @@ paths_organism:
 # ----------------------------------------------------------------------------
 provenance:
   card_version:     "4.0.1"   # CARD DB version used for BLAST annotation (citeable)
-  kb_schema_version: "0.6.0"
+  kb_schema_version: "0.6.1"
   # NCBI Entrez identity is configured under the `ncbi:` section below
   # (entrez_email / api_key); it is the single source for Step 09.
 
