@@ -1,46 +1,68 @@
 # ============================================================================
 # ORGANISM REGISTRY — single source of truth for multi-organism scale-out
 # ============================================================================
-# Adding a new organism = add a block here (enabled: true) + drop its data in
-# the matching data/raw/{organism}/ and data/external/{organism}/ folders.
-# No Python code changes are required (see SCALE_MLOPS_PLAN.md §9).
-# Accessed via scripts/lib/registry.py.
+# Adding a new organism = add a block here + drop its data in the matching
+# data/raw/{organism}/ and data/external/{organism}/ folders. No Python code
+# changes are required (see docs/SCALE_MLOPS_PLAN.md §9). Accessed via
+# scripts/lib/registry.py.
+#
+# SCHEMA 2.0 (2026-07-13): ESKAPEE-oriented (docs/literature/ESKAPEE1.md).
+# Each block now carries the biology that used to live only in the KB schema
+# (gram_stain, phylum) + ESKAPEE prioritisation, so the registry is the single
+# source of truth and populate_database reads these instead of hard-coding them.
+#   status:          done | in_progress | planned  (replaces the old `enabled`)
+#   eskapee_phase:   1 (thesis + 1st paper: Kp, Ec, Sa, Ab) | 2 (2nd paper: Pa, Efm, Enterobacter)
+#   priority_classes: the antibiotic classes this organism is the strongest showcase for
+# Slugs are lowercase snake_case (must match kb_figures._abbr and path templates).
+# `antibiotics:` for a not-yet-run (planned) organism is PROVISIONAL — curated
+# to its priority classes, refined when its pipeline actually runs.
 # ============================================================================
-schema_version: "1.0"
+schema_version: "2.0"
 
 organisms:
+  # ── Phase 1 (thesis + 1st SCI paper) ──────────────────────────────────────
   ecoli:
     display_name: "Escherichia coli"
     taxid: 562
+    gram_stain: negative
+    phylum: Pseudomonadota
+    eskapee_phase: 1
+    status: done
+    priority_classes: [cephalosporins, quinolones]
     metadata_file: "data/external/ecoli/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
     genomes_dir: "data/raw/ecoli/genomes"
     source: "BV-BRC"
     download_date: "2026-06-01"
     filter_criteria: "N50>=20000; max_contigs<=500; species=Escherichia coli"
-    # ML target antibiotics for this organism (subset of antibiotics.yaml):
-    antibiotics: [ampicillin, cefotaxime, ciprofloxacin, gentamicin]
-    enabled: true
+    # 7 models in the KB (schema 0.6.0):
+    antibiotics: [ampicillin, cefotaxime, ciprofloxacin, gentamicin, trimethoprim_sulfamethoxazole, ceftazidime, amoxicillin_clavulanic_acid]
 
-  # ---------------------------------------------------------------------------
-  # FUTURE ORGANISM TEMPLATE — disabled until data is available.
-  # Copy this block, fill in the paths, set enabled: true.
-  # ---------------------------------------------------------------------------
   kpneumoniae:
     display_name: "Klebsiella pneumoniae"
     taxid: 573
+    gram_stain: negative
+    phylum: Pseudomonadota
+    eskapee_phase: 1
+    status: done
+    priority_classes: [carbapenems]
     metadata_file: "data/external/kpneumoniae/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
     genomes_dir: "data/raw/kpneumoniae/genomes"
     source: "BV-BRC"
-    download_date: null
-    filter_criteria: null
-    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
-    enabled: false
+    download_date: "2026-07-03"
+    filter_criteria: "N50>=20000; max_contigs<=500; species=Klebsiella pneumoniae"
+    # 14 models in the KB (schema 0.6.0):
+    antibiotics: [amikacin, cefepime, cefotaxime, cefoxitin, ceftazidime, ciprofloxacin, gentamicin, imipenem, levofloxacin, meropenem, piperacillin_tazobactam, tetracycline, tobramycin, trimethoprim_sulfamethoxazole]
 
   staphylococcus_aureus:
     display_name: "Staphylococcus aureus"
     taxid: 1280
+    gram_stain: positive
+    phylum: Bacillota
+    eskapee_phase: 1
+    status: planned
+    priority_classes: [penicillins]   # methicillin/oxacillin (mecA/MRSA) surrogate: cefoxitin
     metadata_file: "data/external/staphylococcus_aureus/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
     genomes_dir: "data/raw/staphylococcus_aureus/genomes"
@@ -48,16 +70,72 @@ organisms:
     download_date: null
     filter_criteria: null
     antibiotics: [cefoxitin, oxacillin, ciprofloxacin, gentamicin, tetracycline, trimethoprim_sulfamethoxazole, erythromycin, clindamycin]
-    enabled: true
 
-  Pseudomonas_aeruginosa:
+  acinetobacter_baumannii:
+    display_name: "Acinetobacter baumannii"
+    taxid: 470
+    gram_stain: negative
+    phylum: Pseudomonadota
+    eskapee_phase: 1
+    status: planned
+    priority_classes: [carbapenems, polymyxins]   # OXA-23/24/58 + colistin (mcr/pmrAB)
+    metadata_file: "data/external/acinetobacter_baumannii/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/acinetobacter_baumannii/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    # PROVISIONAL — curate when its pipeline runs:
+    antibiotics: [meropenem, imipenem, colistin, ciprofloxacin, gentamicin, amikacin]
+
+  # ── Phase 2 (2nd SCI paper / advanced optimisation) ───────────────────────
+  pseudomonas_aeruginosa:
     display_name: "Pseudomonas aeruginosa"
     taxid: 287
+    gram_stain: negative
+    phylum: Pseudomonadota
+    eskapee_phase: 2
+    status: planned
+    priority_classes: [carbapenems]   # OprD loss + MexAB-OprM efflux + VIM (polygenic — hard)
     metadata_file: "data/external/pseudomonas_aeruginosa/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
     genomes_dir: "data/raw/pseudomonas_aeruginosa/genomes"
     source: "BV-BRC"
     download_date: null
     filter_criteria: null
-    antibiotics: [meropenem, ciprofloxacin, gentamicin, colistin]
-    enabled: false
+    # PROVISIONAL:
+    antibiotics: [meropenem, imipenem, ciprofloxacin, ceftazidime, cefepime, gentamicin, tobramycin, colistin]
+
+  enterococcus_faecium:
+    display_name: "Enterococcus faecium"
+    taxid: 1352
+    gram_stain: positive
+    phylum: Bacillota
+    eskapee_phase: 2
+    status: planned
+    priority_classes: [glycopeptides]   # vanA/vanB operons (VRE)
+    metadata_file: "data/external/enterococcus_faecium/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/enterococcus_faecium/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    # PROVISIONAL:
+    antibiotics: [vancomycin, teicoplanin, linezolid, ampicillin]
+
+  enterobacter_cloacae:
+    display_name: "Enterobacter cloacae complex"
+    taxid: 550
+    gram_stain: negative
+    phylum: Pseudomonadota
+    eskapee_phase: 2
+    status: planned
+    priority_classes: [cephalosporins, carbapenems]   # AmpC hyperproduction + KPC/NDM
+    metadata_file: "data/external/enterobacter_cloacae/metadata/amr_phenotypes.csv"
+    genome_id_column: "Genome ID"
+    genomes_dir: "data/raw/enterobacter_cloacae/genomes"
+    source: "BV-BRC"
+    download_date: null
+    filter_criteria: null
+    # PROVISIONAL (taxonomic contamination high — curate carefully):
+    antibiotics: [meropenem, imipenem, cefotaxime, ceftazidime, cefepime, ciprofloxacin, gentamicin]

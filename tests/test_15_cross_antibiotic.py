@@ -23,12 +23,13 @@ def mod(load_script):
 
 # --- pure functions --------------------------------------------------------
 def test_drug_family_collapses_betalactams(mod):
-    # penicillins + cephalosporins + carbapenems-others all collapse to one
-    # family so an ampicillin/cefotaxime pair reads as "within β-lactam" (H3),
+    # penicillins + cephalosporins + carbapenems + monobactams all collapse to
+    # one family so an ampicillin/cefotaxime pair reads as "within β-lactam" (H3),
     # while a non-β-lactam class is left untouched.
     assert mod._drug_family("penicillins") == "beta_lactam"
     assert mod._drug_family("cephalosporins") == "beta_lactam"
-    assert mod._drug_family("beta_lactams_carbapenems_others") == "beta_lactam"
+    assert mod._drug_family("carbapenems") == "beta_lactam"
+    assert mod._drug_family("monobactams") == "beta_lactam"
     assert mod._drug_family("quinolones") == "quinolones"
     assert mod._drug_family(None) is None
 

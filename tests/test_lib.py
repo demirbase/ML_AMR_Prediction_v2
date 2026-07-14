@@ -54,14 +54,30 @@ def test_registry_classes_structure():
 def test_registry_reverse_index():
     assert registry.antibiotic_to_class("gentamicin") == "aminoglycosides"
     assert registry.antibiotic_to_class("ciprofloxacin") == "quinolones"
+    # carbapenems are their own class (schema 2.0), not lumped with beta-lactams
+    assert registry.antibiotic_to_class("meropenem") == "carbapenems"
     assert registry.antibiotic_to_class("not_a_real_drug") is None
+
+
+def test_registry_metadata_accessors():
+    # mechanism_type resolves via class; who_aware is per-antibiotic (registry = source)
+    assert registry.antibiotic_mechanism_type("ciprofloxacin") == "target_snp"
+    assert registry.antibiotic_mechanism_type("meropenem") == "acquired"
+    assert registry.antibiotic_mechanism_type("not_a_real_drug") is None
+    assert registry.antibiotic_who_aware("colistin") == "Reserve"
+    assert registry.antibiotic_who_aware("ampicillin") == "Access"
+    assert registry.antibiotic_who_aware("not_a_real_drug") is None
 
 
 def test_registry_targets_and_validation():
     targets = registry.list_targets(enabled_only=True)
+    # ecoli + kpneumoniae are status: done -> active targets (schema 2.0)
     assert ("ecoli", "gentamicin") in targets
-    # kpneumoniae is enabled: false -> excluded
-    assert all(org == "ecoli" for org, _ab in targets)
+    assert ("kpneumoniae", "meropenem") in targets
+    # eskapee_phase filter: pseudomonas is phase 2, excluded from phase-1 list
+    phase1 = registry.list_targets(phase=1)
+    assert ("ecoli", "gentamicin") in phase1
+    assert all(org != "pseudomonas_aeruginosa" for org, _ab in phase1)
     assert registry.validate_target("ecoli", "gentamicin") is True
     assert registry.validate_target("ecoli", "meropenem") is False
 
@@ -70,7 +86,12 @@ def test_registry_targets_and_validation():
 # config / path resolution
 # ---------------------------------------------------------------------------
 def test_resolve_path_organism_antibiotic():
-    p = resolve_path("matrix_dir", organism="ecoli", antibiotic="gentamicin")
+    # Force the k-mer (base) layout so this templating check is independent of
+    # config.yaml's feature_repr default (now 'unitig'); the redirect itself is
+    # covered by test_resolve_path_feature_repr_switch below.
+    base = load_config()
+    cfg = {**base, "preprocessing": {**base.get("preprocessing", {}), "feature_repr": "kmer"}}
+    p = resolve_path("matrix_dir", organism="ecoli", antibiotic="gentamicin", config=cfg)
     assert p.as_posix().endswith("data/processed/ecoli/gentamicin/matrix")
 
 

@@ -54,7 +54,7 @@ from lib.registry import antibiotic_to_class  # noqa: E402
 _BETA_LACTAM_CLASSES = {
     "penicillins",
     "cephalosporins",
-    "beta_lactams_carbapenems_others",
+    "carbapenems",
     "monobactams",
 }
 

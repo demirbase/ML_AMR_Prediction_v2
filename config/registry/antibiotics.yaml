@@ -6,8 +6,22 @@
 # Accessed via scripts/lib/registry.py.
 #
 # Adding/renaming an antibiotic class = editing this file only. No code change.
+#
+# TAXONOMY (schema 2.0, 2026-07-13): mechanism-based classes aligned to the
+# CARD ARO ontology (see docs/literature/ESKAPEE1.md §3-5). Two deliberate
+# design rules for the ML pipeline:
+#   1. CARBAPENEMS are their OWN class (never lumped under beta-lactams) — a
+#      blaKPC/blaNDM carbapenemase is mechanistically miles from a blaTEM
+#      penicillinase; merging them would drown the specific signal in noise.
+#   2. NO "others" grab-bag — glycopeptides / polymyxins / oxazolidinones /
+#      phenicols / rifamycins / fosfomycins / lipopeptides / nitrofurans are
+#      each their own mechanism class. A drug with too little data is left OUT
+#      of scope, never merged into a mixed-mechanism bucket (that makes the
+#      genotype→phenotype map non-learnable).
+# Generic/inhibitor tokens with no clean ML target (bare "beta-lactam",
+# "sulbactam") are intentionally UNCLASSIFIED (antibiotic_to_class -> None).
 # ============================================================================
-schema_version: "1.0"
+schema_version: "2.0"
 
 classes:
   penicillins:
@@ -47,17 +61,19 @@ classes:
       - cefpirome
       - "cefepime/taniborbactam"
 
-  beta_lactams_carbapenems_others:
-    display_name: "Beta-Lactams: Carbapenems & Others"
+  carbapenems:
+    display_name: "Carbapenems"
     members:
       - meropenem
       - imipenem
       - ertapenem
       - doripenem
-      - aztreonam
-      - beta-lactam
-      - sulbactam
       - "meropenem/vaborbactam"
+
+  monobactams:
+    display_name: "Monobactams"
+    members:
+      - aztreonam
 
   aminoglycosides:
     display_name: "Aminoglycosides"
@@ -92,11 +108,15 @@ classes:
   tetracyclines:
     display_name: "Tetracyclines"
     members:
-      - tigecycline
       - tetracycline
       - doxycycline
       - minocycline
       - oxytetracycline
+
+  glycylcyclines:
+    display_name: "Glycylcyclines"
+    members:
+      - tigecycline
 
   macrolides:
     display_name: "Macrolides"
@@ -111,19 +131,47 @@ classes:
       - clindamycin
       - lincomycin
 
-  others:
-    display_name: "Others"
+  glycopeptides:
+    display_name: "Glycopeptides"
+    members:
+      - vancomycin
+      - teicoplanin
+
+  polymyxins:
+    display_name: "Polymyxins"
+    members:
+      - colistin
+      - "polymyxin B"
+
+  oxazolidinones:
+    display_name: "Oxazolidinones"
+    members:
+      - linezolid
+
+  phenicols:
+    display_name: "Phenicols"
     members:
       - chloramphenicol
-      - nitrofurantoin
-      - colistin
-      - fosfomycin
+
+  rifamycins:
+    display_name: "Rifamycins"
+    members:
       - rifampin
+
+  fosfomycins:
+    display_name: "Fosfomycins"
+    members:
+      - fosfomycin
+
+  lipopeptides:
+    display_name: "Lipopeptides"
+    members:
       - daptomycin
-      - linezolid
-      - polymyxin B
-      - teicoplanin
-      - vancomycin
+
+  nitrofurans:
+    display_name: "Nitrofurans"
+    members:
+      - nitrofurantoin
 
 # ============================================================================
 # ANTIBIOTIC NAME ALIASES (raw-source spelling variants / typos -> canonical)
@@ -193,3 +241,75 @@ amrfinder_keywords:
   oxacillin:                     [OXACILLIN, METHICILLIN]
   erythromycin:                  [ERYTHROMYCIN, MACROLIDE]
   clindamycin:                   [CLINDAMYCIN, LINCOSAMIDE]
+
+# ============================================================================
+# DOMINANT RESISTANCE MECHANISM per class — acquired gene vs target-gene SNP.
+# The thesis "acquired vs target-SNP" showcase axis; consumed by
+# populate_database (antibiotics.mechanism_type via lib.registry). For classes
+# not yet in the KB the value is the literature-dominant style (provisional —
+# refine when that class is actually modelled).
+# ============================================================================
+class_mechanism_type:
+  penicillins: acquired
+  cephalosporins: acquired
+  carbapenems: acquired
+  monobactams: acquired
+  aminoglycosides: acquired
+  quinolones: target_snp            # gyrA/parC
+  folate_pathway_inhibitors: acquired
+  tetracyclines: acquired
+  glycylcyclines: acquired
+  macrolides: acquired
+  lincosamides: acquired
+  glycopeptides: acquired           # vanA/vanB operons
+  polymyxins: target_snp            # pmrAB/lpx chromosomal dominant (mcr acquired also exists)
+  oxazolidinones: target_snp        # 23S rRNA / rplC-rplD (cfr acquired is a minority)
+  phenicols: acquired               # cat genes
+  rifamycins: target_snp            # rpoB
+  fosfomycins: acquired             # fosA (chromosomal murA/transporter SNPs also occur)
+  lipopeptides: target_snp          # mprF/cls
+  nitrofurans: target_snp           # nfsA/nfsB
+
+# ============================================================================
+# WHO AWaRe 2023 category per antibiotic (Access / Watch / Reserve). Clinical
+# stewardship context only — NOT an ML class axis (ESKAPEE1.md §3). Consumed by
+# populate_database (antibiotics.who_aware). Antibiotics not listed -> null.
+# ============================================================================
+who_aware:
+  ampicillin: Access
+  amoxicillin: Access
+  amoxicillin_clavulanic_acid: Access
+  penicillin: Access
+  oxacillin: Access
+  piperacillin_tazobactam: Watch
+  cefotaxime: Watch
+  ceftazidime: Watch
+  ceftriaxone: Watch
+  cefepime: Watch
+  cefoxitin: Watch
+  cefazolin: Watch
+  meropenem: Watch
+  imipenem: Watch
+  ertapenem: Watch
+  aztreonam: Watch
+  ciprofloxacin: Watch
+  levofloxacin: Watch
+  gentamicin: Access
+  amikacin: Access
+  tobramycin: Access
+  tetracycline: Access
+  tigecycline: Reserve
+  trimethoprim_sulfamethoxazole: Access
+  trimethoprim: Access
+  erythromycin: Watch
+  clindamycin: Access
+  vancomycin: Watch
+  teicoplanin: Watch
+  linezolid: Reserve
+  daptomycin: Reserve
+  colistin: Reserve
+  "polymyxin B": Reserve
+  chloramphenicol: Access
+  rifampin: Watch
+  fosfomycin: Access
+  nitrofurantoin: Access

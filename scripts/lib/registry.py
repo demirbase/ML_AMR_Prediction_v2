@@ -99,6 +99,38 @@ def antibiotic_to_class(ab_id):
 
 
 @lru_cache(maxsize=1)
+def _class_mechanism_index():
+    """{class_id: 'acquired'|'target_snp'} from the class_mechanism_type block."""
+    return dict(_antibiotics_doc().get("class_mechanism_type", {}) or {})
+
+
+@lru_cache(maxsize=1)
+def _who_aware_index():
+    """{antibiotic: 'Access'|'Watch'|'Reserve'} from the who_aware block."""
+    return {str(k): v for k, v in (_antibiotics_doc().get("who_aware", {}) or {}).items()}
+
+
+def antibiotic_mechanism_type(ab_id):
+    """Dominant resistance-mechanism style ('acquired' | 'target_snp') for an
+    antibiotic, resolved via its class. None if antibiotic/class is unregistered."""
+    cls = antibiotic_to_class(ab_id)
+    return _class_mechanism_index().get(cls) if cls else None
+
+
+def antibiotic_who_aware(ab_id):
+    """WHO AWaRe 2023 category ('Access' | 'Watch' | 'Reserve') or None."""
+    return _who_aware_index().get(str(ab_id))
+
+
+def clear_cache():
+    """Drop all registry lru_caches — call in tests that mutate the registry YAML
+    files at runtime so a stale cached parse is not reused."""
+    for fn in (_organisms_doc, _antibiotics_doc, _ab_to_class_index, _alias_index,
+               _class_mechanism_index, _who_aware_index):
+        fn.cache_clear()
+
+
+@lru_cache(maxsize=1)
 def _alias_index():
     """
     Build {lowercased name -> canonical antibiotic name}.
@@ -138,16 +170,34 @@ def normalize_antibiotic(name):
     return _alias_index().get(key.lower(), key)
 
 
-def list_targets(enabled_only=True):
+# Organism `status:` values that count as an active ML target (schema 2.0).
+# Backward-compatible with the legacy boolean `enabled:` field.
+_ACTIVE_STATUS = {"done", "in_progress", "planned"}
+
+
+def is_active(block):
+    """True if an organism block is an active target. Prefers the new
+    ``status:`` field (schema 2.0); falls back to the legacy ``enabled:`` bool."""
+    status = block.get("status")
+    if status is not None:
+        return status in _ACTIVE_STATUS
+    return bool(block.get("enabled", False))
+
+
+def list_targets(enabled_only=True, phase=None):
     """
     Return [(organism_id, antibiotic_id), ...] across the registry.
 
     Args:
-        enabled_only: if True, only organisms with ``enabled: true`` are included.
+        enabled_only: if True, only ACTIVE organisms are included (``status`` in
+            done/in_progress/planned, or legacy ``enabled: true``).
+        phase: optional int — restrict to organisms with this ``eskapee_phase``.
     """
     targets = []
     for org_id, block in load_organisms().items():
-        if enabled_only and not block.get("enabled", False):
+        if enabled_only and not is_active(block):
+            continue
+        if phase is not None and block.get("eskapee_phase") != phase:
             continue
         for ab in block.get("antibiotics", []):
             targets.append((org_id, ab))

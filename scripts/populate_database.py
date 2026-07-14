@@ -36,7 +36,12 @@ import pandas as pd
 
 from lib.config import load_config, resolve_path, get_target
 from lib.kb_schema import KB_SCHEMA_VERSION, create_schema, ensure_unique_indexes
-from lib.registry import antibiotic_to_class
+from lib.registry import (
+    antibiotic_to_class,
+    antibiotic_mechanism_type,
+    antibiotic_who_aware,
+    load_organisms,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -389,41 +394,23 @@ def update_metadata(conn, card_version):
 # ---------------------------------------------------------------------------
 # 0.5.0 reference/meta populators.
 # ---------------------------------------------------------------------------
-_ORG_META = {  # slug -> (display_name, taxid, gram_stain, phylum)
-    "ecoli": ("Escherichia coli", 562, "negative", "Pseudomonadota"),
-    "kpneumoniae": ("Klebsiella pneumoniae", 573, "negative", "Pseudomonadota"),
-    "saureus": ("Staphylococcus aureus", 1280, "positive", "Bacillota"),
-    "staphylococcus_aureus": ("Staphylococcus aureus", 1280, "positive", "Bacillota"),
-}
-_AWARE = {  # WHO AWaRe 2023 category
-    "ampicillin": "Access", "amoxicillin": "Access", "amoxicillin_clavulanic_acid": "Access",
-    "piperacillin_tazobactam": "Watch", "cefotaxime": "Watch", "ceftazidime": "Watch",
-    "ceftriaxone": "Watch", "cefepime": "Watch", "cefoxitin": "Watch", "cefazolin": "Watch",
-    "meropenem": "Watch", "imipenem": "Watch", "ciprofloxacin": "Watch", "levofloxacin": "Watch",
-    "gentamicin": "Access", "amikacin": "Access", "tobramycin": "Access", "tetracycline": "Access",
-    "trimethoprim_sulfamethoxazole": "Access", "trimethoprim": "Access", "penicillin": "Access",
-    "colistin": "Reserve", "oxacillin": "Access", "erythromycin": "Watch", "clindamycin": "Access",
-}
-_MECH = {  # dominant confirmed-mechanism style: acquired gene vs target SNP
-    "quinolones": "target_snp",
-    "penicillins": "acquired", "cephalosporins": "acquired",
-    "beta_lactams_carbapenems_others": "acquired", "aminoglycosides": "acquired",
-    "tetracyclines": "acquired", "folate_pathway_inhibitors": "acquired",
-    "macrolides": "acquired", "lincosamides": "acquired",
-}
-
-
 def populate_organisms(conn):
-    for slug, (dn, tx, gram, phy) in _ORG_META.items():
-        conn.execute("INSERT OR REPLACE INTO organisms(organism, display_name, taxid, gram_stain, phylum) "
-                     "VALUES (?,?,?,?,?)", (slug, dn, tx, gram, phy))
+    """Populate the organism reference table from the registry (single source of
+    truth — organisms.yaml carries display_name / taxid / gram_stain / phylum)."""
+    for slug, blk in load_organisms().items():
+        conn.execute(
+            "INSERT OR REPLACE INTO organisms(organism, display_name, taxid, gram_stain, phylum) "
+            "VALUES (?,?,?,?,?)",
+            (slug, blk.get("display_name"), blk.get("taxid"),
+             blk.get("gram_stain"), blk.get("phylum")))
 
 
 def populate_antibiotics_meta(conn):
-    """Backfill AWaRe + mechanism_type on whatever antibiotic rows exist so far."""
-    for ab, cls in conn.execute("SELECT antibiotic, drug_class FROM antibiotics").fetchall():
+    """Backfill WHO AWaRe + mechanism_type on whatever antibiotic rows exist so
+    far, resolved from the registry (antibiotics.yaml) — no hard-coded tables."""
+    for (ab,) in conn.execute("SELECT antibiotic FROM antibiotics").fetchall():
         conn.execute("UPDATE antibiotics SET mechanism_type=?, who_aware=? WHERE antibiotic=?",
-                     (_MECH.get(cls), _AWARE.get(ab), ab))
+                     (antibiotic_mechanism_type(ab), antibiotic_who_aware(ab), ab))
 
 
 def _count_features(matrix_dir):

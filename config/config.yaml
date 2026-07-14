@@ -19,7 +19,7 @@ project:
   organism: "ecoli"  # Organism registry slug (see config/registry/organisms.yaml)
   organism_display: "Escherichia coli"  # Human-readable name (display only)
   model: "xgboost"  # ML model
-  version: "M4-pro"
+  version: "0.6.0"  # aligned to the KB schema / data state (see provenance below)
 
 # ----------------------------------------------------------------------------
 # REGISTRY (single source of truth for organisms & antibiotic classes)
@@ -120,8 +120,8 @@ paths_organism:
 # PROVENANCE (reproducibility / future Knowledge Base — SCALE_MLOPS_PLAN.md §4.1)
 # ----------------------------------------------------------------------------
 provenance:
-  card_version:     null      # e.g. "CARD v3.2.9" — fill in before BLAST for citeability
-  kb_schema_version: "v0.1.0"
+  card_version:     "4.0.1"   # CARD DB version used for BLAST annotation (citeable)
+  kb_schema_version: "0.6.0"
   # NCBI Entrez identity is configured under the `ncbi:` section below
   # (entrez_email / api_key); it is the single source for Step 09.
 
@@ -151,7 +151,7 @@ preprocessing:
   chunk_size: 200  # Genomes per matrix chunk (for RAM management)
   
   # Feature engineering
-  encoding: "binary"  # Binary (presence/absence) or frequency-basedß
+  encoding: "binary"  # Binary (presence/absence) or frequency-based
   # Binary is preferred for assembled genomes
 
   # Feature representation consumed DOWNSTREAM (03b/04/05/06/07/07b). This is the
@@ -161,7 +161,7 @@ preprocessing:
   # Flipping this makes the WHOLE HPO/train/eval chain run on unitigs with NO
   # per-script change (resolve_path redirects the matrix dir). The raw-k-mer
   # baseline under …/matrix is preserved either way (03u writes a separate dir).
-  feature_repr: "kmer"   # kmer | unitig
+  feature_repr: "unitig"   # unitig (thesis method — default) | kmer (raw-k-mer baseline, opt-in)
 
 # ----------------------------------------------------------------------------
 # UNITIG REPRESENTATION (ROADMAP §0.1 M12 — replaces raw k-mers downstream)
