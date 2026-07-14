@@ -205,12 +205,15 @@ def build_cv_splits(y_all, n_total, genomes_csv, lineage_csv, n_splits, seed=42)
     """
     if lineage_csv.exists() and genomes_csv.exists():
         try:
-            from lib.lineage import load_lineage, group_kfold_masks
+            from lib.lineage import load_lineage, group_kfold_masks, no_group_leakage
             groups = load_lineage(genomes_csv, lineage_csv)
             n_clusters = len(set(groups.tolist()))
             if len(groups) == n_total and n_clusters >= n_splits:
                 masks = group_kfold_masks(y_all, groups, n_splits=n_splits,
                                           stratified=True, seed=seed)
+                # watertight guard: no lineage may span train+test in any fold
+                if not all(no_group_leakage(tr, te, groups) for tr, te in masks):
+                    raise RuntimeError("lineage leakage detected in group-kfold masks")
                 return masks, f"lineage_group_kfold_{n_splits}fold", list(range(len(masks)))
             print(f"  ⚠ lineage labels unusable (aligned {len(groups)} vs {n_total} rows, "
                   f"{n_clusters} clusters < {n_splits} folds); using 5-seed holdout.")
@@ -266,6 +269,13 @@ def main():
     splits, cv_method, split_labels = build_cv_splits(
         y_all, n_total, genomes_csv, lineage_dir / "poppunk_clusters.csv", n_splits)
     print(f"  CV scheme: {cv_method} ({len(splits)} splits)")
+    if not cv_method.startswith("lineage_group_kfold"):
+        print("  " + "!" * 74)
+        print("  ⚠ WARNING: NO lineage-aware CV (PopPUNK clusters absent/unusable).")
+        print("  ⚠ The reported AUC is a 5-seed holdout and may be lineage-INFLATED —")
+        print("  ⚠ it is NOT a lineage-corrected metric. Run 02c PopPUNK for this")
+        print(f"  ⚠ organism ({ORGANISM}) before trusting auc_mean_seeds as lineage-CV.")
+        print("  " + "!" * 74)
 
     # Splits run sequentially; each split's full-data boosting already saturates
     # the allocated cores (one DMatrix over all train rows). The 'seed' column in
@@ -310,6 +320,10 @@ def main():
         {'seed': 'STD', 'roc_auc': auc_std, 'n_top_features': np.nan},
         {'seed': 'MEAN_JACCARD', 'roc_auc': jaccard, 'n_top_features': np.nan},
     ])], ignore_index=True)
+    # Persist the CV scheme so downstream (populate/KB) can tell an HONEST
+    # lineage-CV AUC from a fallback holdout — auc_mean_seeds is only "lineage-CV"
+    # when cv_method == lineage_group_kfold_* (M3-3).
+    summary['cv_method'] = cv_method
     summary_path = EVAL_DIR / f"10_repeated_holdout_summary_{TARGET_ANTIBIOTIC}.csv"
     summary.to_csv(summary_path, index=False)
 
