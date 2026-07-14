@@ -5,7 +5,37 @@
 
 ---
 
-# §0.-3 — LATEST STATE (2026-07-07 evening) — 3rd ORGANISM (S. aureus) + K. pneu BREADTH IN FLIGHT — READ FIRST, supersedes §0.-2 and all below
+# §0.-4 — LATEST STATE (2026-07-09) — KB SCHEMA 0.6.0, 21 MODELS COMPLETE, EXTERNAL VALIDATION + OVERLAP DONE — READ FIRST, supersedes ALL below
+
+> **Repo HEAD `b413f84`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Advisor meeting prep session — KB brought to a polished, presentable "final" state for a Friday meeting.
+
+### What this session did (all pushed unless noted)
+- **21 models COMPLETE** (E. coli 7 + K. pneu 14). Finished the 4 in-flight K. pneu antibiotics: **cefotaxime m18, levofloxacin m19, ceftazidime m20, amikacin m21** (each full chain 03u→…→14→populate). All 7 validation layers present in every model.
+- **KB schema 0.4.0 → 0.6.0** (`scripts/lib/kb_schema.py`): added tables **`organisms`** (gram/phylum), **`external_concordance`** (M13), + columns `antibiotics.mechanism_type`/`who_aware` (WHO AWaRe), `models.n_features`; **`unitig_antibiotic_overlap` made organism-aware** (0.6.0, organism in PK — unified KB must not merge same drug across organisms).
+- **`scripts/migrate_kb_050.py`** — additive backfill (does NOT re-insert models → avoids the FK issue). Run with `AMR_FEATURE_REPR=unitig AMR_CARD_VERSION=4.0.1`. **This is how the KB is updated now, not full re-populate.**
+- **15_cross_antibiotic** refactored organism-aware (per-organism stable_sets/overlap; `--db results/kb/amrk.db`). Ran for ecoli+kpneu → `unitig_antibiotic_overlap` filled (ecoli 18 + kpneu 13).
+- **16_external_concordance** run for BOTH organisms → `external_concordance` = 48 rows (model + AMRFinderPlus + ResFinder, leakage-free head-to-head on held-out test genomes). **K. pneu afp/resfinder produced via `$AMR_WORK/run_16_kpneu.slurm`** (40-core parallel, DB paths from `data/external/{amrfinder_db,resfinder_db,pointfinder_db}`; amrfinder `--organism Klebsiella_pneumoniae`, resfinder `--db_path_res/--db_path_point`). Flagship result: **K. pneu ciprofloxacin model bACC 0.926 vs AMRFinderPlus 0.538 / ResFinder 0.540** (unitig model catches gyrA/parC SNP that gene-based tools miss).
+- **9 thesis figures** (`scripts/kb_figures.py`): 00 overview, 01 performance, 02 cpss/pfer, 03 cross-org, 04 mechanism-heatmap, 05 significance (real-vs-null), 06 evidence-layers (7-layer backbone), 07 external (model-vs-tools) + `why_unitigs_not_kmers` SVG concept diagram (visualize tool). All in `results/figures/` (Mac + TRUBA).
+- **`scripts/kb_app.py`** fixed: default `results/kb/amrk.db` (was old per-org), tab5 reads `external_concordance` table, tab3 organisms panel, **+ new "Ham tablolar" tab (all 13 raw tables)**. ⚠️ **kb_app.py "Ham tablolar" tab NOT yet committed/pushed** (local only).
+- **Registry curation** (commit cfd9dc5): oxacillin (penicillins), macrolides+lincosamides classes (7→9), AFP keywords for amikacin/levofloxacin/oxacillin/erythromycin/clindamycin.
+- **2 docs NOT yet committed** (local Mac only): `docs/KB_ACIKLAMA.md` (every table/column explained) + `docs/KB_KAVRAMLAR.md` (concepts + real KB examples, for the advisor).
+- **Backups on Drive** (`gdrive:TRUBA_25626/scratch_amr/backup/`): `amr_results_20260709_*.tar.gz` (genome_qc + rtab + amrfinder/resfinder raw excluded → ~40MB meaningful backup).
+
+### KB final state (verified, `results/kb/amrk.db`, schema 0.6.0)
+21 models · 2 organisms · 7 drug classes · 2363 unitigs · 13 tables all populated · external_concordance 48 · overlap organism-aware · card 4.0.1 · every model 7 evidence layers. **Known caveat:** cefotaxime(Kp) external head-to-head model bACC≈0.495 (small n=200 test slice; lineage-CV is 0.77) — have the explanation ready for the advisor.
+
+### NEXT SESSION — resume order
+1. **Commit + push the uncommitted local work** (needs a fresh fine-grained PAT, no Co-Authored-By): `scripts/kb_app.py` (Ham tablolar tab) + `docs/KB_ACIKLAMA.md` + `docs/KB_KAVRAMLAR.md`. Then optionally `git checkout origin/main -- scripts/kb_app.py` on TRUBA.
+2. **S. aureus (3rd organism) — STILL PENDING** (paused before the meeting). The blocker + fix are known: 03u writes genomes in phenotype-blocked order (clonal MRSA) → 04's chunk-split gives single-class folds → nan. **Fix ready but NOT applied:** add a deterministic seed-42 shuffle of `valid_genomes` in `scripts/03u_unitig_matrix.py:select_genomes` (before return), then re-run cefoxitin 03u (unitig_all store exists → fast) → Faz1 → full chain. Then the other 7 staph antibiotics (registry already curated: cefoxitin/oxacillin/ciprofloxacin/gentamicin/tetracycline/tmp-smx/erythromycin/clindamycin). S. aureus completes the gram-positive cross-phylum claim. (Also run 02c PopPUNK for staph so 07b lineage-CV is real, not fallback.)
+3. **M10 Zenodo deposit** — last must-have; deposit the 21-model 0.6.0 KB, stamp `kb_metadata.zenodo_doi`.
+4. **Optional polish:** external_concordance currently head-to-head (test-set); the broader csv-based afp/resfinder-vs-phenotype (all genomes, more antibiotics) is in `16_concordance_{org}.csv` if a wider table is wanted. Docs (METHODOLOGY/ROADMAP) fold-in of the 0.6.0 schema + 21-model panel.
+
+### Operational reminders (also in memory `amr-truba-gotchas`)
+- SLURM: submit `sbatch --chdir=$AMR_WORK --export=ALL,... $AMR_HOME/slurm/<s>.slurm` (WorkDir must be scratch; barbun needs ≥20 cores → use `-c40`). Interactive Faz2a needs `export AMR_FEATURE_REPR=unitig`. Per-antibiotic chain is STRICTLY SEQUENTIAL (bio 10-13b fully done BEFORE pyseer 14; verify `14_pyseer_significant_*.csv` exists before populate + before `rm rtab`). `populate`/`migrate` need target via inline env; run from `$AMR_HOME`. `git checkout origin/main -- <file>` needs a `git fetch origin` first. No `sqlite3` CLI in container → use python. amr-tools.sif DBs live in `data/external/{amrfinder_db,resfinder_db,pointfinder_db}` (container has none).
+
+---
+
+# §0.-3 — LATEST STATE (2026-07-07 evening) — 3rd ORGANISM (S. aureus) + K. pneu BREADTH IN FLIGHT — superseded by §0.-4 above
 
 > **Repo HEAD `4946883`** (pushed). Two commits since §0.-2 (HEAD `2528437`): `ac041e4` (populate now fills `antibiotics.drug_class` from registry — was hardcoded `None`) + `4946883` (`scripts/kb_tables.py` tidy-CSV export + `scripts/kb_figures.py` thesis figures). Local untracked: `backup/`, `figures/`; `TRUBA_Proje_Kurulum_Rehberi.md` staged as deleted.
 

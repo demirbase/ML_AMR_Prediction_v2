@@ -119,9 +119,9 @@ if search:
     mask = mask | f["sequence"].fillna("").str.lower().str.contains(search)
     f = f[mask]
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ["🔬 Biyobelirteçler", "🧩 Kanıt zinciri", "📊 Model & Provenance",
-     "🔗 Çapraz-antibiyotik (H3)", "✅ Dış doğrulama (M13)"])
+     "🔗 Çapraz-antibiyotik (H3)", "✅ Dış doğrulama (M13)", "🗄️ Ham tablolar"])
 
 with tab1:
     st.caption(f"{len(f)} unitig (filtreli). Güven seviyesi CARD identity+coverage'a dayanır.")
@@ -219,5 +219,20 @@ with tab5:
     else:
         st.info("`external_concordance` tablosu boş. `16_external_concordance.py` çalıştır + "
                 "`migrate_kb_050.py` ile KB'ye yükle.")
+
+with tab6:
+    st.caption("KB'nin 13 ham tablosu (şema 0.6.0). Her tablonun/kolonun anlamı: "
+               "`docs/KB_ACIKLAMA.md`.")
+    _order = ["kb_metadata", "organisms", "antibiotics", "pipeline_runs", "models",
+              "unitigs", "unitig_model_scores", "blast_annotations",
+              "unitig_background_frequency", "variant_snp_check",
+              "unitig_antibiotic_overlap", "validation_evidence", "external_concordance"]
+    names = [t for t in _order if t in T] + [t for t in sorted(T) if t not in _order]
+    tname = st.selectbox("Tablo", names)
+    df = T.get(tname, pd.DataFrame())
+    st.write(f"**{tname}** — {len(df)} satır × {len(df.columns)} kolon")
+    st.dataframe(df, use_container_width=True, height=500)
+    st.download_button(f"{tname}.csv indir", df.to_csv(index=False).encode("utf-8"),
+                       file_name=f"{tname}.csv", mime="text/csv")
 
 st.sidebar.caption("ROADMAP S8/N1 · CC-BY-4.0")
