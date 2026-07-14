@@ -17,7 +17,7 @@ Endpoints (ROADMAP §1.8):
 
 Run:
     pip install fastapi uvicorn
-    AMR_KB_DB=results/ecoli/kb/amrk.db uvicorn scripts.kb_api:app --reload
+    AMR_KB_DB=results/kb/amrk.db uvicorn scripts.kb_api:app --reload
     # or: python scripts/kb_api.py   (serves on :8000)
 """
 
@@ -30,7 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from lib import kb_queries as Q  # noqa: E402
 
-DB_PATH = Path(os.environ.get("AMR_KB_DB", PROJECT_ROOT / "results" / "ecoli" / "kb" / "amrk.db"))
+DB_PATH = Path(os.environ.get("AMR_KB_DB", PROJECT_ROOT / "results" / "kb" / "amrk.db"))
 
 
 def _create_app():
@@ -92,10 +92,10 @@ def _create_app():
             c.close()
 
     @app.get("/api/v1/overlap")
-    def overlap(ab1: str, ab2: str):
+    def overlap(ab1: str, ab2: str, organism: str = None):
         c = _conn()
         try:
-            return Q.get_overlap(c, ab1, ab2)
+            return Q.get_overlap(c, ab1, ab2, organism=organism)
         finally:
             c.close()
 

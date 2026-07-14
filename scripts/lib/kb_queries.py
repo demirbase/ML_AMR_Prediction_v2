@@ -125,16 +125,22 @@ def get_unitig(conn, sequence):
     }
 
 
-def get_overlap(conn, ab1, ab2):
-    """Cross-antibiotic shared stable unitigs for a pair (order-independent)."""
+def get_overlap(conn, ab1, ab2, organism=None):
+    """Cross-antibiotic shared stable unitigs for a pair (order-independent).
+
+    The overlap table is organism-aware (schema 0.6.0): pass ``organism`` to keep
+    a same-drug pair from being merged across species; None returns all organisms.
+    """
+    org_clause = " AND o.organism = ?" if organism else ""
+    params = (ab1, ab2, ab2, ab1) + ((organism,) if organism else ())
     rows = _rows(conn,
-        """SELECT o.unitig_id, u.sequence, o.same_class,
+        f"""SELECT o.unitig_id, o.organism, u.sequence, o.same_class,
                   (SELECT group_concat(DISTINCT gene_symbol) FROM blast_annotations b
                     WHERE b.unitig_id = o.unitig_id AND b.tier IN ('confirmed','candidate')
                       AND gene_symbol IS NOT NULL) AS genes
              FROM unitig_antibiotic_overlap o JOIN unitigs u ON u.unitig_id = o.unitig_id
-            WHERE (antibiotic_a = ? AND antibiotic_b = ?)
-               OR (antibiotic_a = ? AND antibiotic_b = ?)""",
-        (ab1, ab2, ab2, ab1))
-    return {"antibiotic_a": ab1, "antibiotic_b": ab2,
+            WHERE ((antibiotic_a = ? AND antibiotic_b = ?)
+               OR (antibiotic_a = ? AND antibiotic_b = ?)){org_clause}""",
+        params)
+    return {"antibiotic_a": ab1, "antibiotic_b": ab2, "organism": organism,
             "n_shared": len(rows), "shared_unitigs": rows}
