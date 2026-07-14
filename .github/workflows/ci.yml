@@ -30,10 +30,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff>=0.4
+          pip install ruff>=0.4 mypy>=1.8
 
       - name: Lint (ruff)
         run: ruff check .
+
+      - name: Validate registry (organisms/antibiotics consistency)
+        run: python scripts/validate_registry.py
+
+      - name: Type-check lib/ (mypy, advisory)
+        run: mypy
+        continue-on-error: true
 
       - name: Run tests (unit + smoke)
         run: pytest -ra
