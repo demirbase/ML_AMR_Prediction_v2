@@ -1,0 +1,17 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+%files
+    environment.yml /opt/environment.yml
+
+%post
+    mamba env create -f /opt/environment.yml -p /opt/amr-env
+    mamba clean -a -y
+
+%environment
+    export PATH=/opt/amr-env/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+%runscript
+    exec python "$@"

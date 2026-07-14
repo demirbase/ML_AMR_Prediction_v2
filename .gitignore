@@ -25,6 +25,9 @@ amr_sunum.js
 results/
 logs/
 
+# Local backups (tarballs synced to Drive — never version-controlled)
+backup/
+
 # ============================================================================
 # CACHES
 # ============================================================================
