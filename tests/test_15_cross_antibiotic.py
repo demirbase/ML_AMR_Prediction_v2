@@ -164,7 +164,7 @@ def test_stable_sets_and_overlap_cross_class(mod, tmp_path):
     sets = mod.stable_sets(conn)
     assert sets == {"ampicillin": {1, 2, 3, 4}, "ciprofloxacin": {3, 4, 5, 6, 7}}
 
-    summaries, union_all = mod.populate_overlap(conn, sets, classes, log)
+    summaries, union_all = mod.populate_overlap(conn, sets, classes, "ecoli", log)
     assert union_all == {1, 2, 3, 4, 5, 6, 7}
     assert len(summaries) == 1
     s = summaries[0]
@@ -188,7 +188,7 @@ def test_same_drug_family_for_betalactam_pair(mod, tmp_path):
     log = get_logger("test")
     classes = mod.fill_drug_classes(conn, log)
     sets = mod.stable_sets(conn)
-    summaries, _ = mod.populate_overlap(conn, sets, classes, log)
+    summaries, _ = mod.populate_overlap(conn, sets, classes, "ecoli", log)
     s = summaries[0]
     assert s["same_class"] is False       # penicillins != cephalosporins
     assert s["same_drug_family"] is True   # both β-lactams -> H3-testable pair
@@ -203,8 +203,8 @@ def test_populate_overlap_is_idempotent(mod, tmp_path):
     log = get_logger("test")
     classes = mod.fill_drug_classes(conn, log)
     sets = mod.stable_sets(conn)
-    mod.populate_overlap(conn, sets, classes, log)
-    mod.populate_overlap(conn, sets, classes, log)  # full recompute, no dupes
+    mod.populate_overlap(conn, sets, classes, "ecoli", log)
+    mod.populate_overlap(conn, sets, classes, "ecoli", log)  # full recompute, no dupes
     (n,) = conn.execute("SELECT COUNT(*) FROM unitig_antibiotic_overlap").fetchone()
     assert n == 2
     conn.close()
