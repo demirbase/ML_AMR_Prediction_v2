@@ -121,6 +121,15 @@ def select_genomes(config, organism, antibiotic):
     print(f"  ✓ Valid genomes: {len(valid_genomes)} "
           f"({pos} resistant / {len(valid_labels) - pos} susceptible, "
           f"{pos / len(valid_labels) * 100:.1f}% R)")
+
+    # Deterministic (seed-42) shuffle to break any phenotype-BLOCKED ordering in
+    # the metadata (e.g. clonal MRSA / A. baumannii, where amr_phenotypes.csv can
+    # list all-R then all-S). Without it, the downstream chunk split (03/04) can
+    # produce a single-class chunk -> single-class CV fold -> XGBoost NaN. The
+    # fixed seed keeps the genome/chunk assignment fully reproducible.
+    perm = np.random.RandomState(42).permutation(len(valid_genomes))
+    valid_genomes = [valid_genomes[i] for i in perm]
+    valid_labels = [valid_labels[i] for i in perm]
     return valid_genomes, valid_labels
 
 
@@ -208,8 +217,12 @@ def rtab_to_chunks(rtab, valid_genomes, valid_labels, out_dir, antibiotic,
                 if tab < 0:
                     continue
                 seq = line[:tab]
-                # Presence values are single-char 0/1, tab-separated, one per sample.
-                vals = np.fromstring(line[tab + 1:], dtype=np.int8, sep="\t")
+                # Presence values are single-char 0/1, tab-separated, one per
+                # sample. Parse via frombuffer (fast, C-level) instead of the
+                # deprecated np.fromstring(sep=...): strip tabs/newline -> a run of
+                # '0'/'1' chars -> ASCII bytes -> subtract ord('0') to get 0/1.
+                vals = (np.frombuffer(line[tab + 1:].replace("\t", "").strip().encode("ascii"),
+                                      dtype=np.int8) - ord("0"))
                 if vals.size != len(sample_ids):
                     sys.exit(
                         f"ERROR: unitig '{seq[:20]}...' has {vals.size} values but "
