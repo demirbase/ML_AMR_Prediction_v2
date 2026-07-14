@@ -108,6 +108,15 @@ Zincir: `00a→00→(01/01b)→02/02b/02c/02d→03u→04→05→06→07→07b→
 
 ---
 
+## E1 KARARI (docs/literature/E1.md) — TEMPORAL VALIDATION YAPILACAK
+**Karar: A — yayın öncesi ZORUNLU** (TRIPOD+AI/DOME; hedef dergiler major-revision/reject eder). BV-BRC Collection Year ~%85-89 dolu → fizibıl (eksikler FetchM/NCBI BioSample ile doldurulabilir).
+**Pipeline etkisi (yeni iş — geliştirme fazı):**
+1. `00a` → BV-BRC `collection_year` (+ `geographic_location`/`country`) alanlarını çek (SELECT_FIELDS'e ekle); eksik yıllar FetchM/Entrez BioSample fallback.
+2. **Sızıntı-güvenli temporal split:** unitig sözlüğü (de Bruijn) **SADECE train (eski yıl) diliminde** kurulur; test (yeni yıl) genomları bu **kilitli** sözlüğe map/query edilir (03u'ya `--temporal-train` modu). Whole-set unitig = sızıntı.
+3. Split: en eski ~%70-80 (≤~2021) train, en yeni (~2023+) izole test, 1-2 yıl gap. SMOTE/undersample SADECE train; test doğal prevalansta.
+4. Lineage-aware CV hiperparametre için kalır; temporal = nihai external test. Metrik düşüşü (%10-25) beklenir ve DEĞERLİdir (robustness kanıtı).
+**Not:** Bu, mevcut concordance-external'a (M13) EK; onun yerine değil. Deploy sonrası ayrı bir geliştirme kalemi.
+
 ## ÖZET KARAR NOKTALARI
 - **Deploy'a hazır** (kod/pipeline/test yeşil). **2 bilimsel gap** karar bekliyor: temporal external validation (E-1, en yüksek major-revision riski) + H3 hypergeometric (E-2). Bunlar submission-öncesi; deploy'u bloke etmez ama makale-öncesi çözülmeli.
 - **Deploy-must:** container lock + digest-pin (M9-3), slurm commit (M9-2), Zenodo (M10).
