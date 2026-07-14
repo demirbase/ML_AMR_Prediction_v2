@@ -5,7 +5,47 @@
 
 ---
 
-# §0.-4 — LATEST STATE (2026-07-09) — KB SCHEMA 0.6.0, 21 MODELS COMPLETE, EXTERNAL VALIDATION + OVERLAP DONE — READ FIRST, supersedes ALL below
+# §0.-5 — LATEST STATE (2026-07-14) — 12-MODÜL PRODUCTION-HARDENING İNCELEMESİ TAMAM + ESKAPEE PİVOTU — READ FIRST, supersedes ALL below
+
+> **Repo HEAD `3d92bb6`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Bu session = **sistematik 12-modül audit + sertleştirme** (yeni özellik değil; tez+makale+production+TRUBA hazırlığı). Suite artık **TAMAMEN YEŞİL (109 passed / 0 kırık)** — HANDOFF §0.-4'teki "117 pass" bayattı, suite kırmızıydı; düzelttik.
+
+### Proje yeni yönü (danışman toplantısı 2026-07-14)
+- **2 makale** tezden çıkacak. **Araç/web-app en son.** Odak = **organizma değil, antibiyotik SINIFI.** Organizmalar = **ESKAPEE.** Pipeline production-ready + Nur'un pipeline'ına entegre (ayrı makale).
+- **ESKAPEE paneli (E1/ESKAPEE1.md literatürüyle):** **Faz 1** (tez+1. makale): K. pneumoniae, E. coli, S. aureus, A. baumannii. **Faz 2**: P. aeruginosa, E. faecium, Enterobacter. (Veri hep BV-BRC'den; uygunluk kapı değil.)
+
+### 12-modül incelemede yapılanlar (hepsi push'lu, her modülün raporu `docs/review/MODULE_00..11_*.md` + `FINAL_AUDIT_pre_deploy.md`)
+- **M0 Repo:** `amr.def` TRUBA'dan kurtarılıp geri yüklendi (container reçetesi environment.yml'den türer). `backup/` gitignore. 9 commit push.
+- **M1 Config/registry:** **registry schema 2.0** — mekanizma-bazlı 19 sınıf (**carbapenems ayrı**, `others` dağıtıldı: glycopeptides/polymyxins/oxazolidinones/phenicols/rifamycins/fosfomycins/lipopeptides/nitrofurans/glycylcyclines). `organisms.yaml`: gerçekle senkron (ecoli 7, kpneu 14 `status:done`) + 7 ESKAPEE organizması + gram/phylum/eskapee_phase/priority_classes. **mechanism_type/who_aware registry'ye taşındı** (populate artık registry'den okuyor — hardcode yok). `feature_repr: unitig` **varsayılan** (artık env-override ŞART değil). `scripts/validate_registry.py` bekçisi (registry↔KB, CI'da).
+- **M2 Veri:** **BUG FIX** `lib/bvbrc._resolve_group` `np.argmax→nanargmax` (kısmi-NaN yılda yanlış R/S etiketi). Bilinmeyen-antibiyotik raporu + `intermediate_policy` config switch (drop varsayılan). API-truncation loud.
+- **M3 QC/lineage:** 02/02b/02p/03/03b → `get_target` (env-parametrik, ESKAPEE paralel). legacy `paths:` bloğu silindi. 02c PopPUNK docstring uyumlandı. `lib/lineage.py` mükemmel.
+- **M4 Unitig:** **S. AUREUS BLOCKER ÇÖZÜLDÜ** — `03u.select_genomes`'a seed-42 shuffle (fenotip-bloklu sıra→tek-sınıf-chunk→XGBoost NaN). deprecated `np.fromstring`→`frombuffer`.
+- **M5 Modelleme:** **`07b` fallback şeffaflığı** — `cv_method` summary'ye yazılıyor + non-lineage-CV loud uyarı + `no_group_leakage` assert.
+- **M6 Biyoloji:** `test_15` düzeltildi. **`08_blast_pipeline.nf` öksüzdü → M9'da silindi.**
+- **M7 KB:** **`models.cv_method` kolonu** (schema **0.6.1**) — her modelin lineage-CV mi fallback mı olduğu KB'de; Mac KB backfill (21=lineage_group_kfold_5fold). `test_kb_queries` fixture düzeltildi → **tüm suite yeşil.**
+- **M8 Arayüz:** **BUG FIX** `kb_api` DB path `results/ecoli/kb`→`results/kb/amrk.db`. `get_overlap`+`/overlap` organism-aware.
+- **M9 Orkestrasyon:** **Nextflow tamamen kaldırıldı** (08.nf + environment.yml dep + docstring + README badge) — "Python'da kal" kararı.
+- **M10 Test/CI:** CI'a `validate_registry` (blocking) + `mypy` (advisory).
+- **M11 Docs:** CITATION/zenodo/pyproject → **version 0.6.1** + "Escherichia coli"→"ESKAPEE (E. coli, K. pneumoniae)".
+
+### KB durumu (Mac `results/kb/amrk.db`, schema 0.6.1)
+21 model, 2 organizma, cv_method='lineage_group_kfold_5fold' (hepsi). **TRUBA/Drive KB kopyaları 0.6.0 (bayat) → re-populate ile senkron olacak.** Mac KB drug_class re-sync'li (meropenem/imipenem→carbapenems).
+
+### DEPLOY ÖNCESİ YAPILACAKLAR (sıralı, deployment planı `FINAL_AUDIT_pre_deploy.md §G`)
+0. **⭐ Tier sistemini evidence-weighted yap (kullanıcı isteği, deploy-öncesi):** tier şu an SADECE BLAST (identity/coverage/evalue, `09`). 7 katmanı da (prevalans/SNP/MDA/label-perm/CPSS/pyseer) katan bileşik güven notu → özellikle `tier=none` ama CPSS+pyseer geçen **novel adaylar** görünür olur. BLAST-tier'ı yanında ayrı `evidence_tier` olarak ekle (M1 raporu §5 + memory `amr-future-ideas`). Re-populate öncesi yapılırsa yeni KB doğrudan içerir.
+1. **TRUBA temizliği** (konservatif — `FINAL_AUDIT §F`): SAFE-DELETE = `data/interim/*` (155G KMC), staph cefoxitin `unitigs.rtab` (3.6G bayat), smoke/log/cache. KEEP = genomlar/KB/figures/models/runs/poppunk_clusters/unitig_all/containers/slurm.
+2. **Bayat çıktı temizliği:** kod değişti (shuffle+registry2.0) → re-populate edilecek her (org,ab) için `data/processed/{o}/{a}/matrix_unitig`, `models/{o}/{a}`, `results/{o}/{a}` sil (resume-logic bayat sonuç almasın). `unitig_all` store KORU.
+3. **Backup** (rclone, alt-dizin, arf-ui4/screen) → NEEDS-BACKUP seti.
+4. **TRUBA repo reset:** `git -C $AMR_HOME fetch origin && git reset --hard origin/main` (untracked amr.def/slurm etkilenmez) + HPC config (kmc_mem=128/threads=20) tekrar uygula + **`slurm/` kanonik 4'ü (`run_03u_env`,`run_ml_env`,`run_bio_env`,`run_pyseer_env`) repoya commit.**
+5. **Container lock** (M9-3, publication-must): `apptainer build amr.sif amr.def` + `conda env export --no-builds > environment.lock.yml` commit + base imaj digest-pin.
+6. **Test:** pytest (109 passed) + validate_registry (0 hata) + pilot dry-run (1 ab, --max-genomes 50, cv_method='lineage_group_kfold' teyit).
+7. **Tam koşu:** ecoli/kpneu re-populate (0.6.1) → S. aureus (blocker çözülü) → A. baumannii (yeni). Env-parametrik zincir.
+8. **Zenodo deposit (M10)** + DOI damgası.
+
+### BİLİMSEL GAP'LER (submission-öncesi, literatür kararlı)
+- **E1 [KARAR VERİLDİ] — Temporal external validation YAPILACAK** (yayın-zorunlu, TRIPOD+AI/DOME). Uygulama: `00a`'ya `collection_year`/`geo` ekle (eksik→FetchM/BioSample); **sızıntı-güvenli:** unitig sözlüğü SADECE train(eski yıl)→test(yeni yıl) map; train≤~2021/test~2023+; SMOTE sadece train. M13 concordance'a EK. Detay: `FINAL_AUDIT §E1 KARARI` + `docs/literature/E1.md`.
+- **E2 (H3 hypergeometric test) + E3 (yeni-organizma PopPUNK ayarı):** dosyalar `docs/literature/E2.md`/`E3.md` YÜKLENDİ ama **HENÜZ OKUNMADI** (context doldu). Yeni session'da oku → H3 istatistiksel testi + S. aureus/A. baumannii PopPUNK model/refine kararı.
+
+### Reviewer riski (FINAL_AUDIT §D): reject YOK. Major-revision riski = temporal validation (E1, çözülüyor) + container-lock. Minor = H3 test (E2), cefotaxime(Kp) head-to-head 0.495 açıklaması, provenance tool sürümleri.
 
 > **Repo HEAD `b413f84`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Advisor meeting prep session — KB brought to a polished, presentable "final" state for a Friday meeting.
 
