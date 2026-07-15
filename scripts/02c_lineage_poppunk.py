@@ -33,8 +33,29 @@ from utils import run_command
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+from lib import registry  # noqa: E402
 from lib.config import load_config, resolve_path, resolve_tool  # noqa: E402
 from lib.lineage import lineage_summary  # noqa: E402
+
+
+def lineage_params(organism, config):
+    """Global ``lineage:`` defaults from config.yaml, overlaid with this
+    organism's ``lineage:`` override in the registry (organisms.yaml).
+
+    ESKAPEE population structures differ enough that one setting cannot serve all
+    seven (docs/literature/E3.md): S. aureus is highly clonal with very low core
+    diversity and needs a bigger sketch to separate strains at all, while
+    A. baumannii mainly needs a tighter length filter. Everything not overridden
+    stays on the shared default, so the panel remains comparable by construction
+    and each deviation is explicit and justified in the registry.
+    """
+    params = dict(config.get("lineage", {}) or {})
+    try:
+        override = registry.get_organism(organism).get("lineage") or {}
+    except KeyError:
+        override = {}   # organism not in the registry: fall back to globals
+    params.update(override)
+    return params
 
 
 def write_refs(genome_ids, genomes_dir: Path, refs_path: Path):
@@ -78,20 +99,55 @@ def normalize_clusters(clusters_csv, genome_ids, *,
     return pd.DataFrame(rows)
 
 
+def _sketch_args(p):
+    """PopPUNK --create-db sketching flags from the merged lineage params.
+
+    Passed EXPLICITLY rather than relying on PopPUNK's defaults (13/29/4/10000):
+    the sketch settings decide the clustering, the clustering is the CV grouping,
+    so they are scientific parameters and belong in the recorded config — not in
+    whatever the installed PopPUNK happens to default to.
+    """
+    return (f"--min-k {int(p['min_k'])} --max-k {int(p['max_k'])} "
+            f"--k-step {int(p['k_step'])} --sketch-size {int(p['sketch_size'])}")
+
+
+def _qc_args(p):
+    """PopPUNK --qc-db flags from the merged lineage params (E3 §3.4)."""
+    args = (f"--max-a-dist {float(p['max_a_dist'])} "
+            f"--length-sigma {int(p['length_sigma'])} "
+            f"--prop-n {float(p['prop_n'])}")
+    lr = p.get("length_range")
+    if lr:
+        lo, hi = lr
+        args += f" --length-range {int(lo)} {int(hi)}"   # takes TWO values
+    return args
+
+
 def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: int,
-                *, refine: bool = True, reuse_db: bool = False):
-    """create-db -> fit-model [-> refine]; returns the raw clusters CSV path.
+                *, params: dict, refine: bool = True, reuse_db: bool = False):
+    """create-db [-> qc-db] -> fit-model [-> refine]; returns the raw clusters CSV.
 
     Uses the canonical single-dir PopPUNK pattern (--output == --ref-db, with
     --overwrite so a batch job never blocks on a prompt). ``refine`` chains a
-    boundary-refinement step after the initial ``model`` fit. Empirically on this
-    data (E. coli / K. pneumoniae) **dbscan alone gives good strain-level
-    resolution** (~324 clusters, largest ~15 %), so the validated config uses
-    ``model: dbscan`` with ``refine: false``; bgmm instead collapsed into one
-    ~94 % mega-cluster AND its refine step failed (degenerate NaN boundary).
-    For a NEW organism, verify the resolution (n_clusters >= n_splits) — the
-    optimal model/refine may differ by population structure. ``reuse_db`` skips
+    boundary-refinement step after the initial ``model`` fit. ``reuse_db`` skips
     the expensive re-sketching when a prior run's database is still present.
+
+    MODEL CHOICE — we deviate from the literature, deliberately. E3 §3.2 (and the
+    iterative-PopPUNK papers) recommend BGMM K=2 + refine and warn that HDBSCAN
+    (PopPUNK's ``dbscan``) can fail to converge on highly recombinant species.
+    On OUR data the opposite happened: dbscan gives good strain-level resolution
+    while bgmm collapsed into a single ~94 % mega-cluster whose degenerate
+    2-Gaussian fit then made refine die on a NaN boundary. Note the literature's
+    recommendation assumes iterative-PopPUNK's multi-boundary fit, which is not
+    what we ran. So: ``model: dbscan``, ``refine: false``, justified empirically
+    rather than by convention — and the Methods should say exactly this.
+
+    Because E3's warning targets high-recombination organisms, dbscan may yet
+    fail on an ESKAPEE member we have not clustered (Enterobacter is the prime
+    suspect). It fails LOUDLY: main() checks n_clusters >= n_splits and tells you
+    to try ``--model bgmm``. Verify the resolution for every new organism — the
+    clusters ARE the CV folds, so a bad clustering silently degrades the split
+    rather than raising.
     """
     db = work_dir / "db"
     has_sketch = db.exists() and any(db.glob("*.h5"))
@@ -99,8 +155,14 @@ def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: i
         print("  ✓ Reusing existing PopPUNK sketch database (skipping --create-db).")
     else:
         shutil.rmtree(db, ignore_errors=True)
+        print(f"  Sketching (k {params['min_k']}-{params['max_k']} step "
+              f"{params['k_step']}, sketch {params['sketch_size']})...")
         run_command(f"{poppunk} --create-db --r-files {refs_path} "
-                    f"--output {db} --threads {int(threads)}")
+                    f"--output {db} --threads {int(threads)} {_sketch_args(params)}")
+        if params.get("qc", True):
+            print("  Quality control on the sketch database (--qc-db)...")
+            run_command(f"{poppunk} --qc-db --ref-db {db} --output {db} "
+                        f"--overwrite --threads {int(threads)} {_qc_args(params)}")
 
     run_command(f"{poppunk} --fit-model {model} --ref-db {db} --output {db} "
                 f"--overwrite --threads {int(threads)}")
@@ -129,13 +191,16 @@ def main():
     ap = argparse.ArgumentParser(description="PopPUNK lineage clustering (organism-level).")
     ap.add_argument("--organism", default=default_org)
     ap.add_argument("--threads", type=int, default=default_threads)
-    ap.add_argument("--model", default=lin_cfg.get("model", "bgmm"),
-                    help="PopPUNK initial --fit-model (bgmm | dbscan). Default from config lineage.model.")
+    ap.add_argument("--model", default=lin_cfg.get("model", "dbscan"),
+                    help="PopPUNK initial --fit-model (dbscan | bgmm). Default from "
+                         "config lineage.model. Try bgmm if dbscan under-clusters a "
+                         "new organism (n_clusters < n_splits).")
     ap.add_argument("--refine", dest="refine", action="store_true", default=None,
-                    help="Chain a refine step for strain-level resolution (default: "
-                         "config lineage.refine, else on).")
+                    help="Chain a refine step after the initial fit (default: config "
+                         "lineage.refine, which is OFF — refine failed on a degenerate "
+                         "bgmm fit here; see run_poppunk).")
     ap.add_argument("--no-refine", dest="refine", action="store_false",
-                    help="Use only the initial model (NOT recommended — under-clusters E. coli).")
+                    help="Use only the initial model (the validated setting).")
     ap.add_argument("--reuse-db", action="store_true",
                     help="Reuse an existing PopPUNK sketch database from a prior run "
                          "(skip the expensive --create-db re-sketching).")
@@ -146,6 +211,7 @@ def main():
     refine = lin_cfg.get("refine", True) if args.refine is None else args.refine
 
     organism = args.organism
+    params = lineage_params(organism, config)   # globals + this organism's override
     print("=" * 80)
     print(f"LINEAGE CLUSTERING (PopPUNK) — {organism}")
     print("=" * 80)
@@ -182,8 +248,9 @@ def main():
         write_refs(genome_ids, genomes_dir, refs_path)
         print(f"  Running PopPUNK (model={args.model}, refine={refine}, "
               f"reuse_db={args.reuse_db}, threads={args.threads})...")
+        print(f"  Lineage params: {params}")   # provenance: what actually clustered
         raw_clusters = run_poppunk(poppunk, refs_path, work_dir, args.model, args.threads,
-                                   refine=refine, reuse_db=args.reuse_db)
+                                   params=params, refine=refine, reuse_db=args.reuse_db)
 
     print(f"  Normalizing clusters (un-mangling '.'→'_') from: {raw_clusters.name}")
     out_df = normalize_clusters(raw_clusters, genome_ids)

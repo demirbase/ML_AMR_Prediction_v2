@@ -171,6 +171,31 @@ lineage:
   model: "dbscan"        # PopPUNK --fit-model: dbscan | bgmm
   refine: false          # dbscan alone suffices; refine on bgmm failed on this data
   threads: null          # null -> preprocessing.threads
+
+  # ── Sketching (PopPUNK --create-db) — docs/literature/E3.md §3.1 ──────────
+  # PopPUNK 2.7.8's OWN defaults are min_k 13 / max_k 29 / k_step 4. E3 recommends
+  # 15-35 step 2 for ESKAPEE: short k-mers cause spurious matches, and the wider
+  # range costs RAM but resolves strains better. We adopt E3's range for EVERY
+  # organism — a panel where some species are clustered on defaults and others on
+  # E3 settings would make the cross-organism claim methodologically lame.
+  # CHANGING ANY OF THESE RE-CLUSTERS THE ORGANISM: the clustering recorded in
+  # data/processed/{org}/lineage/ was produced with a specific setting, and the
+  # lineage groups ARE the CV folds. Re-verify lineage_summary after any change.
+  min_k: 15
+  max_k: 35
+  k_step: 2
+  sketch_size: 10000     # per-organism override in organisms.yaml (S. aureus needs 10^5)
+
+  # ── Quality control (PopPUNK --qc-db, a SEPARATE mode) — E3 §3.4 ──────────
+  # Contamination/length outliers corrupt the distance estimates and can make
+  # PopPUNK infer a core distance of 0. Until now 02c ran NO PopPUNK QC at all.
+  # CheckM2 (M15) already filters completeness/contamination upstream; this is the
+  # distance-level guard PopPUNK applies to its own sketches.
+  qc: true
+  max_a_dist: 0.5        # drop pairs with accessory distance above this (E3 §3.4)
+  length_sigma: 5        # SD of the length distribution beyond which a genome is cut
+  prop_n: 0.1            # max proportion of ambiguous bases
+  length_range: null     # [min, max] bp, or null; per-organism (A. baumannii — E3 §5)
   # ── consumed by the CV step (lib/lineage, 06/07b wiring) ──
   n_splits: 5            # StratifiedGroupKFold folds (ROADMAP §0.1: 5-10)
   # NOTE: PopPUNK clusters are used AS-IS — every cluster, singletons included, is

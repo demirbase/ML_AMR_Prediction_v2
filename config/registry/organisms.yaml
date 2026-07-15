@@ -70,6 +70,12 @@ organisms:
     download_date: null
     filter_criteria: null
     antibiotics: [cefoxitin, oxacillin, ciprofloxacin, gentamicin, tetracycline, trimethoprim_sulfamethoxazole, erythromycin, clindamycin]
+    # PopPUNK override (docs/literature/E3.md §4): S. aureus is the panel's most
+    # clonal species — core distances between strains are so small that the default
+    # 10^4 sketch cannot separate them, collapsing lineages and gutting the CV
+    # grouping. 10^5 costs runtime and buys single-nucleotide-level resolution.
+    lineage:
+      sketch_size: 100000
 
   acinetobacter_baumannii:
     display_name: "Acinetobacter baumannii"
@@ -87,6 +93,17 @@ organisms:
     filter_criteria: null
     # PROVISIONAL — curate when its pipeline runs:
     antibiotics: [meropenem, imipenem, colistin, ciprofloxacin, gentamicin, amikacin]
+    # PopPUNK (docs/literature/E3.md §5): A. baumannii needs no special model or
+    # sketch tuning — defaults resolve GC1/GC2 well — EXCEPT a length filter
+    # narrowed to its genome size (~3.9 Mb), because its extreme plasmid/integron
+    # plasticity makes contamination easy to mistake for accessory content.
+    # DELIBERATELY NOT SET YET: the genomes are not downloaded (status: planned),
+    # so any bp range here would be a guess this config asserts as fact. Derive it
+    # from the observed assembly length distribution after 00a, then set:
+    #   lineage:
+    #     length_range: [<lo>, <hi>]
+    # Until then the global `length_sigma: 5` still filters length outliers, but
+    # adaptively (5 SD of the observed distribution) rather than absolutely.
 
   # ── Phase 2 (2nd SCI paper / advanced optimisation) ───────────────────────
   pseudomonas_aeruginosa:
