@@ -151,11 +151,24 @@ def clean_amr_table(df, normalize_fn=None, intermediate_policy="drop",
     #    known to be computational, that one demands positive proof of real AST.
     #    (Computational rows carry no testing_standard either, so step 1 would
     #    catch them anyway; this stays explicit rather than relying on that.)
-    if "evidence" in df.columns:
-        # fillna("") before astype(str): newer pandas can leave NaN as a float
-        # after astype(str).str.lower(), which then breaks substring tests.
-        ev = df["evidence"].fillna("").astype(str).str.lower()
-        df = df[~ev.str.contains("computational", na=False)]
+    #    "Computational" hides in TWO columns, not one: besides evidence=
+    #    "Computational Method", BV-BRC also has rows with an empty evidence but
+    #    laboratory_typing_method="Computational Prediction" (9 814 for
+    #    K. pneumoniae, 209 for A. baumannii — measured 2026-07-15). Those slip
+    #    past an evidence-only filter. They happen to carry no testing_standard,
+    #    so step 1 currently catches every one of them — but that is luck, not
+    #    design: loosen step 1 some day and software predictions would quietly
+    #    become training labels. Check both columns explicitly.
+    _comp = None
+    for col in ("evidence", "laboratory_typing_method"):
+        if col in df.columns:
+            # fillna("") before astype(str): newer pandas can leave NaN as a float
+            # after astype(str).str.lower(), which then breaks substring tests.
+            hit = df[col].fillna("").astype(str).str.lower().str.contains(
+                "computational", na=False)
+            _comp = hit if _comp is None else (_comp | hit)
+    if _comp is not None:
+        df = df[~_comp]
         report["rows_after_evidence"] = len(df)
 
     # 1) testing standard filter (EUCAST / CLSI only). Vectorised + NaN-safe:

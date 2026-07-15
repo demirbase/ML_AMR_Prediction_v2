@@ -212,3 +212,20 @@ def test_empty_evidence_without_a_standard_is_still_dropped():
                  ["3.2", "meropenem", "Resistant", None, "CLSI"]])
     out, _ = clean_amr_table(df)
     assert set(out["genome_id"]) == {"3.2"}
+
+
+def test_computational_hidden_in_typing_method_is_dropped():
+    """"Computational" lives in TWO columns. Rows with an empty evidence but
+    laboratory_typing_method="Computational Prediction" (9814 of them for
+    K. pneumoniae) slip past an evidence-only filter. They currently carry no
+    testing_standard so step 1 catches them anyway — this pins the explicit
+    defence so that stays true if step 1 is ever loosened."""
+    import pandas as pd
+    from lib.bvbrc import clean_amr_table
+    df = pd.DataFrame(
+        [["4.1", "meropenem", "Resistant", None, "Computational Prediction", "CLSI"],
+         ["4.2", "meropenem", "Resistant", None, "Broth dilution", "CLSI"]],
+        columns=["genome_id", "antibiotic", "resistant_phenotype", "evidence",
+                 "laboratory_typing_method", "testing_standard"])
+    out, _ = clean_amr_table(df)
+    assert set(out["genome_id"]) == {"4.2"}   # the predicted row must not become a label
