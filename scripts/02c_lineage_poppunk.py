@@ -207,11 +207,31 @@ def main():
     ap.add_argument("--clusters-csv", default=None,
                     help="Skip PopPUNK and normalize an existing raw clusters CSV "
                          "(debug/resume; e.g. a smoke's pp_fit_clusters.csv).")
+    # Sketch/QC overrides. These exist so a CONTROLLED comparison never requires
+    # hand-editing config.yaml: to test whether a rebuilt container changed the
+    # clustering you must re-run the OLD settings against the OLD labels, varying
+    # exactly one thing. Everything unset falls through to config + registry.
+    ap.add_argument("--min-k", type=int, default=None)
+    ap.add_argument("--max-k", type=int, default=None)
+    ap.add_argument("--k-step", type=int, default=None)
+    ap.add_argument("--sketch-size", type=int, default=None)
+    ap.add_argument("--no-qc", dest="qc", action="store_false", default=None,
+                    help="Skip the PopPUNK --qc-db pass (e.g. to reproduce a "
+                         "pre-QC clustering for comparison).")
+    ap.add_argument("--out-name", default="poppunk_clusters.csv",
+                    help="Output filename under the lineage dir. Use a different "
+                         "name for a comparison run so it does not clobber the "
+                         "canonical labels the pipeline reads.")
     args = ap.parse_args()
     refine = lin_cfg.get("refine", True) if args.refine is None else args.refine
 
     organism = args.organism
     params = lineage_params(organism, config)   # globals + this organism's override
+    # CLI wins over config + registry (same precedence as get_target).
+    for key in ("min_k", "max_k", "k_step", "sketch_size", "qc"):
+        val = getattr(args, key, None)
+        if val is not None:
+            params[key] = val
     print("=" * 80)
     print(f"LINEAGE CLUSTERING (PopPUNK) — {organism}")
     print("=" * 80)
@@ -255,7 +275,7 @@ def main():
     print(f"  Normalizing clusters (un-mangling '.'→'_') from: {raw_clusters.name}")
     out_df = normalize_clusters(raw_clusters, genome_ids)
 
-    out_path = lineage_dir / "poppunk_clusters.csv"
+    out_path = lineage_dir / args.out_name
     out_df.to_csv(out_path, index=False, encoding="utf-8")
 
     groups = out_df["Cluster"].to_numpy()
