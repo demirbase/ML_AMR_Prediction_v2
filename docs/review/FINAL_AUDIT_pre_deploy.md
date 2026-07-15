@@ -108,16 +108,34 @@ Zincir: `00a→00→(01/01b)→02/02b/02c/02d→03u→04→05→06→07→07b→
 
 ---
 
-## E1 KARARI (docs/literature/E1.md) — TEMPORAL VALIDATION YAPILACAK
-**Karar: A — yayın öncesi ZORUNLU** (TRIPOD+AI/DOME; hedef dergiler major-revision/reject eder). BV-BRC Collection Year ~%85-89 dolu → fizibıl (eksikler FetchM/NCBI BioSample ile doldurulabilir).
-**Pipeline etkisi (yeni iş — geliştirme fazı):**
-1. `00a` → BV-BRC `collection_year` (+ `geographic_location`/`country`) alanlarını çek (SELECT_FIELDS'e ekle); eksik yıllar FetchM/Entrez BioSample fallback.
-2. **Sızıntı-güvenli temporal split:** unitig sözlüğü (de Bruijn) **SADECE train (eski yıl) diliminde** kurulur; test (yeni yıl) genomları bu **kilitli** sözlüğe map/query edilir (03u'ya `--temporal-train` modu). Whole-set unitig = sızıntı.
-3. Split: en eski ~%70-80 (≤~2021) train, en yeni (~2023+) izole test, 1-2 yıl gap. SMOTE/undersample SADECE train; test doğal prevalansta.
-4. Lineage-aware CV hiperparametre için kalır; temporal = nihai external test. Metrik düşüşü (%10-25) beklenir ve DEĞERLİdir (robustness kanıtı).
-**Not:** Bu, mevcut concordance-external'a (M13) EK; onun yerine değil. Deploy sonrası ayrı bir geliştirme kalemi.
+## ~~E1 KARARI — TEMPORAL VALIDATION YAPILACAK~~ → **TERSİNE DÖNDÜ (2026-07-15): TEMPORAL İMKÂNSIZ**
+
+> **Bu bölümün kararı ÖLÇÜMLE ÇÜRÜTÜLDÜ. Aşağıdaki eski plan uygulanmayacak; yeni karar bunun altında.**
+
+**Eski karar (2026-07-14):** "yayın öncesi ZORUNLU (TRIPOD+AI/DOME); BV-BRC Collection Year ~%85-89 dolu → fizibıl". Plan: `00a`'ya collection_year ekle, sızıntı-güvenli split (unitig sözlüğü sadece train'de), train ≤2021 / test 2023+.
+
+**ÇÜRÜTME (2026-07-15, ölçüm).** E1 doluluk konusunda haklıydı (%73-85 ölçtük) ama **dağılıma hiç bakmadı.** Etiketlenebilir genomlarda (R/S + CLSI/EUCAST) `collection_year` ≥2023 olanlar:
+
+| organizma | ≤2021 | **≥2023** |
+|---|---|---|
+| E. coli | 1362 | **28** |
+| K. pneumoniae | 3726 | **13** |
+| S. aureus | 2326 | **0** |
+| A. baumannii | 991 | **11** |
+
+**BV-BRC'nin AMR-etiketli genomları pratikte 2021'de bitiyor.** 0-28 genomluk bir dilim test seti değil, gürültü. Temporal hold-out bu veriyle **yapılamaz** — istemediğimizden değil, veri olmadığından. *Doluluk ≠ fizibilite:* E1'in atladığı ayrım buydu.
+
+**YENİ KARAR — dış doğrulama = COĞRAFİ + SOY hold-out, yıl tamamen işlemden çıkar.**
+ROADMAP zaten "zamansal **veya coğrafi** hold-out" diyordu; veri coğrafiyi çok daha iyi destekliyor: `isolation_country` **%96-99 dolu** (collection_year'ın %73-85'ine karşı, üstelik onda 1885/1800/1905 gibi çöp değerler var).
+
+1. **`collection_year` / `testing_standard_year` KULLANILMIYOR.** 00a onları çekebilir (provenance), ama hiçbir split'e girmezler.
+2. **Coğrafi hold-out** — `isolation_country` ile. UYARILAR: (a) **ülke dominansı** — E. coli'nin %58'i Norveç, A. baumannii'nin %63'ü USA; onları hold-out yapmak train/test'i ters çevirir. En dengeli adaylar **S. aureus** (UK 773 / Çin 665 / USA 659) ve K. pneumoniae (USA 2045 / Norveç 693 / İtalya 484). (b) **ülke ve soy karışık (confounded)** — tek bir çalışmadan gelen ülke, zaten bir soyu hold-out etmek demek; PopPUNK'la onu zaten yapıyoruz. Coğrafinin soy-CV'nin ÜSTÜNE ne kattığı **ölçülmeli**; katmıyorsa süslü bir tekrardır.
+3. **Veri yetersizse coğrafiyi de katma** (kullanıcı kararı) — zorlama bir dış doğrulama, hiç olmamasından kötüdür.
+4. **M13 concordance (AMRFinderPlus/ResFinder head-to-head) yerinde duruyor** ve şu an tek gerçek dış doğrulamamız.
+
+**Not:** Bu ölçümdeki E. coli sayıları `cap=150000` ile budanmış olabilir (E. coli'nin lab satırı 243K+); coğrafi dağılım ORANLARI temsili ama mutlak sayılar için yeniden ölçülmeli. Temporal bulgusu bundan etkilenmez — 0/11/13/28 o kadar uç ki dört katı bile test seti etmez.
 
 ## ÖZET KARAR NOKTALARI
-- **Deploy'a hazır** (kod/pipeline/test yeşil). **2 bilimsel gap** karar bekliyor: temporal external validation (E-1, en yüksek major-revision riski) + H3 hypergeometric (E-2). Bunlar submission-öncesi; deploy'u bloke etmez ama makale-öncesi çözülmeli.
+- **Deploy'a hazır** (kod/pipeline/test yeşil). ~~2 bilimsel gap~~ → **E-1 kapandı** (temporal imkânsız, ölçüldü; yerine coğrafi+soy hold-out — yukarı bak). Kalan: **H3 hypergeometric (E-2)**, submission-öncesi, deploy'u bloke etmez.
 - **Deploy-must:** container lock + digest-pin (M9-3), slurm commit (M9-2), Zenodo (M10).
 - **TRUBA:** sadece rtab/kmc/cache SAFE-TO-DELETE; gerisi KEEP/BACKUP; survey çıktısıyla kesinleştir.
