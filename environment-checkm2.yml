@@ -1,12 +1,32 @@
 # ============================================================================
 # CheckM2 — genome completeness/contamination QC (ROADMAP §0.2 M15)
 # ============================================================================
-# Its OWN env/container (amr-checkm2.sif): CheckM2 pins python <3.9, which
-# conflicts with pyseer/AMRFinderPlus/ResFinder (>=3.9) — so it can't share the
-# amr-tools env. No python pin here; conda resolves CheckM2's required ~3.8.
+# Its OWN env/container (amr-checkm2.sif).
 #
-# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH`):
+# WHY SEPARATE — corrected 2026-07-15. The old header here said "CheckM2 pins
+# python <3.9, which conflicts with pyseer/AMRFinderPlus/ResFinder (>=3.9)" and
+# that conda would resolve "CheckM2's required ~3.8". Every part of that is
+# inverted. Measured from the running containers:
+#     amr-checkm2.sif  python 3.12.13   <- CheckM2 is on 3.12, not 3.8
+#     amr-tools.sif    python 3.8.20    <- the tool set below 3.9 is THAT one
+# The real reason for the split is CheckM2's ML stack (tensorflow 2.17 + lightgbm
+# + its own numpy/scikit-learn pins), which would drag the validation env — and
+# amr.sif — somewhere neither wants to go. Do not re-derive the split from the
+# old rationale; it says the opposite of the truth.
+#
+# ── VERSIONS ARE PINNED ON PURPOSE (publication reproducibility) ────────────
+# Exact versions verified running in the container that produced the published
+# M15 QC (captured 2026-07-15 via `conda list -p /opt/amr-checkm2-env`). CheckM2
+# decides which genomes enter the study at all (completeness/contamination →
+# 02d → 03u drops the outliers), so its version and its DIAMOND DB are part of
+# the dataset definition, not incidental tooling.
+#
+# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH` — the login
+# node's CPU ulimit kills mksquashfs, see amr.def):
+#   srun -p debug -N1 -c8 --time=02:00:00 --pty bash
 #   apptainer build --fakeroot $AMR_WORK/containers/amr-checkm2.sif amr-checkm2.def
+# Then lock it FROM the new container:
+#   apptainer exec <sif> conda env export -p /opt/amr-checkm2-env > environment-checkm2.lock.yml
 #
 # DIAMOND DB (~1.4 GB, NOT baked in) — download once onto scratch after build:
 #   apptainer exec $AMR_WORK/containers/amr-checkm2.sif \
@@ -17,4 +37,5 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - checkm2>=1.0                # completeness / contamination (needs DIAMOND DB)
+  - python=3.12.13              # what it actually resolves to — NOT the "~3.8" the old note claimed
+  - checkm2=1.1.0               # completeness / contamination (needs DIAMOND DB)

@@ -2,38 +2,62 @@
 # Block-2 validation / QC tools  (ROADMAP §0 MUST-haves M13 / M14 / M15)
 # ============================================================================
 # A SEPARATE conda env / Apptainer container (amr-tools.sif) from the core
-# pipeline (environment.yml / amr.sif). Kept separate on purpose:
-#   - these tools are independent of the core ML pipeline (they run as their own
-#     steps), so they should not destabilise the audited core environment;
-#   - they pull heavy, opinionated dependency trees (CheckM2 ML stack, kma,
-#     diamond, ...) that risk a solve conflict if merged into amr.sif.
+# pipeline (environment.yml / amr.sif).
 #
-# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH` first):
+# WHY SEPARATE — corrected 2026-07-15. The old note here (and in amr-tools.def)
+# said CheckM2 was the odd one out because "it pins python <3.9". That is
+# BACKWARDS. Measured from the running containers:
+#     amr-tools.sif    python 3.8.20    <- THIS env is the one stuck below 3.9
+#     amr-checkm2.sif  python 3.12.13
+#     amr.sif          python 3.12.13
+# It is this tool set that resolves to python 3.8, which is why it cannot live in
+# amr.sif. CheckM2 (on 3.12) has its own container for its ML stack
+# (tensorflow/lightgbm), not for a python floor. Do not re-derive the split from
+# the old rationale — it would come out inverted.
+#
+# ── VERSIONS ARE PINNED ON PURPOSE (publication reproducibility) ────────────
+# Every version below is the EXACT one verified running in the container that
+# produced the published M13/M14 results (captured 2026-07-15 via
+# `conda list -p /opt/amr-tools-env`). Floors do not reproduce: the old
+# `ncbi-amrfinderplus>=3.12` sat in front of an actual 4.2.7 — a major version
+# away — and AMRFinderPlus is what the project's headline is measured AGAINST
+# (K. pneu ciprofloxacin: our model bACC 0.926 vs AMRFinderPlus 0.538). A
+# comparison against an unpinned baseline is not a comparison.
+#
+# NOTE the BLAST divergence: this env has blast 2.16.0, amr.sif has 2.17.0. They
+# serve different steps and both are now pinned, so the difference is recorded
+# rather than accidental. Do NOT silently align them — that changes what the
+# published runs used.
+#
+# Build (debug node, fakeroot, internet; `unset APPTAINER_BINDPATH` first — the
+# login node's CPU ulimit kills mksquashfs, see amr.def):
+#   srun -p debug -N1 -c8 --time=02:00:00 --pty bash
 #   apptainer build --fakeroot $AMR_WORK/containers/amr-tools.sif amr-tools.def
+# Then regenerate the lock FROM the new container:
+#   apptainer exec <sif> conda env export -p /opt/amr-tools-env > environment-tools.lock.yml
 #
-# DATABASES are NOT baked into the image (large, versioned separately). Download
-# once onto scratch AFTER building (see amr-tools.def header for commands):
-#   CheckM2 DIAMOND DB (~1.4 GB), AMRFinderPlus DB, ResFinder DB.
-#
-# If the combined solve CONFLICTS (likely candidates: checkm2's ML stack vs the
-# rest), split into per-tool envs/containers — exactly how we handle conflicts
-# elsewhere (cf. setuptools<81 for PopPUNK). Pin/relax versions then.
+# DATABASES are not baked in and are versioned SEPARATELY from the software —
+# AMRFinderPlus software 4.2.7 vs its DB 2026-05-15.1 are different facts, and
+# scripts/16_external_concordance.py records both. Download once after building.
 # ============================================================================
 name: amr-tools
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  # No python pin: let conda pick a version all four tools accept. CheckM2 is
-  # intentionally NOT here — it pins python <3.9, which conflicts with the rest,
-  # so it lives in its own container (environment-checkm2.yml / amr-checkm2.def).
+  # Pinned: this env resolves to 3.8 because of the tools below — record it
+  # rather than let a future solve wander.
+  - python=3.8.20
 
-  # ── M14: population-structure-aware association (unitig/k-mer significance) ──
-  - pyseer>=1.3                 # LMM + Bonferroni over unitigs (uses PopPUNK distances)
+  # ── M14: population-structure-aware association (unitig significance) ───────
+  - pyseer=1.4.1                # LMM + Bonferroni over unitigs (uses PopPUNK distances)
 
   # ── M15: genome quality control (assembly stats) ────────────────────────────
-  - quast>=5.2                  # N50, contig count, assembly stats
+  - quast=5.3.0                 # N50, contig count, assembly stats
 
   # ── M13: external concordance (head-to-head reference callers) ──────────────
-  - ncbi-amrfinderplus>=3.12    # AMRFinderPlus (acquired genes + point mutations)
-  - resfinder>=4.4              # ResFinder (CGE; pulls kma)
+  # These two ARE the M13 baseline; their versions are scientific parameters.
+  - ncbi-amrfinderplus=4.2.7    # acquired genes + point mutations
+  - resfinder=4.5.0             # ResFinder (CGE)
+  - kma=1.6.11                  # ResFinder's aligner — it decides the calls
+  - blast=2.16.0                # NB: amr.sif has 2.17.0 — see the note above

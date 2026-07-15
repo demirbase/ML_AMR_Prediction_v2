@@ -1,4 +1,6 @@
 Bootstrap: docker
+# TODO(deploy): digest-pin — `:latest` silently rebases the whole stack between
+# builds, so a "reproducible" rebuild is not. Same open item as amr.def.
 From: condaforge/miniforge3:latest
 
 # ============================================================================
@@ -15,8 +17,11 @@ From: condaforge/miniforge3:latest
 #   cd $AMR_HOME
 #   apptainer build --fakeroot $AMR_WORK/containers/amr-tools.sif amr-tools.def
 #
-# NOTE: CheckM2 is NOT here — it pins python <3.9 and conflicts with these
-# (>=3.9), so it has its own container (amr-checkm2.def / environment-checkm2.yml).
+# NOTE: CheckM2 is NOT here, but NOT for the reason this file used to give. The
+# old note said CheckM2 "pins python <3.9 and conflicts with these (>=3.9)".
+# Measured 2026-07-15: amr-tools is on python 3.8.20 and amr-checkm2 on 3.12.13 —
+# exactly inverted. THIS env is the one below 3.9; CheckM2 is separate because of
+# its ML stack (tensorflow/lightgbm). See environment-tools.yml.
 #
 # DATABASES (download ONCE onto scratch after build; NOT baked into the image):
 #   export APPTAINER_BINDPATH=/arf
@@ -24,8 +29,10 @@ From: condaforge/miniforge3:latest
 #   # ResFinder DB: git clone https://bitbucket.org/genomicepidemiology/resfinder_db \
 #   #   into $AMR_WORK/data/external/resfinder_db
 #
-# If this 4-tool env still fails to solve, split further per tool — same
-# approach as setuptools<81 for PopPUNK.
+# If this env fails to solve, split further per tool — same approach as
+# setuptools<81 for PopPUNK (that constraint is real and verified: the PopPUNK
+# container carries setuptools 80.10.2 because PopPUNK 2.7.x imports the legacy
+# pkg_resources, removed in setuptools 81).
 
 %files
     environment-tools.yml /opt/environment-tools.yml

@@ -64,12 +64,69 @@ _AFP_FALLBACK = {
 AFP_KEYWORDS = load_amrfinder_keywords() or _AFP_FALLBACK
 DEFAULT_ANTIBIOTICS = list(AFP_KEYWORDS)
 
-# Tool versions for provenance (audit Issue 8) — env-overridable so a re-run with
-# updated DBs records the real version rather than a stale literal; defaults are
-# the 2026-07 canonical-run versions. The M13 SLURM can export these from
-# `amrfinder --version` / `python -m resfinder --version`.
-AFP_SOURCE = os.environ.get("AMR_AFP_VERSION", "AMRFinderPlus 2026-05-15.1")
-RF_SOURCE = os.environ.get("AMR_RF_VERSION", "ResFinder 4.5.0")
+# Tool versions for provenance (audit Issue 8). These are the M13 BASELINE — the
+# whole headline is "our model beats AMRFinderPlus" (K. pneu ciprofloxacin: bACC
+# 0.926 vs 0.538), which means nothing unless the KB says WHICH AMRFinderPlus.
+#
+# SOFTWARE and DATABASE versions are different facts and both matter: the same
+# AMRFinderPlus binary calls different genes off a newer DB. The old default here
+# was "AMRFinderPlus 2026-05-15.1" — that is the DATABASE version stamped as if
+# it were the software (the software is 4.2.7), so the KB recorded a date where a
+# version belongs.
+#
+# Asked of the tools themselves rather than hardcoded: a literal default rots
+# silently, and this one had. Env overrides stay for the case where the binary
+# is not on PATH (e.g. running from another container).
+def _probe(cmd, args, env_var, label):
+    """Ask the tool for its own version; fall back to the env var, then None.
+
+    The exit code is checked, not just the output: `python -m resfinder --version`
+    with resfinder absent exits 1 and prints "No module named resfinder" to
+    stderr — reading that as a version would stamp an error message into the KB
+    as provenance, which is worse than admitting it is unknown.
+    """
+    v = os.environ.get(env_var)
+    if v:
+        return v
+    try:
+        import subprocess
+        r = subprocess.run([cmd] + args, capture_output=True, text=True,
+                           check=False, timeout=30)
+        if r.returncode != 0:
+            return None
+        out = (r.stdout or r.stderr or "").strip().splitlines()
+        if out:
+            return f"{label} {out[0].strip()}"
+    except Exception:
+        pass
+    return None
+
+
+def _amrfinder_db_version():
+    """AMRFinderPlus DB version — a separate fact from the software version.
+    The DB lives on scratch (not baked into the image) and is named by date."""
+    v = os.environ.get("AMR_AFP_DB_VERSION")
+    if v:
+        return v
+    db = PROJECT_ROOT / "data" / "external" / "amrfinder_db"
+    try:
+        dated = sorted(p.name for p in db.iterdir()
+                       if p.is_dir() and p.name[:4].isdigit())
+        return dated[-1] if dated else None
+    except Exception:
+        return None
+
+
+AFP_VERSION = _probe("amrfinder", ["--version"], "AMR_AFP_VERSION", "AMRFinderPlus")
+AFP_DB_VERSION = _amrfinder_db_version()
+RF_VERSION = _probe("python", ["-m", "resfinder", "--version"], "AMR_RF_VERSION", "ResFinder")
+
+# evidence_source strings: software + DB together, so a KB row states exactly what
+# produced it (e.g. "AMRFinderPlus 4.2.7 (DB 2026-05-15.1)").
+AFP_SOURCE = " ".join(filter(None, [
+    AFP_VERSION or "AMRFinderPlus (version unknown)",
+    f"(DB {AFP_DB_VERSION})" if AFP_DB_VERSION else None]))
+RF_SOURCE = RF_VERSION or "ResFinder (version unknown)"
 
 
 def _tokens(field):

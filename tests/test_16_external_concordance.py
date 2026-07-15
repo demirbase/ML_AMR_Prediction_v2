@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for 16_external_concordance.py parsers (M13), using the REAL
-AMRFinderPlus 2026-05-15.1 and ResFinder 4.5.0 output formats captured on TRUBA."""
+"""Tests for 16_external_concordance.py parsers (M13), using the REAL output
+formats captured on TRUBA from AMRFinderPlus 4.2.7 (DB 2026-05-15.1) and
+ResFinder 4.5.0. Note the software/DB distinction: "2026-05-15.1" is the
+DATABASE, which this file used to name as if it were the software version."""
+
+from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # real AMRFinderPlus header (v2026-05-15.1)
 AFP_HEADER = ("Protein id\tContig id\tStart\tStop\tStrand\tElement symbol\tElement name\t"
@@ -160,3 +166,38 @@ def test_write_kb_evidence(mod, tmp_path):
     n = conn.execute("SELECT COUNT(*) FROM validation_evidence").fetchone()[0]
     assert n == 3
     conn.close()
+
+
+# ---- M13 baseline provenance: software AND database versions ---------------
+# The headline is "our model beats AMRFinderPlus" (K. pneu cipro: 0.926 vs
+# 0.538). That means nothing unless the KB says which AMRFinderPlus — and the
+# software version (4.2.7) and the DB version (2026-05-15.1) are different facts.
+
+def _reload(monkeypatch, **env):
+    import importlib.util
+    for k in ("AMR_AFP_VERSION", "AMR_AFP_DB_VERSION", "AMR_RF_VERSION"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    spec = importlib.util.spec_from_file_location(
+        "conc16", PROJECT_ROOT / "scripts" / "16_external_concordance.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_evidence_source_carries_software_and_db_version(monkeypatch):
+    m = _reload(monkeypatch, AMR_AFP_VERSION="AMRFinderPlus 4.2.7",
+                AMR_AFP_DB_VERSION="2026-05-15.1", AMR_RF_VERSION="ResFinder 4.5.0")
+    assert m.AFP_SOURCE == "AMRFinderPlus 4.2.7 (DB 2026-05-15.1)"
+    assert m.RF_SOURCE == "ResFinder 4.5.0"
+
+
+def test_missing_tool_reports_unknown_not_an_error_message(monkeypatch):
+    """`python -m resfinder --version` without resfinder exits 1 and prints
+    "No module named resfinder" to stderr. Stamping that into the KB as a version
+    is worse than admitting it is unknown."""
+    m = _reload(monkeypatch)   # no env, and the tools are not installed locally
+    assert "unknown" in m.RF_SOURCE.lower()
+    assert "No module named" not in m.RF_SOURCE
+    assert "unknown" in m.AFP_SOURCE.lower()

@@ -1,11 +1,15 @@
 Bootstrap: docker
+# TODO(deploy): digest-pin — see amr.def.
 From: condaforge/miniforge3:latest
 
 # ============================================================================
 # amr-checkm2.sif — CheckM2 genome QC (ROADMAP §0.2 M15)
 # ============================================================================
-# Separate from amr-tools.sif because CheckM2 pins python <3.9, incompatible
-# with pyseer/AMRFinderPlus/ResFinder (>=3.9). See environment-checkm2.yml.
+# Separate from amr-tools.sif because of CheckM2's ML stack (tensorflow 2.17 +
+# lightgbm + its own numpy/scikit-learn pins) — NOT because of a python floor.
+# The old note here claimed CheckM2 "pins python <3.9, incompatible with
+# pyseer/AMRFinderPlus/ResFinder (>=3.9)"; measured 2026-07-15 it is the reverse
+# (checkm2 3.12.13, amr-tools 3.8.20). See environment-checkm2.yml.
 #
 # Build (debug node, internet + fakeroot; build sandbox can't bind /arf):
 #   unset APPTAINER_BINDPATH
