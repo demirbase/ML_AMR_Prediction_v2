@@ -6,13 +6,24 @@
 #     conda env update -f environment.yml --prune
 #
 # This file captures BOTH the Python stack and the external bioinformatics
-# tools (KMC, BLAST+, Nextflow) that pip cannot install, so the whole pipeline
-# is reproducible from a single command.
+# tools (KMC, BLAST+, bcalm/unitig-caller, PopPUNK) that pip cannot install, so
+# the whole pipeline is reproducible from a single command. It is the recipe
+# amr.def feeds to mamba, and therefore the definition of the ONE container the
+# pipeline runs in.
 #
-# For an EXACT lock from your working machine, run:
-#     conda env export --no-builds > environment.lock.yml
-#     pip freeze > requirements.lock.txt
-# and commit those lock files alongside this one.
+# ── VERSIONS ARE PINNED ON PURPOSE (publication reproducibility) ────────────
+# Every version below is the EXACT version verified running in the container
+# that produced the published lineage labels and models (captured 2026-07-15
+# from amr-pp.sif via `conda env export -p /opt/amr-env`). They are `=` pins,
+# not floors, because floors do not reproduce: `poppunk>=2.6` would resolve to
+# a newer PopPUNK whose clustering may differ, silently invalidating every
+# lineage-aware CV result and the empirical dbscan justification in
+# config/config.yaml. Bump a pin deliberately, then re-verify the clustering.
+#
+# The exact solved environment (all transitive deps + build strings) lives in
+# environment.lock.yml, generated FROM the rebuilt container:
+#     apptainer exec <sif> conda env export -p /opt/amr-env > environment.lock.yml
+# Regenerate the lock whenever this file changes.
 # ============================================================================
 name: amr-prediction
 channels:
@@ -20,61 +31,58 @@ channels:
   - bioconda
 dependencies:
   # ── Python ────────────────────────────────────────────────────────────────
-  - python>=3.10,<3.13
+  - python=3.12.13
 
   # ── Core data science ─────────────────────────────────────────────────────
-  - pandas>=1.3
-  - numpy>=1.21
-  - scipy>=1.7
+  - pandas=3.0.3
+  - numpy=2.5.0
+  - scipy=1.18.0
 
   # ── Machine learning ──────────────────────────────────────────────────────
-  - scikit-learn>=1.0
-  - xgboost>=1.5
-  - optuna>=2.10
-  - joblib>=1.0
-  # SHAP (TreeSHAP) feature importance on the restricted candidate model
-  # (ROADMAP §0.1 M4 — Gain -> SHAP; only on the candidate set, never the full
-  # 4.9M-feature matrix). Rebuild amr.sif when the M4/CPSS work lands.
-  - shap>=0.44
+  - scikit-learn=1.9.0
+  - xgboost=3.2.0
+  - optuna=4.9.0
+  - joblib=1.5.3
+  # NOTE: the `shap` library is deliberately NOT a dependency. TreeSHAP feature
+  # importance (13_stability_selection.shap_importance) uses XGBoost's BUILT-IN
+  # implementation (`predict(..., pred_contribs=True)`), so nothing imports
+  # `shap`. An earlier `shap>=0.44` entry here was dead weight — no container
+  # ever had it, and the pipeline never missed it.
 
   # ── Visualisation ─────────────────────────────────────────────────────────
-  - matplotlib>=3.4
-  - seaborn>=0.11
+  - matplotlib=3.11.0
+  - seaborn=0.13.2
 
   # ── Bioinformatics (Python) ───────────────────────────────────────────────
-  - biopython>=1.79
+  - biopython=1.87
 
   # ── Utilities ─────────────────────────────────────────────────────────────
-  - pyyaml>=5.4
-  - tqdm>=4.62
-  - certifi>=2021.10.8   # CA bundle for BV-BRC HTTPS (step 00a)
-  # PopPUNK imports the legacy `pkg_resources`, which setuptools REMOVED in
-  # v81 (2025). Pin below that so the module exists in the container.
-  - setuptools<81
+  - pyyaml=6.0.3
+  - tqdm=4.68.3
+  - certifi=2026.6.17   # CA bundle for BV-BRC HTTPS (step 00a)
+  # PopPUNK 2.7.x still imports the legacy `pkg_resources`, which setuptools
+  # REMOVED in v81 (2025) -> ModuleNotFoundError without this pin. Verified:
+  # the working PopPUNK container carries setuptools 80.10.2.
+  - setuptools=80.10.2
 
   # ── External tools (bioconda) — required by steps 02/03 and 08 ────────────
-  - kmc>=3.2          # k-mer counting (02/02b QC + raw-k-mer 03 baseline)
-  - blast>=2.12       # step 08 BLAST (blastn via 08_blast_annotation.py subprocess; no Nextflow)
+  - kmc=3.2.4          # k-mer counting (02/02b QC + raw-k-mer 03 baseline)
+  - blast=2.17.0       # step 08 BLAST (blastn via 08_blast_annotation.py subprocess)
 
   # ── Unitig representation (ROADMAP §0.1 M12 — replaces raw k-mers) ─────────
   # bcalm builds the compacted de Bruijn graph (unitigs); unitig-caller (pyseer
   # ecosystem) calls per-sample unitig presence/absence -> binary matrix input
   # for the same downstream XGBoost. KMC above is kept for QC/spectra only.
-  # NOTE: adding these REQUIRES rebuilding the Apptainer container on TRUBA
-  # (`apptainer build --fakeroot amr.sif amr.def`; amr.def pulls this file).
-  - bcalm>=2.2
-  - unitig-caller>=1.2
+  - bcalm=2.2.3
+  - unitig-caller=1.3.2
 
   # ── Lineage / population structure (ROADMAP §0.1 M2 — lineage-aware CV) ────
   # PopPUNK clusters genomes into lineages (organism-level, antibiotic-independent)
-  # so train/test folds can keep an entire lineage on one side (GroupKFold) and
-  # the reported AUC is not inflated by lineage leakage (lib/lineage.py).
-  # NOTE: adding this REQUIRES rebuilding the Apptainer container on TRUBA.
-  - poppunk>=2.6
-  # PopPUNK 2.7.x still imports the legacy `pkg_resources`, which setuptools
-  # removed in v81 -> pin below that so the module stays importable
-  # (ModuleNotFoundError: No module named 'pkg_resources' otherwise).
-  - setuptools<81
+  # so train/test folds keep an entire lineage on one side (lib/lineage.py) and
+  # the reported AUC is not inflated by lineage leakage. Pinned exactly: PopPUNK
+  # defines the CV groups, so its version is a scientific parameter, not an
+  # implementation detail.
+  - poppunk=2.7.8
 
   # ── Dev / tests ───────────────────────────────────────────────────────────
-  - pytest>=7.0
+  - pytest=9.1.1

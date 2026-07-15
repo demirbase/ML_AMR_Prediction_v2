@@ -1,5 +1,42 @@
 Bootstrap: docker
+# TODO(deploy): replace :latest with a digest pin —
+#   From: condaforge/miniforge3@sha256:<digest>
+# `:latest` is a moving target: it silently rebases the whole stack between
+# builds, so a "reproducible" rebuild is not reproducible. Capture the digest of
+# the image actually used at build time with:
+#   apptainer exec docker://condaforge/miniforge3:latest true   # then read the cache
+#   # or: docker buildx imagetools inspect condaforge/miniforge3:latest
 From: condaforge/miniforge3:latest
+
+# ============================================================================
+# amr.sif — THE pipeline container (steps 00a-16 + PopPUNK lineage clustering)
+# ============================================================================
+# One container, one environment (/opt/amr-env), one provenance chain. The old
+# amr.sif/amr-pp.sif split was a build-history accident, not a design: amr-pp.sif
+# was this same recipe rebuilt hours later once PopPUNK was added to
+# environment.yml, so the two shared identical build strings for every common
+# package and differed only by poppunk + setuptools. Do not reintroduce a split.
+#
+# pyseer (amr-tools.sif) and CheckM2 (amr-checkm2.sif) stay separate on purpose —
+# they pull conflicting dependency trees (see amr-tools.def / amr-checkm2.def).
+#
+# Build (debug node, internet + fakeroot; build sandbox can't bind /arf):
+#   unset APPTAINER_BINDPATH
+#   export APPTAINER_TMPDIR=/tmp/apptmp APPTAINER_CACHEDIR=/tmp/apcache
+#   mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+#   cd $AMR_HOME
+#   apptainer build --fakeroot $AMR_WORK/containers/amr.sif amr.def
+#
+# AFTER building, regenerate the lock from the NEW container (not the old one —
+# the old sif predates M9's Nextflow removal and would resurrect it):
+#   apptainer exec $AMR_WORK/containers/amr.sif \
+#       conda env export -p /opt/amr-env > environment.lock.yml
+#
+# THEN verify the rebuild is scientifically equivalent before trusting it:
+# re-run 02c on a done organism and confirm the clustering matches the recorded
+# lineage_summary. PopPUNK defines the CV groups — a different clustering means
+# different folds, different AUCs, and a broken comparison to published runs.
+# ============================================================================
 
 %files
     environment.yml /opt/environment.yml
