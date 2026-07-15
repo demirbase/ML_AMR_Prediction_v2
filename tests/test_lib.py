@@ -12,6 +12,8 @@ or directly:
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
@@ -192,3 +194,41 @@ if __name__ == "__main__":
             failed += 1
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
+
+
+# ---- compute-resource env overrides ---------------------------------------
+# kmc_mem/threads describe machine size, not science. They used to be a hand-edit
+# on the HPC that `git reset --hard` wiped on every deploy — a forgotten re-edit
+# meant jobs ran with laptop resources, slowly or OOM, with no clue in the logs.
+
+def test_resource_keys_default_to_laptop_safe_values(monkeypatch):
+    from lib.config import load_config
+    monkeypatch.delenv("AMR_KMC_MEM", raising=False)
+    monkeypatch.delenv("AMR_THREADS", raising=False)
+    pre = load_config()["preprocessing"]
+    assert pre["kmc_mem"] == 16 and pre["threads"] == 10
+
+
+def test_env_overrides_resource_keys(monkeypatch):
+    from lib.config import load_config
+    monkeypatch.setenv("AMR_KMC_MEM", "128")
+    monkeypatch.setenv("AMR_THREADS", "20")
+    pre = load_config()["preprocessing"]
+    assert pre["kmc_mem"] == 128 and pre["threads"] == 20
+
+
+def test_bad_resource_env_raises_instead_of_silently_defaulting(monkeypatch):
+    from lib.config import load_config
+    monkeypatch.setenv("AMR_THREADS", "twenty")
+    with pytest.raises(ValueError, match="AMR_THREADS"):
+        load_config()
+
+
+def test_env_int_helper(monkeypatch):
+    from lib.config import env_int
+    monkeypatch.delenv("AMR_TEST_INT", raising=False)
+    assert env_int("AMR_TEST_INT", 7) == 7
+    monkeypatch.setenv("AMR_TEST_INT", "42")
+    assert env_int("AMR_TEST_INT", 7) == 42
+    monkeypatch.setenv("AMR_TEST_INT", "  ")      # blank -> default, not a crash
+    assert env_int("AMR_TEST_INT", 7) == 7

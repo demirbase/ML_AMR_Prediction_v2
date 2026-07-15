@@ -30,13 +30,52 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
 
+# Compute-resource keys an HPC job may override from the environment. These are
+# NOT science — they are how big the machine is — so they must not live only in a
+# hand-edited config.yaml: `git reset --hard` wipes such edits on every deploy,
+# and a forgotten re-edit means jobs silently run with laptop-sized resources
+# (kmc_mem 16 instead of 128) — slow or OOM, with nothing in the logs saying why.
+# Set AMR_KMC_MEM / AMR_THREADS in the SLURM script instead; the repo default
+# stays laptop-safe.
+_ENV_RESOURCE_OVERRIDES = {
+    ("preprocessing", "kmc_mem"): "AMR_KMC_MEM",   # GB handed to KMC
+    ("preprocessing", "threads"): "AMR_THREADS",   # CPU threads (02/02b/03; 03u/02c fall back to it)
+}
+
+
+def env_int(name: str, default: int) -> int:
+    """Read an int from environment variable ``name``, falling back to ``default``.
+
+    Raises on a non-integer value rather than silently falling back: a typo'd
+    AMR_THREADS=twenty must not quietly run the job on the default thread count.
+    """
+    v = os.environ.get(name)
+    if v is None or not v.strip():
+        return int(default)
+    try:
+        return int(v.strip())
+    except ValueError as e:
+        raise ValueError(f"{name} must be an integer, got {v!r}") from e
+
+
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
-    """Load and return the global config.yaml as a dict."""
+    """Load and return the global config.yaml as a dict.
+
+    Compute-resource keys (see ``_ENV_RESOURCE_OVERRIDES``) are overlaid from the
+    environment here, at the single point every caller goes through, so no call
+    site can forget to honour them.
+    """
     path = Path(config_path) if config_path else CONFIG_FILE
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+
+    for (section, key), env_var in _ENV_RESOURCE_OVERRIDES.items():
+        block = cfg.get(section)
+        if isinstance(block, dict) and block.get(key) is not None:
+            block[key] = env_int(env_var, block[key])
+    return cfg
 
 
 def get_target(args: Any = None, config: dict[str, Any] | None = None) -> tuple[str | None, str | None]:
