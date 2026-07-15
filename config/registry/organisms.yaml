@@ -34,7 +34,7 @@ organisms:
     genomes_dir: "data/raw/ecoli/genomes"
     source: "BV-BRC"
     download_date: "2026-06-01"
-    filter_criteria: "N50>=20000; max_contigs<=500; species=Escherichia coli"
+    filter_criteria: "BV-BRC genome_amr: taxon_id=562; public=true; evidence=\"Laboratory Method\" (00a). Quality is NOT filtered at download — 02d/M15 (CheckM2+QUAST) grades genomes afterwards and 03u drops the outliers."
     # 7 models in the KB (schema 0.6.0):
     antibiotics: [ampicillin, cefotaxime, ciprofloxacin, gentamicin, trimethoprim_sulfamethoxazole, ceftazidime, amoxicillin_clavulanic_acid]
 
@@ -51,7 +51,7 @@ organisms:
     genomes_dir: "data/raw/kpneumoniae/genomes"
     source: "BV-BRC"
     download_date: "2026-07-03"
-    filter_criteria: "N50>=20000; max_contigs<=500; species=Klebsiella pneumoniae"
+    filter_criteria: "BV-BRC genome_amr: taxon_id=573; public=true; evidence=\"Laboratory Method\" (00a). Quality is NOT filtered at download — 02d/M15 (CheckM2+QUAST) grades genomes afterwards and 03u drops the outliers."
     # 14 models in the KB (schema 0.6.0):
     antibiotics: [amikacin, cefepime, cefotaxime, cefoxitin, ceftazidime, ciprofloxacin, gentamicin, imipenem, levofloxacin, meropenem, piperacillin_tazobactam, tetracycline, tobramycin, trimethoprim_sulfamethoxazole]
 
@@ -61,14 +61,14 @@ organisms:
     gram_stain: positive
     phylum: Bacillota
     eskapee_phase: 1
-    status: planned
+    status: in_progress   # 2494 genomes downloaded + cefoxitin 03u ran; no models in the KB yet
     priority_classes: [penicillins]   # methicillin/oxacillin (mecA/MRSA) surrogate: cefoxitin
     metadata_file: "data/external/staphylococcus_aureus/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
     genomes_dir: "data/raw/staphylococcus_aureus/genomes"
     source: "BV-BRC"
-    download_date: null
-    filter_criteria: null
+    download_date: "2026-07-07"   # 2494 usable .fna (162 failed: the low-ID 1280.9xx cluster)
+    filter_criteria: "BV-BRC genome_amr: taxon_id=1280; public=true; evidence=\"Laboratory Method\" (00a). Quality is NOT filtered at download — 02d/M15 (CheckM2+QUAST) grades genomes afterwards and 03u drops the outliers."
     antibiotics: [cefoxitin, oxacillin, ciprofloxacin, gentamicin, tetracycline, trimethoprim_sulfamethoxazole, erythromycin, clindamycin]
     # PopPUNK override (docs/literature/E3.md §4): S. aureus is the panel's most
     # clonal species — core distances between strains are so small that the default
