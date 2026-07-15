@@ -89,10 +89,14 @@ def resolve_path(key: str, organism: str | None = None, antibiotic: str | None =
     """
     Resolve a path template from config into an absolute Path.
 
-    Looks the key up first in the new ``paths_organism:`` block (the
-    {organism}-aware templates), then falls back to the legacy ``paths:`` block.
-    Any ``{organism}`` / ``{antibiotic}`` / ``{run_id}`` placeholders present in
-    the template are filled in.
+    Keys live in the ``paths_organism:`` block ({organism}-aware templates). Any
+    ``{organism}`` / ``{antibiotic}`` / ``{run_id}`` placeholders in the template
+    are filled in.
+
+    The lookup also falls back to a legacy ``paths:`` block. That block no longer
+    exists in the shipped config.yaml (removed in the M3 review) — the fallback is
+    kept only so an older, hand-edited config (e.g. on the HPC) still resolves
+    rather than dying. Do not add new keys there.
 
     Args:
         key:        path key, e.g. "matrix_dir", "genomes_dir", "run_dir".
