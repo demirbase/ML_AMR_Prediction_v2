@@ -1,11 +1,73 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `4946883`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `ebc8526`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
 
 ---
 
-# §0.-5 — LATEST STATE (2026-07-14) — 12-MODÜL PRODUCTION-HARDENING İNCELEMESİ TAMAM + ESKAPEE PİVOTU — READ FIRST, supersedes ALL below
+# §0.-6 — LATEST STATE (2026-07-15) — DEPLOY-ÖNCESİ SERTLEŞTİRME + YENİ CONTAINER KURULDU — READ FIRST, supersedes ALL below
+
+> **Repo HEAD `ebc8526`**, hepsi push'lu. **TRUBA da artık senkron** (`$AMR_HOME` = origin/main; öncesinde HEAD **`5b76f47`** gibi çok eski bir commit'teydi ve dosyalar `git checkout origin/main -- <file>` ile tek tek güncellendiğinden index Frankenstein durumdaydı — `reset --hard` ile temizlendi).
+> Suite **126 passed**, `validate_registry` 0 hata, config'te 0 ölü anahtar.
+
+### ⏳ TEK AÇIK KAPI: container kümeleme doğrulaması (iş `6098297`)
+Yeni container kuruldu (`$AMR_WORK/containers/amr-new.sif`) ama **HENÜZ GÜVENİLİR DEĞİL.** `environment.yml`'in **doğrudan** pinleri birebir tuttu (poppunk 2.7.8, python 3.12.13, pandas 3.0.3, numpy 2.5.0, sklearn 1.9.0, xgboost 3.2.0, unitig-caller 1.3.2, blast 2.17.0, kmc 3.2.4 — build string'lerine kadar aynı; nextflow ve shap yok). **Ama transitif bağımlılıklar kaydı:**
+- **`graph-tool` 2.98 → 3.0** (major) — PopPUNK'ın ağ-analizi backend'i
+- `mandrake` 1.2.5 → **1.2.4** (düşüş), `libprotobuf` 6.33.5 → 7.35.1, `libboost` 1.86 → 1.90
+
+**Neden önemli:** PopPUNK kümeleri = CV grupları. graph-tool 3.0 farklı kümelerse **her lineage-CV AUC'si kayar** ve yayımlanmış sonuçlarla kıyaslanamaz hâle gelir — hiçbir hata vermeden. Bu yüzden `verify_container.slurm` (iş **6098297**, barbun79) E. coli'yi **ESKİ parametrelerle** (`--min-k 13 --max-k 29 --k-step 4 --sketch-size 10000 --no-qc`) yeniden kümeliyor; tek değişken container. Sonra `scripts/compare_lineage.py` **Adjusted Rand Index** ile karşılaştırıyor (etiketler yeniden numaralanabilir → bölümleme kıyaslanır).
+- **ARI = 1.0 →** container temiz. `amr-new.sif` → `amr.sif` yap, `amr-pp.sif` emekli. E3 parametreleriyle tam ESKAPEE koşusuna geç.
+- **ARI < 1.0 →** `environment.yml`'e `graph-tool=2.98` + `mandrake=1.2.5` pinle, yeniden kur, tekrar doğrula. (Eski 4 sif Mac'te `backup/containers_20260715/` + SHA256SUMS.)
+- Çıktı: `$AMR_WORK/pp-verify-6098297.out`. `set -euo pipefail` var → kümeleme değişirse iş **FAILED** olur + mail gelir.
+
+### Bu session ne yaptı — "belge bir şey diyor, kod başka şey yapıyor" sınıfı
+12-modül audit'i kodu inceledi ama **kodun kendisi hakkında söylediklerini** incelemedi. Testler bunları göremez (hiçbiri kod hatası değil). ~13 bulgu, üçü doğrudan tezi vuracaktı:
+- **`lineage.min_cluster_size: 10`** hiçbir şey tarafından okunmuyordu, `collapse_rare_clusters` hiç çağrılmıyordu (sadece testi vardı; MODULE_03 raporu onu "bilimsel pillar" diye övmüş) → Methods'a **yanlış cümle** yazdıracaktı. **Silindi**, politika belgelendi: PopPUNK kümeleri **olduğu gibi** kullanılır (havuzlama daha kötü: akraba olmayan singleton'ları tek grupta toplayıp tek fold'a atar). E3'ün parent-merge önerisi bize kapalı (iterative-PopPUNK hiyerarşisi gerekir; biz düz dbscan).
+- **`card_nt` + 08** → 08 CARD DB yoksa sadece **uyarıp devam ediyordu**; ama tier/gene_symbol/ARO oradan gelir → **içi boş KB, exit 0, kimse fark etmez.** Artık hard-fail (`AMR_ALLOW_MISSING_CARD_DB=true` kaçış).
+- **symlink tuzağı** (aşağıda) → deploy ortasında pipeline koptu.
+
+Diğerleri: `shap>=0.44` ölü (TreeSHAP XGBoost built-in, `import shap` yok) · 8 ölü config anahtarı (`encoding`, `optimization_metric`, `booster`, `registry.*_file`, `organism_display`, `blast_db_dir`, `analysis_results_dir` — çoğu **var olmayan yetenek vaat ediyordu**) · `kb_api` "0.4.0" + "for E. coli" · `08` docstring'inde "Why Nextflow?" · `resolve_path` docstring'i silinmiş `paths:` bloğuna atıf · `config.project.version` 0.6.0 ama yorumu "KB şemasıyla hizalı" diyor.
+
+### Yapılanlar (hepsi push'lu)
+- **`evidence_tier` (schema 0.7.0)** — `unitig_evidence_tier` tablosu + `classify_evidence_tier` (confirmed / **strong_novel** / candidate / weak / none). CPSS+pyseer = novelty backbone. `/api/v1/novel` ucu. 7 test. *Geçen session yapılmış ama commit edilmemişti.*
+- **E2/E3 okundu** (kararlar aşağıda), `docs/literature/` commit'lendi.
+- **`environment.yml` TAM PİNLENDİ** + `environment.lock.yml` (355 paket, build-string'li) commit'lendi. `amr.def` tek-container tasarımını belgeliyor (`amr.sif`/`amr-pp.sif` ikiliği **tasarım değil, build-tarihi kazası**: amr-pp = aynı reçete 3 saat sonra, poppunk eklendikten sonra; ortak paketlerin build string'leri birebir aynıydı).
+- **02c PopPUNK parametreleri açıldı** — E3 ayarları panel geneline (k 15-35 step 2), S. aureus `sketch_size: 10^5` registry override'ı, `--qc-db` (daha önce **hiç** koşmuyordu). CLI flag'leri (`--min-k/--max-k/--k-step/--sketch-size/--no-qc/--out-name`) + `scripts/compare_lineage.py`.
+- **HPC kaynakları env'e** — `AMR_KMC_MEM` / `AMR_THREADS` (`load_config`'te, tek noktada). Artık `git reset` HPC ayarlarını silmiyor; HANDOFF'un "reset sonrası elle tekrar uygula" notu **geçersiz**.
+- **Zenodo/CITATION/pyproject/kb_app** → hepsi **0.7.0** + ESKAPEE. `.zenodo.json` "E. coli / schema 0.4.0" diyordu — **DOI ile kalıcılaşacaktı.** `notes` artık sayı tekrarlamıyor, "amrk.db'yi oku" diyor.
+- **TRUBA temizliği: 766 GB → 216 GB.** `blast_db/core_nt` **318G** (yarıda bırakılmış NCBI indirmesi, kod referansı sıfır) · `data/interim` 155G · `ecoli/ampicillin/matrix` 49G (eski ham k-mer baseline) · staph rtab 3.6G · smoke artıkları. **KORUNDU:** genomlar 58G, card/amrfinder/resfinder/checkm2 DB'leri, containers.
+- **Yedekler:** 4 sif + SHA256SUMS → `backup/containers_20260715/` (Mac). `$AMR_WORK/backup/predeploy_20260715/` → KB + figures + tables + runs + **eski `poppunk_clusters.csv`** (= container testinin kontrol grubu).
+
+### ⚠️ SYMLINK TUZAĞI (yaşandı, çözüldü — bir daha kurma)
+`$AMR_HOME/{data,results,runs,models,logs}` **symlink** → `/arf/scratch`. Git izlenen bir yolu symlink'in içine **yazmaz**: symlink'i silip yerine gerçek dizin koyar. `data/external/blast_db/card_nt/*` (8 dosya) + `runs/.gitkeep` izlendiği için **`git reset --hard` `data` ve `runs` symlink'lerini kopardı** — 156 GB görünmez oldu (veri kaybı yok; symlink hedefi silinmez). Kurtarma: `rm -rf data runs && ln -s $AMR_WORK/data data && ln -s $AMR_WORK/runs runs`.
+**Kalıcı çözüm:** 9 dosya untrack + `.gitignore`'a `data/external/blast_db/` + `!runs/.gitkeep` kaldırıldı + **`tests/test_repo_symlink_safety.py`** (symlink'li önek altına dosya eklenirse kırmızı). `card_nt` git'te tutulmasının tek gerekçesi ("08 kutudan çıkar çıkmaz çalışsın") 08'in hard-fail'iyle karşılandı.
+
+### E2 KARARI (H3 istatistiksel testi) — `docs/literature/E2.md`
+**Ham unitig üzerinde Fisher/hypergeometric = hakem reddi** (LD bağımsızlığı yıkar; tek plazmit binlerce korele unitig sokar → sahte mikroskobik p). Doğru çerçeve: **(1)** önce bileşenleştir (cDBG alt-grafı ya da Pearson>0.95 kümeleme) → **(2)** null evren = iki modelin ön-filtre sonrası girdi uzaylarının **KESİŞİMİ** (bizim "union-universe" caveat'ımızın cevabı; pan-genom **değil**, bilinen AMR genleri **değil**) → **(3)** Fisher exact (bileşenlerde) → **(4)** 500-1000 etiket permütasyonu ile temsili çiftlerde doğrula → **(5)** **Benjamini-Yekutieli** (BH değil — çapraz-direnç negatif korelasyon yaratır, PRDS ihlal) → **(6)** Overlap Coefficient + Fold Enrichment (Jaccard boyut-dengesizliğinde yanıltır; setlerimiz 36 vs 83) → **(7)** UpSet + kümelenmiş heatmap. **İyi haber:** `15_cross_antibiotic.py`'nin ARO gen-ailesi katmanı zaten bileşenleştirme → orada Fisher bugün savunulabilir. Minor-revision kalemi.
+
+### E3 KARARI (PopPUNK) — `docs/literature/E3.md`
+Literatür **BGMM K=2 + refine** diyor, biz **dbscan + refine yok** kullanıyoruz → **bilinçli sapma, ampirik gerekçeli** (`config.yaml:167-172`: bgmm E. coli'de ~%94'lük mega-kümeye çöktü, refine dejenere NaN sınırda öldü) **ve E3'ün önerisi iterative-PopPUNK varsayıyor, biz düz fit koştuk.** Methods'ta aynen böyle yazılmalı. E3'ün HDBSCAN-yakınsama uyarısı yüksek-rekombinasyonlu türleri hedefliyor → **Enterobacter (Faz 2) patlayabilir**; loud fail var (`n_clusters >= n_splits`, "try --model bgmm"). ✅ StratifiedGroupKFold zaten altın standart (`lib/lineage.py:122`). **Hâlâ eksik ve hakem-beklentisi: random-vs-lineage-aware CV karşılaştırma tablosu** (ucuz, yüksek değer).
+
+### DEPLOY — KALAN ADIMLAR (sıralı)
+1. **⏳ `6098297` sonucu** → ARI 1.0 mı? (yukarıdaki iki yol)
+2. `amr-new.sif` → `amr.sif` (doğrulanınca); `slurm/` **kanonik 4'ü** repoya commit (32 dosyanın 28'i eskimiş tek-seferlik).
+3. **Faz B temizlik** (container doğrulandıktan SONRA): `data/processed/*/{ab}`, `results/{ecoli,kpneumoniae}`, `models/` (~185G, hepsi yeniden üretilecek).
+4. Pilot dry-run (1 ab, `--max-genomes 50`) → **`--qc-db` çağrısını DOĞRULA** (PopPUNK 2.7.8 `--help`'inden yazıldı, hiç koşulmadı) + `cv_method='lineage_group_kfold'` teyidi.
+5. **Tam ESKAPEE koşusu.** ⚡ **`unitig_all` store hiç kurulmamış** (`du` boş döndü; her antibiyotik kendi unitig-caller'ını koşmuş!) → **`03u --build-db` ile organizma başına BİR kez kur**, sonra subset. 7 organizma × çok antibiyotik için devasa tasarruf.
+6. Zenodo deposit + DOI.
+
+### OPERASYONEL (bugün öğrenilenler — memory `amr-truba-gotchas`)
+- **Container build giriş düğümünde ÖLÜR** — `mksquashfs` CPU-time ulimit'ine çarpar ("CPU time limit exceeded", solve bittikten *sonra*). **`srun -p debug -N1 -c8 --time=02:00:00 --pty bash`** → orada 2dk13sn'de bitti. (`debug` partition: 4sa limit, internet + fakeroot var.)
+- **SLURM barbun: `--nodes=1` ŞART** — yoksa "node başına 20 çekirdek" QOS kontrolü hesaplayamaz ve reddeder. **`export APPTAINER_BINDPATH=/arf` ŞART** — yoksa container `/arf`'ı görmez. Altın örnek: `$AMR_HOME/slurm/run_lineage.slurm` (PopPUNK'ı daha önce başarıyla koşan script).
+- **Container'a `conda list` ile sorma** — `-p /opt/amr-env` vermezsen miniforge **base** env'ini listeler ve "paket yok" yanılgısı verir. PATH ile sor (`which` / `<tool> --version`) ya da prefix ver. Bu yüzden iki kez yanlış teşhis kondu.
+- TRUBA'ya `rsync`/`ssh` **IP ile**: `172.16.6.14` (`.11`, `.16` de var); `arf-ui1` küme-içi ad, dışarıdan çözülmez. `.sif` çekerken `-z` **kullanma** (zaten sıkıştırılmış).
+- 19 detached `screen` oturumu birikmiş (`screen -ls`) — eski koşulardan ölü kabuklar, süpürülebilir.
+
+---
+
+# §0.-5 — (2026-07-14) — 12-MODÜL PRODUCTION-HARDENING İNCELEMESİ + ESKAPEE PİVOTU — **§0.-6 TARAFINDAN DEVRALINDI** (tarihsel)
+
+> ⚠️ Bu bölümün "DEPLOY ÖNCESİ YAPILACAKLAR" listesi **BİTTİ** (evidence_tier ✅, E2/E3 ✅ okundu, temizlik ✅, container ✅ kuruldu) ve şema artık **0.7.0**. Aşağıdaki "yapılacak"ları **uygulama** — güncel durum §0.-6'da. Bölüm, kararların gerekçesi için duruyor.
 
 > **Repo HEAD `3d92bb6`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Bu session = **sistematik 12-modül audit + sertleştirme** (yeni özellik değil; tez+makale+production+TRUBA hazırlığı). Suite artık **TAMAMEN YEŞİL (109 passed / 0 kırık)** — HANDOFF §0.-4'teki "117 pass" bayattı, suite kırmızıydı; düzelttik.
 
@@ -43,7 +105,7 @@
 
 ### BİLİMSEL GAP'LER (submission-öncesi, literatür kararlı)
 - **E1 [KARAR VERİLDİ] — Temporal external validation YAPILACAK** (yayın-zorunlu, TRIPOD+AI/DOME). Uygulama: `00a`'ya `collection_year`/`geo` ekle (eksik→FetchM/BioSample); **sızıntı-güvenli:** unitig sözlüğü SADECE train(eski yıl)→test(yeni yıl) map; train≤~2021/test~2023+; SMOTE sadece train. M13 concordance'a EK. Detay: `FINAL_AUDIT §E1 KARARI` + `docs/literature/E1.md`.
-- **E2 (H3 hypergeometric test) + E3 (yeni-organizma PopPUNK ayarı):** dosyalar `docs/literature/E2.md`/`E3.md` YÜKLENDİ ama **HENÜZ OKUNMADI** (context doldu). Yeni session'da oku → H3 istatistiksel testi + S. aureus/A. baumannii PopPUNK model/refine kararı.
+- **E2 + E3: ✅ OKUNDU (2026-07-15), kararları §0.-6'da.** (Bu satır "HENÜZ OKUNMADI" diyordu.)
 
 ### Reviewer riski (FINAL_AUDIT §D): reject YOK. Major-revision riski = temporal validation (E1, çözülüyor) + container-lock. Minor = H3 test (E2), cefotaxime(Kp) head-to-head 0.495 açıklaması, provenance tool sürümleri.
 
