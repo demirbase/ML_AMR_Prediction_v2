@@ -123,10 +123,12 @@ def main():
              b.gene_symbol, b.tier, b.identity_pct, b.coverage, b.aro_accession,
              b.aro_gene_family, b.aro_drug_class, b.aro_resistance_mechanism,
              f.prevalence_resistant, f.prevalence_susceptible, f.delta_prevalence,
-             f.odds_ratio, f.fisher_p, f.discriminative
+             f.odds_ratio, f.fisher_p, f.discriminative,
+             et.evidence_tier, et.n_evidence_layers, et.evidence_layers, et.is_novel_candidate
       FROM unitig_model_scores s
       LEFT JOIN blast_annotations b ON b.unitig_id=s.unitig_id AND b.model_id=s.model_id
       LEFT JOIN unitig_background_frequency f ON f.unitig_id=s.unitig_id AND f.model_id=s.model_id
+      LEFT JOIN unitig_evidence_tier et ON et.unitig_id=s.unitig_id AND et.model_id=s.model_id
       LEFT JOIN unitigs u ON u.unitig_id=s.unitig_id
     """
     id2ab = {m["model_id"]: (m["antibiotic"], _org(m["run_id"])) for m in models}
@@ -152,7 +154,8 @@ def main():
              "mda_auc_drop", "pyseer_lrt_p", "prevalence_resistant", "prevalence_susceptible",
              "delta_prevalence", "odds_ratio", "fisher_p", "discriminative",
              "gene_symbol", "tier", "identity_pct", "coverage", "aro_accession",
-             "aro_gene_family", "aro_drug_class", "aro_resistance_mechanism"]
+             "aro_gene_family", "aro_drug_class", "aro_resistance_mechanism",
+             "evidence_tier", "n_evidence_layers", "evidence_layers", "is_novel_candidate"]
     _write(bio, bcols, out / "biomarkers.csv")
 
     # ---- mechanisms: on-target confirmed genes (class-filtered) ------------

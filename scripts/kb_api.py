@@ -11,8 +11,9 @@ versioned ``/api/v1`` routes, CORS, and auto OpenAPI docs at ``/docs``.
 Endpoints (ROADMAP §1.8):
     GET /api/v1/metadata                     FAIR metadata (schema ver, DOI, license) — S9
     GET /api/v1/stats                        aggregate counts
-    GET /api/v1/kmers?antibiotic=&tier=&min_stability=&stable_only=&limit=&offset=
+    GET /api/v1/kmers?antibiotic=&tier=&evidence_tier=&novel_only=&min_stability=&stable_only=&limit=&offset=
     GET /api/v1/kmers/{sequence}             one unitig's full evidence chain
+    GET /api/v1/novel?antibiotic=&organism=  strong_novel biomarkers (0.7.0) — no known gene, CPSS+pyseer
     GET /api/v1/overlap?ab1=&ab2=            cross-antibiotic shared stable unitigs
 
 Run:
@@ -70,12 +71,27 @@ def _create_app():
     @app.get("/api/v1/kmers")
     def kmers(antibiotic: str | None = None, tier: str | None = None,
               min_stability: float | None = None, stable_only: bool = False,
+              evidence_tier: str | None = None, novel_only: bool = False,
               limit: int = Query(200, le=2000), offset: int = 0):
         c = _conn()
         try:
             rows = Q.list_biomarkers(c, antibiotic=antibiotic, tier=tier,
                                      min_stability=min_stability, stable_only=stable_only,
+                                     evidence_tier=evidence_tier, novel_only=novel_only,
                                      limit=limit, offset=offset)
+            return {"count": len(rows), "results": rows}
+        finally:
+            c.close()
+
+    @app.get("/api/v1/novel")
+    def novel(antibiotic: str | None = None, organism: str | None = None,
+              limit: int = Query(200, le=2000), offset: int = 0):
+        """strong_novel biomarkers (0.7.0): CPSS-stable + pyseer-significant with
+        no known CARD gene — the candidates the BLAST-only tier hides as `none`."""
+        c = _conn()
+        try:
+            rows = Q.list_novel_candidates(c, antibiotic=antibiotic, organism=organism,
+                                           limit=limit, offset=offset)
             return {"count": len(rows), "results": rows}
         finally:
             c.close()
@@ -103,7 +119,8 @@ def _create_app():
     def root():
         return {"name": "AMRK-DB API", "version": "0.4.0", "docs": "/docs",
                 "endpoints": ["/api/v1/metadata", "/api/v1/stats", "/api/v1/kmers",
-                              "/api/v1/kmers/{sequence}", "/api/v1/overlap?ab1=&ab2="]}
+                              "/api/v1/kmers/{sequence}", "/api/v1/novel",
+                              "/api/v1/overlap?ab1=&ab2="]}
 
     return app
 

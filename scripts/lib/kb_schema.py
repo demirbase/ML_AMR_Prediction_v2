@@ -29,7 +29,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.6.1"
+KB_SCHEMA_VERSION = "0.7.0"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -163,6 +163,24 @@ CREATE TABLE IF NOT EXISTS validation_evidence (
     pipeline_run_id  TEXT REFERENCES pipeline_runs(run_id)
 );
 
+-- Composite evidence tier (0.7.0) — one grade per (unitig, model) folding the
+-- BLAST hit + the 5 statistical validation layers into a single confidence
+-- level (see populate_database.classify_evidence_tier). This is ADDITIVE to and
+-- independent of blast_annotations.tier (the BLAST-only layer-1 grade, kept for
+-- backward-compat). Its purpose is to surface *novel* candidate biomarkers: a
+-- unitig with no known CARD gene but CPSS-stable + pyseer-significant (the
+-- lineage-aware backbone) grades `strong_novel` here while the BLAST-only tier
+-- buries it as `none`.
+CREATE TABLE IF NOT EXISTS unitig_evidence_tier (
+    unitig_id          INTEGER NOT NULL REFERENCES unitigs(unitig_id),
+    model_id           INTEGER NOT NULL REFERENCES models(model_id),
+    evidence_tier      TEXT,     -- confirmed | strong_novel | candidate | weak | none
+    n_evidence_layers  INTEGER,  -- 0..6 passed layers (blast + prevalence/snp/mda/cpss/pyseer)
+    evidence_layers    TEXT,     -- csv of the passed layer names
+    is_novel_candidate INTEGER,  -- 0/1: strong_novel (no known gene, CPSS+pyseer+>=1)
+    PRIMARY KEY (unitig_id, model_id)
+);
+
 -- Single-row KB metadata (FAIR; surfaced by API /metadata). -----------------
 CREATE TABLE IF NOT EXISTS kb_metadata (
     id                INTEGER PRIMARY KEY CHECK (id = 1),
@@ -207,6 +225,8 @@ CREATE INDEX IF NOT EXISTS idx_unitigs_sequence    ON unitigs(sequence);
 CREATE INDEX IF NOT EXISTS idx_blast_gene          ON blast_annotations(gene_symbol);
 CREATE INDEX IF NOT EXISTS idx_scores_stability    ON unitig_model_scores(selection_frequency);
 CREATE INDEX IF NOT EXISTS idx_models_antibiotic   ON models(antibiotic);
+CREATE INDEX IF NOT EXISTS idx_evtier_model         ON unitig_evidence_tier(model_id, evidence_tier);
+CREATE INDEX IF NOT EXISTS idx_evtier_novel         ON unitig_evidence_tier(is_novel_candidate);
 """
 
 

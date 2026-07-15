@@ -372,6 +372,95 @@ def populate_permutation(conn, run_id, k, perm_df, labelperm):
     return n
 
 
+# --- Composite evidence tier (0.7.0) ---------------------------------------
+# Two of the five statistical layers — CPSS stability + pyseer LMM — are the
+# lineage-aware, confounder-robust "novelty backbone" (literature E2/E3): a
+# unitig passing BOTH with no known CARD gene is a strong *novel* candidate
+# biomarker that the BLAST-only tier would hide as `none`.
+def classify_evidence_tier(blast_hit, prevalence, snp, mda, cpss, pyseer):
+    """Fold the BLAST hit + the 5 statistical validation layers into one
+    per-(unitig, model) confidence grade. Returns
+    ``(tier, n_layers, passed_layers_csv, is_novel)``.
+
+    Grades (thesis Methods; HANDOFF §0.-5 item 0):
+      confirmed     — known CARD gene (BLAST confirmed/candidate) + >=2 stat layers
+      strong_novel  — NO known gene, but CPSS *and* pyseer + >=1 other stat layer
+                      (surfaces novel biomarkers the BLAST-only tier hides)
+      candidate     — a lone BLAST hit, OR >=2 stat layers (not the novel combo)
+      weak          — exactly one statistical layer, no BLAST hit
+      none          — no evidence
+    """
+    blast_hit = bool(blast_hit)
+    stat = (("prevalence", prevalence), ("snp", snp), ("mda", mda),
+            ("cpss", cpss), ("pyseer", pyseer))
+    passed = (["blast"] if blast_hit else []) + [name for name, hit in stat if hit]
+    n_stat = sum(1 for _, hit in stat if hit)
+    n_layers = n_stat + (1 if blast_hit else 0)
+    is_novel = bool((not blast_hit) and cpss and pyseer and (prevalence or mda or snp))
+    if blast_hit and n_stat >= 2:
+        tier = "confirmed"
+    elif is_novel:
+        tier = "strong_novel"
+    elif blast_hit or n_stat >= 2:
+        tier = "candidate"
+    elif n_stat == 1:
+        tier = "weak"
+    else:
+        tier = "none"
+    return tier, n_layers, ",".join(passed), is_novel
+
+
+def populate_evidence_tier(conn, model_id, run_id, perm_df):
+    """Derive + load the composite ``evidence_tier`` for every unitig of ONE
+    model. Reads the 5 KB-stored layers (blast / prevalence / snp / cpss /
+    pyseer) and takes MDA significance from step 12's ``permutation_significant``
+    column (the per-pass MDA flag is not otherwise stored in the KB —
+    validation_evidence keeps the effect size ``mda_auc_drop`` for kb_tables)."""
+    mda_sig = set()
+    if perm_df is not None and not perm_df.empty and "permutation_significant" in perm_df.columns:
+        for _, r in perm_df.iterrows():
+            if _b(r.get("permutation_significant")):
+                seq = str(r.get("kmer", "")).strip()
+                if seq:
+                    mda_sig.add(seq)
+    rows = conn.execute(
+        """SELECT s.unitig_id AS uid, u.sequence AS seq,
+             MAX(CASE WHEN ba.tier IN ('confirmed','candidate') THEN 1 ELSE 0 END) AS blast_hit,
+             MAX(COALESCE(bf.discriminative,0)) AS prevalence,
+             MAX(CASE WHEN vs.allele_class='resistant_allele' THEN 1 ELSE 0 END) AS snp,
+             MAX(CASE WHEN s.selection_method='cpss' AND s.stable=1 THEN 1 ELSE 0 END) AS cpss,
+             MAX(CASE WHEN pe.unitig_id IS NOT NULL THEN 1 ELSE 0 END) AS pyseer
+           FROM unitig_model_scores s
+           JOIN unitigs u ON u.unitig_id = s.unitig_id
+           LEFT JOIN blast_annotations ba
+                  ON ba.unitig_id = s.unitig_id AND ba.model_id = s.model_id
+           LEFT JOIN unitig_background_frequency bf
+                  ON bf.unitig_id = s.unitig_id AND bf.model_id = s.model_id
+           LEFT JOIN variant_snp_check vs
+                  ON vs.unitig_id = s.unitig_id AND vs.model_id = s.model_id
+           LEFT JOIN validation_evidence pe
+                  ON pe.unitig_id = s.unitig_id AND pe.pipeline_run_id = ?
+                     AND pe.evidence_type = 'pyseer_lmm'
+           WHERE s.model_id = ?
+           GROUP BY s.unitig_id, u.sequence""",
+        (run_id, model_id),
+    ).fetchall()
+    n = 0
+    for uid, seq, blast_hit, prevalence, snp, cpss, pyseer in rows:
+        mda = 1 if seq in mda_sig else 0
+        tier, n_layers, layers, is_novel = classify_evidence_tier(
+            blast_hit, prevalence, snp, mda, cpss, pyseer)
+        conn.execute(
+            """INSERT OR REPLACE INTO unitig_evidence_tier
+               (unitig_id, model_id, evidence_tier, n_evidence_layers,
+                evidence_layers, is_novel_candidate)
+               VALUES (?,?,?,?,?,?)""",
+            (uid, model_id, tier, n_layers, layers, 1 if is_novel else 0),
+        )
+        n += 1
+    return n
+
+
 def update_metadata(conn, card_version):
     n_unitigs = conn.execute("SELECT COUNT(*) FROM unitigs").fetchone()[0]
     n_models = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
@@ -534,6 +623,12 @@ def main():
         n_c = populate_cpss(conn, model_id, run_id, k_length, cpss)
         n_l = populate_pyseer(conn, run_id, pyseer_sig,
                               (pyseer_sum or {}).get("bonferroni_threshold"))
+        # 0.7.0: composite evidence tier (runs last — needs every other layer
+        # already written for this model, esp. pyseer/cpss/blast).
+        n_et = populate_evidence_tier(conn, model_id, run_id, perm_df)
+        n_novel = conn.execute(
+            "SELECT COUNT(*) FROM unitig_evidence_tier WHERE model_id=? AND is_novel_candidate=1",
+            (model_id,)).fetchone()[0]
         # 0.5.0: model feature count + antibiotic meta + external concordance
         nf = _count_features(matrix_dir)
         conn.execute("UPDATE models SET n_features=? WHERE model_id=?", (nf, model_id))
@@ -547,6 +642,7 @@ def main():
     print(f"\n  ✓ run_id={run_id}  model_id={model_id}  | unitigs loaded: {n_k} "
           f"| SNP rows: {n_s} | permutation evidence: {n_p} | CPSS stable: {n_c} "
           f"| pyseer LMM evidence: {n_l} | n_features: {nf} | external concordance: {n_ext}")
+    print(f"  ✓ evidence_tier graded: {n_et} unitigs | novel candidates (strong_novel): {n_novel}")
     print(f"  ✓ KB written: {db_path}  (schema {KB_SCHEMA_VERSION})")
 
 
