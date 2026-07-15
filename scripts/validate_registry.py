@@ -67,10 +67,18 @@ def _check_registry(errors: list[str], warnings: list[str]) -> None:
         if str(ab).lower() not in seen:
             warnings.append(f"amrfinder_keywords lists '{ab}' which is not a class member")
 
-    # 6) organisms: lowercase slugs, priority_classes exist, antibiotics classified
+    # 6) organisms: lowercase slugs, valid status, priority_classes exist,
+    #    antibiotics classified
     for slug, block in registry.load_organisms().items():
         if not _SLUG_RE.match(slug):
             errors.append(f"organism slug '{slug}' is not lowercase snake_case")
+        # An unknown status silently makes the organism INACTIVE (is_active() just
+        # tests membership), so a typo would quietly drop it from the panel with
+        # nothing failing. Pin the vocabulary shut.
+        status = block.get("status")
+        if status is not None and status not in registry.VALID_STATUS:
+            errors.append(f"organism '{slug}' status '{status}' not in "
+                          f"{sorted(registry.VALID_STATUS)}")
         for cid in block.get("priority_classes", []) or []:
             if cid not in classes:
                 errors.append(f"organism '{slug}' priority_class '{cid}' is not a known class")

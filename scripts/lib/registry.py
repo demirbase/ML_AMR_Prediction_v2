@@ -170,9 +170,19 @@ def normalize_antibiotic(name):
     return _alias_index().get(key.lower(), key)
 
 
-# Organism `status:` values that count as an active ML target (schema 2.0).
-# Backward-compatible with the legacy boolean `enabled:` field.
+# Organism `status:` vocabulary (schema 2.0). VALID_STATUS is the closed set —
+# validate_registry rejects anything else, because an unknown value (a typo like
+# "in_progres") would silently make the organism inactive with nothing raising.
+#   done        — pipeline run, models in the KB
+#   in_progress — genomes downloaded and/or partially run
+#   planned     — on the panel, not started
+#   excluded_insufficient_data — checked and REJECTED: not enough
+#       laboratory-confirmed AST to train on. Deliberately not "planned": it is a
+#       recorded negative finding, not pending work. See the Enterobacter block in
+#       organisms.yaml for the measurement behind such a call.
 _ACTIVE_STATUS = {"done", "in_progress", "planned"}
+_INACTIVE_STATUS = {"excluded_insufficient_data"}
+VALID_STATUS = _ACTIVE_STATUS | _INACTIVE_STATUS
 
 
 def is_active(block):

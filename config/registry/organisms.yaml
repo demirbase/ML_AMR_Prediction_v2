@@ -10,7 +10,10 @@
 # Each block now carries the biology that used to live only in the KB schema
 # (gram_stain, phylum) + ESKAPEE prioritisation, so the registry is the single
 # source of truth and populate_database reads these instead of hard-coding them.
-#   status:          done | in_progress | planned  (replaces the old `enabled`)
+#   status:          done | in_progress | planned | excluded_insufficient_data
+#                    (replaces the old `enabled`; closed vocabulary — validate_registry
+#                    rejects anything else, since an unknown value would silently
+#                    make the organism inactive. See lib/registry.VALID_STATUS.)
 #   eskapee_phase:   1 (thesis + 1st paper: Kp, Ec, Sa, Ab) | 2 (2nd paper: Pa, Efm, Enterobacter)
 #   priority_classes: the antibiotic classes this organism is the strongest showcase for
 # Slugs are lowercase snake_case (must match kb_figures._abbr and path templates).
@@ -140,13 +143,39 @@ organisms:
     # PROVISIONAL:
     antibiotics: [vancomycin, teicoplanin, linezolid, ampicillin]
 
+  # ⛔ EXCLUDED FROM THE PANEL — insufficient laboratory-confirmed AST in BV-BRC.
+  # Reported in the thesis as a NEGATIVE FINDING, not silently dropped.
+  #
+  # MEASURED 2026-07-15 (lab-verified rows only, evidence="Laboratory Method"):
+  #   taxid 550 alone ............ 320 genomes, best minority  44 (tobramycin)
+  #   FULL ECC, 6 species ........ 466 genomes, best minority  89 (gentamicin)
+  #     550 E. cloacae 11935 rows | 61645 E. asburiae 2081 | 158836 E. hormaechei 1283
+  #     1812935 E. roggenkampii 799 | 299767 E. ludwigii 441 | 881260 E. bugandensis 294
+  #   antibiotics with minority >=150: 0.  With >=100: 0.
+  #
+  # The complex WAS checked before concluding. docs/literature/E4.md argues the
+  # scarcity is a taxonomy artefact — clinical "E. cloacae" is 80-92 % actually
+  # E. hormaechei, so querying taxid 550 supposedly hides ~90 % of the data. The
+  # biology is right but it does NOT hold in BV-BRC: 550 is the LARGE bucket
+  # (11935 rows) and hormaechei the small one (1283), because the database keeps
+  # the submitter's label regardless of what ANI would say. Expanding to all six
+  # species moved the best minority 44 -> 89, still far under the >=150 needed.
+  # E4's counter-example (1054 ECC genomes, AUC 0.88-0.91) drew on BV-BRC *plus
+  # NCBI NDARO plus a local hospital cohort* — the gain came from extra SOURCES,
+  # not from taxonomy.
+  #
+  # Reviving it means a second source (CABBAGE / NCBI NDARO) and therefore a
+  # BioSample-keyed dedup pipeline + cross-source label harmonisation (E4 §3-4) —
+  # a real investment for ONE phase-2 organism. Revisit for the 2nd paper; the
+  # thesis panel is phase 1 (E. coli, K. pneumoniae, S. aureus, A. baumannii) and
+  # does not depend on this.
   enterobacter_cloacae:
     display_name: "Enterobacter cloacae complex"
-    taxid: 550
+    taxid: 550   # NB: the ECC members carry their own taxids — see the note above
     gram_stain: negative
     phylum: Pseudomonadota
     eskapee_phase: 2
-    status: planned
+    status: excluded_insufficient_data
     priority_classes: [cephalosporins, carbapenems]   # AmpC hyperproduction + KPC/NDM
     metadata_file: "data/external/enterobacter_cloacae/metadata/amr_phenotypes.csv"
     genome_id_column: "Genome ID"
@@ -154,5 +183,5 @@ organisms:
     source: "BV-BRC"
     download_date: null
     filter_criteria: null
-    # PROVISIONAL (taxonomic contamination high — curate carefully):
+    # PROVISIONAL — never curated; the organism did not clear the data threshold:
     antibiotics: [meropenem, imipenem, cefotaxime, ceftazidime, cefepime, ciprofloxacin, gentamicin]

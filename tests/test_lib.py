@@ -232,3 +232,40 @@ def test_env_int_helper(monkeypatch):
     assert env_int("AMR_TEST_INT", 7) == 42
     monkeypatch.setenv("AMR_TEST_INT", "  ")      # blank -> default, not a crash
     assert env_int("AMR_TEST_INT", 7) == 7
+
+
+# ---- organism status vocabulary -------------------------------------------
+# is_active() just tests set membership, so an unknown status silently drops the
+# organism from the panel with nothing raising. validate_registry pins it shut.
+
+def test_status_vocabulary_is_closed():
+    from lib import registry
+    assert registry.VALID_STATUS == {
+        "done", "in_progress", "planned", "excluded_insufficient_data"}
+
+
+def test_excluded_organism_is_not_an_active_target():
+    from lib import registry
+    ent = registry.get_organism("enterobacter_cloacae")
+    assert ent["status"] == "excluded_insufficient_data"
+    assert not registry.is_active(ent)          # recorded negative finding, not pending work
+    active = {o for o, _ in registry.list_targets(enabled_only=True)}
+    assert "enterobacter_cloacae" not in active
+
+
+def test_validate_registry_rejects_an_unknown_status(monkeypatch):
+    """A typo'd status must fail loudly, not quietly deactivate the organism."""
+    import importlib.util
+    from lib import registry
+    spec = importlib.util.spec_from_file_location(
+        "vr", PROJECT_ROOT / "scripts" / "validate_registry.py")
+    vr = importlib.util.module_from_spec(spec); spec.loader.exec_module(vr)
+
+    orgs = {k: dict(v) for k, v in registry.load_organisms().items()}
+    orgs["ecoli"]["status"] = "in_progres"      # plausible typo
+    monkeypatch.setattr(registry, "load_organisms", lambda: orgs)
+    monkeypatch.setattr(vr.registry, "load_organisms", lambda: orgs)
+
+    errors, warnings = [], []
+    vr._check_registry(errors, warnings)
+    assert any("in_progres" in e for e in errors), errors
