@@ -138,13 +138,24 @@ def clean_amr_table(df, normalize_fn=None, intermediate_policy="drop",
     df = df.drop_duplicates()
     report["rows_dedup"] = len(df)
 
-    # 0) evidence filter — keep laboratory-measured phenotypes only (drop
-    #    computational predictions). No-op if the column is absent.
+    # 0) evidence filter — DROP software predictions. Note the polarity: this
+    #    excludes "Computational Method" rather than requiring "Laboratory
+    #    Method", because BV-BRC leaves `evidence` EMPTY on many real CLSI/EUCAST
+    #    measurements. Requiring "laborator" discarded those (measured 2026-07-15:
+    #    26 608 such rows for K. pneumoniae alone), and dropping a CLSI-standard
+    #    MIC because a neighbouring column was blank is not defensible.
+    #
+    #    Empty-evidence rows are NOT waved through: step 1 below keeps only
+    #    EUCAST/CLSI testing standards, so a row with neither evidence nor a
+    #    standard still goes. The two filters compose — this one removes what is
+    #    known to be computational, that one demands positive proof of real AST.
+    #    (Computational rows carry no testing_standard either, so step 1 would
+    #    catch them anyway; this stays explicit rather than relying on that.)
     if "evidence" in df.columns:
         # fillna("") before astype(str): newer pandas can leave NaN as a float
         # after astype(str).str.lower(), which then breaks substring tests.
         ev = df["evidence"].fillna("").astype(str).str.lower()
-        df = df[ev.str.contains("laborator", na=False)]
+        df = df[~ev.str.contains("computational", na=False)]
         report["rows_after_evidence"] = len(df)
 
     # 1) testing standard filter (EUCAST / CLSI only). Vectorised + NaN-safe:

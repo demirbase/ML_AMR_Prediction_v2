@@ -5,7 +5,10 @@ Step 00a — Download + clean BV-BRC AMR data, then fetch genome assemblies.
 
 Pipeline:
     1. Fetch the genome_amr table from the BV-BRC Data API (paginated), filtered
-       to taxon_id / public / evidence="Laboratory Method".            (or --raw-csv)
+       to taxon_id / public / evidence != "Computational Method".      (or --raw-csv)
+       i.e. EXCLUDE software predictions, rather than keep only rows explicitly
+       stamped "Laboratory Method" — many real CLSI/EUCAST measurements leave the
+       evidence field empty (see fetch_amr_table).
     2. Clean it (EUCAST/CLSI only, Resistant/Susceptible only, antibiotic name
        normalisation, majority -> newest-year conflict resolution) via lib.bvbrc.
     3. Download each surviving genome's contigs FASTA as {genome_id}.fna from the
@@ -80,7 +83,22 @@ FTP_FASTA = "https://ftp.bv-brc.org/genomes/{gid}/{gid}.fna"
 API_BATCH = 25000
 CLI_DRUGS_BATCH = 2000        # genomes per p3-get-genome-drugs call (progress + early-stop)
 SELECT_FIELDS = ["genome_id", "genome_name", "antibiotic", "resistant_phenotype",
-                 "testing_standard", "testing_standard_year"]
+                 "evidence", "testing_standard", "testing_standard_year",
+                 "laboratory_typing_method",
+                 # Raw MIC — kept so labels can later be re-interpreted against ONE
+                 # standard instead of trusting resistant_phenotype, which is a mix
+                 # of whatever breakpoint each submitter's year/continent used
+                 # (docs/literature/E4.md §4).
+                 "measurement", "measurement_sign", "measurement_value",
+                 "measurement_unit"]
+
+# Rows whose phenotype was PREDICTED from the genome by software, not measured in
+# a lab. They must never become ML labels: the model would learn to imitate
+# AMRFinder rather than reality, and the project's own headline claim — our
+# unitig model beats AMRFinderPlus (bACC 0.926 vs 0.538) — would be comparing a
+# tool against its own output. They dominate the database: 6.9M such rows for
+# E. coli vs 243k laboratory ones (measured 2026-07-15).
+COMPUTATIONAL_EVIDENCE = "Computational Method"
 
 log = logging.getLogger("bvbrc")
 
@@ -111,10 +129,24 @@ def _http_get(url, timeout=120):
 
 
 def fetch_amr_table(taxid):
-    """Fetch the full filtered genome_amr table via paginated API requests."""
+    """Fetch the full filtered genome_amr table via paginated API requests.
+
+    Selection = EXCLUDE software predictions, rather than the narrower "keep only
+    evidence='Laboratory Method'" this used to do. That older filter silently threw
+    away real measurements: BV-BRC has rows with an EMPTY `evidence` field that
+    nonetheless carry testing_standard=CLSI/EUCAST and laboratory_typing_method=
+    MIC/Broth dilution — unambiguously lab AST, just with one metadata field
+    unpopulated. Dropping a CLSI-standard MIC because a neighbouring column was
+    blank is not defensible to a reviewer.
+
+    ``ne()`` here also keeps rows whose evidence is NULL (Solr omits the field
+    rather than storing an empty string), which is exactly the set being rescued.
+    The rows are filtered again downstream: a row still needs an R/S phenotype to
+    become a label.
+    """
     base_rql = (
         f"and(eq(taxon_id,{taxid}),eq(public,true),"
-        f'eq(evidence,"Laboratory Method"))'
+        f'ne(evidence,"{COMPUTATIONAL_EVIDENCE}"))'
         f"&select({','.join(SELECT_FIELDS)})&sort(+genome_id)"
     )
     frames, start, complete = [], 0, True
@@ -157,7 +189,7 @@ def _fetch_amr_sample_api(taxid, n_genomes):
     rows_needed = max(n_genomes * 10, 1000)
     rql = (
         f"and(eq(taxon_id,{taxid}),eq(public,true),"
-        f'eq(evidence,"Laboratory Method"))'
+        f'ne(evidence,"{COMPUTATIONAL_EVIDENCE}"))'
         f"&select({','.join(SELECT_FIELDS)})&sort(+genome_id)&limit({rows_needed})"
     )
     url = _api_url(rql)
@@ -228,10 +260,16 @@ def fetch_amr_table_cli(taxid, limit_genomes=0):
 
 def _get_genome_drugs_cli(genome_ids):
     """Run p3-get-genome-drugs for a batch of genome ids; return a frame (TSV)."""
-    cmd = ["p3-get-genome-drugs", "--eq", "evidence,Laboratory Method",
+    # p3-get-genome-drugs has no "not equals", so the computational rows are
+    # fetched and dropped in-frame below — same rule as the API path, one place
+    # (COMPUTATIONAL_EVIDENCE) defining it.
+    cmd = ["p3-get-genome-drugs",
            "--attr", "genome_id", "--attr", "genome_name", "--attr", "antibiotic",
            "--attr", "resistant_phenotype", "--attr", "testing_standard",
-           "--attr", "testing_standard_year", "--attr", "evidence"]
+           "--attr", "testing_standard_year", "--attr", "evidence",
+           "--attr", "laboratory_typing_method",
+           "--attr", "measurement", "--attr", "measurement_sign",
+           "--attr", "measurement_value", "--attr", "measurement_unit"]
     stdin_text = "\n".join(["genome_id"] + genome_ids) + "\n"
     r = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True)
     if r.returncode != 0:
@@ -239,7 +277,32 @@ def _get_genome_drugs_cli(genome_ids):
         return pd.DataFrame()
     if not r.stdout.strip():
         return pd.DataFrame()
-    return pd.read_csv(io.StringIO(r.stdout), sep="\t")  # p3 tools emit TSV
+    df = pd.read_csv(io.StringIO(r.stdout), sep="\t")  # p3 tools emit TSV
+    return _drop_computational(df)
+
+
+def _drop_computational(df):
+    """Remove software-predicted phenotypes — the CLI counterpart of the API's
+    ``ne(evidence, "Computational Method")``.
+
+    p3-* prefixes its columns (``genome_drug.evidence``), so match on the suffix.
+    If no evidence column comes back at all, drop nothing rather than silently
+    discarding the batch: p3 output shape changing is a bug to notice, not a
+    reason to throw data away.
+    """
+    if df.empty:
+        return df
+    cols = [c for c in df.columns if c.split(".")[-1] == "evidence"]
+    if not cols:
+        log.warning("  p3-get-genome-drugs returned no 'evidence' column — "
+                    "cannot filter computational rows in this batch.")
+        return df
+    col = cols[0]
+    keep = df[col].fillna("") != COMPUTATIONAL_EVIDENCE
+    n_drop = int((~keep).sum())
+    if n_drop:
+        log.info(f"  dropped {n_drop} computational-prediction rows")
+    return df[keep]
 
 
 def download_one_cli(gid, dest_dir, retries=3):
@@ -438,7 +501,7 @@ def main():
         "organism": organism, "taxon_id": taxid,
         "source": "BV-BRC genome_amr",
         "backend": "raw-csv" if args.raw_csv else ("cli" if use_cli else "api"),
-        "filter": 'eq(public,true) & eq(evidence,"Laboratory Method")',
+        "filter": f'eq(public,true) & ne(evidence,"{COMPUTATIONAL_EVIDENCE}")',
         "cleaning": "EUCAST/CLSI only; Resistant/Susceptible only; name-normalised; "
                     "majority->newest-year conflict resolution",
         "intermediate_policy": intermediate_policy,

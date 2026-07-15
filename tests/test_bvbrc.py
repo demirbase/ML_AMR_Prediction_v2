@@ -175,3 +175,40 @@ def test_pivot_binary_shape_and_nan():
     assert list(wide.columns) == ["Genome ID", "ampicillin", "gentamicin"]
     row2 = wide[wide["Genome ID"] == "562.2"].iloc[0]
     assert row2["ampicillin"] == 1 and pd.isna(row2["gentamicin"])
+
+
+# ---- evidence polarity: drop computational, don't demand "Laboratory Method" --
+# BV-BRC leaves `evidence` EMPTY on many real CLSI/EUCAST measurements. The old
+# filter required "laborator" and silently discarded them (26 608 rows for
+# K. pneumoniae alone). The rescue must not, however, wave through rows with no
+# proof of real AST — the testing_standard filter still has to earn its keep.
+
+def _frame(rows):
+    import pandas as pd
+    return pd.DataFrame(rows, columns=["genome_id", "antibiotic", "resistant_phenotype",
+                                       "evidence", "testing_standard"])
+
+
+def test_empty_evidence_with_clsi_is_kept():
+    from lib.bvbrc import clean_amr_table
+    df = _frame([["1.1", "meropenem", "Resistant", None, "CLSI"],
+                 ["1.2", "meropenem", "Susceptible", "Laboratory Method", "EUCAST"]])
+    out, _ = clean_amr_table(df)
+    assert set(out["genome_id"]) == {"1.1", "1.2"}   # the empty-evidence CLSI row survives
+
+
+def test_computational_rows_are_dropped_even_with_a_standard():
+    from lib.bvbrc import clean_amr_table
+    df = _frame([["2.1", "meropenem", "Resistant", "Computational Method", "CLSI"],
+                 ["2.2", "meropenem", "Resistant", "Laboratory Method", "CLSI"]])
+    out, _ = clean_amr_table(df)
+    assert set(out["genome_id"]) == {"2.2"}
+
+
+def test_empty_evidence_without_a_standard_is_still_dropped():
+    """The rescue must not become a hole: no evidence AND no standard = no proof."""
+    from lib.bvbrc import clean_amr_table
+    df = _frame([["3.1", "meropenem", "Resistant", None, None],
+                 ["3.2", "meropenem", "Resistant", None, "CLSI"]])
+    out, _ = clean_amr_table(df)
+    assert set(out["genome_id"]) == {"3.2"}
