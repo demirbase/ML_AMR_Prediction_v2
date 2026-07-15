@@ -48,6 +48,24 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from lib.config import load_config, resolve_path, get_target  # noqa: E402
 
 
+def _pyseer_version():
+    """The pyseer version that produced this run's associations, or None.
+
+    Recorded HERE rather than in lib.run_metadata.collect_versions because pyseer
+    ships in amr-tools.sif while populate runs in amr.sif — only this step can see
+    the binary it actually called. Best-effort: a missing version must never fail
+    the run, it just leaves the provenance field empty.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(["pyseer", "--version"], capture_output=True,
+                           text=True, check=False, timeout=30)
+        out = (r.stdout or r.stderr or "").strip().splitlines()
+        return out[0] if out else None
+    except Exception:
+        return None
+
+
 def write_phenotype(genomes_csv, y_csv, out_tsv, samples_txt):
     """pyseer phenotype TSV ('samples<TAB>resistant') + a plain sample-name list
     (one genome id per line) for similarity_pyseer's positional argument."""
@@ -141,6 +159,10 @@ def main():
         "n_variants_tested": int(len(df)), "n_significant": int(len(sig)),
         "n_cpss_stable_significant": n_cpss_sig, "n_cpss_stable_total": len(cpss_kmers),
         "pvalue_column": pcol,
+        # pyseer lives in amr-tools.sif, populate runs in amr.sif — so the step
+        # that actually invokes the tool is the only one that can honestly report
+        # its version. populate reads it back from here into pipeline_runs.
+        "pyseer_version": _pyseer_version(),
     }
     (out_dir / f"14_pyseer_summary_{antibiotic}.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8")

@@ -109,8 +109,14 @@ def unitig_id(conn, sequence, k):
     return row[0]
 
 
-def populate_run(conn, organism, antibiotic, run_meta, card_version, min_support):
-    """Insert/replace the pipeline_runs row; return run_id."""
+def populate_run(conn, organism, antibiotic, run_meta, card_version, min_support,
+                 pyseer_version=None):
+    """Insert/replace the pipeline_runs row; return run_id.
+
+    ``pyseer_version`` comes from 14's summary rather than run_metadata: pyseer
+    ships in amr-tools.sif while this runs in amr.sif, so collect_versions cannot
+    see it and only the step that invoked it can report it honestly.
+    """
     rm = run_meta or {}
     run_id = rm.get("run_id") or f"{organism}__{antibiotic}__unknown"
     versions = rm.get("versions", {}) if isinstance(rm.get("versions"), dict) else {}
@@ -126,14 +132,22 @@ def populate_run(conn, organism, antibiotic, run_meta, card_version, min_support
         config_hash = rm.get("config_hash")
         if config_hash is not None and not isinstance(config_hash, str):
             config_hash = json.dumps(config_hash, sort_keys=True)
+    # 0.7.1: versions of the tools the results actually depend on. `versions` comes
+    # from lib.run_metadata.collect_versions, captured inside amr.sif — so pyseer
+    # is absent there (it lives in amr-tools.sif) and is passed in separately from
+    # 14's own summary, the only place that saw the binary that ran.
     conn.execute(
         """INSERT OR REPLACE INTO pipeline_runs
            (run_id, organism, antibiotic, git_commit, git_dirty, card_version,
-            kmc_version, xgboost_version, random_seed, config_hash, min_support,
-            n_genomes, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            kmc_version, xgboost_version, unitig_caller_version, bcalm_version,
+            poppunk_version, graph_tool_version, blast_version, pyseer_version,
+            random_seed, config_hash, min_support, n_genomes, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (run_id, organism, antibiotic, rm.get("git_commit_hash"), _i(rm.get("git_dirty")),
          card_version, versions.get("kmc"), versions.get("xgboost"),
+         versions.get("unitig_caller"), versions.get("bcalm"),
+         versions.get("poppunk"), versions.get("graph_tool"), versions.get("blastn"),
+         pyseer_version or versions.get("pyseer"),
          _i(rm.get("random_seed")), config_hash,
          _i(min_support), _i(rm.get("n_genomes")),
          rm.get("started_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
@@ -615,7 +629,9 @@ def main():
     matrix_dir = resolve_path("matrix_dir", organism=organism, antibiotic=antibiotic, config=config)
     try:
         populate_organisms(conn)                                  # 0.5.0 reference table
-        run_id = populate_run(conn, organism, antibiotic, run_meta, card_version, min_support)
+        run_id = populate_run(conn, organism, antibiotic, run_meta, card_version,
+                              min_support,
+                              pyseer_version=(pyseer_sum or {}).get("pyseer_version"))
         model_id = populate_model(conn, run_id, antibiotic, drug_class, manifest, metrics, holdout)
         n_k = populate_candidates(conn, model_id, run_id, k_length, cand, card_version)
         n_s = populate_snp(conn, model_id, run_id, k_length, snp)

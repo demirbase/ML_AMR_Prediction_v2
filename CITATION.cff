@@ -19,7 +19,7 @@ authors:
     email: "eren0demirbas@gmail.com"
 repository-code: "https://github.com/demirbase/ML_AMR_Prediction_v2"
 license: MIT
-version: "0.7.0"
+version: "0.7.1"
 date-released: "2026-07-01"
 keywords:
   - antimicrobial resistance

@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amr-kmer-kb"
-version = "0.7.0"
+version = "0.7.1"
 description = "Explainable, FAIR, multi-organism AMR unitig-biomarker knowledge-base pipeline (ESKAPEE)"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"

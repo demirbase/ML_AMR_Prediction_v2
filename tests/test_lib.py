@@ -269,3 +269,70 @@ def test_validate_registry_rejects_an_unknown_status(monkeypatch):
     errors, warnings = [], []
     vr._check_registry(errors, warnings)
     assert any("in_progres" in e for e in errors), errors
+
+
+# ---- tool-version provenance (schema 0.7.1) --------------------------------
+# The KB used to record kmc (a QC-only tool for the abandoned k-mer baseline) but
+# not unitig-caller (builds the features) or PopPUNK (defines the CV groups), so
+# it could not say what produced its own lineage labels. graph_tool is tracked
+# because pinning PopPUNK does NOT pin its behaviour: on 2026-07-15 a rebuild held
+# poppunk at 2.7.8 while graph-tool went 2.98 -> 3.0 and E. coli re-clustered.
+
+def test_collect_versions_captures_the_science_defining_tools():
+    from lib import run_metadata
+    v = run_metadata.collect_versions()
+    for tool in ("unitig_caller", "bcalm", "poppunk", "graph_tool", "pyseer"):
+        assert tool in v, f"{tool} missing from collect_versions"
+
+
+def test_pipeline_runs_has_tool_version_columns(tmp_path):
+    import sqlite3
+    from lib.kb_schema import create_schema
+    c = sqlite3.connect(str(tmp_path / "k.db"))
+    create_schema(c)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(pipeline_runs)")}
+    for col in ("unitig_caller_version", "bcalm_version", "poppunk_version",
+                "graph_tool_version", "blast_version", "pyseer_version"):
+        assert col in cols, f"{col} missing from pipeline_runs"
+    c.close()
+
+
+def test_pre_071_kb_gains_the_columns_instead_of_failing(tmp_path):
+    """A KB created before 0.7.1 must migrate, not break on the next INSERT."""
+    import sqlite3
+    from lib.kb_schema import create_schema
+    p = str(tmp_path / "old.db")
+    c = sqlite3.connect(p)
+    c.execute("""CREATE TABLE pipeline_runs (run_id TEXT PRIMARY KEY, organism TEXT,
+                 antibiotic TEXT, git_commit TEXT, git_dirty INTEGER, card_version TEXT,
+                 kmc_version TEXT, xgboost_version TEXT, random_seed INTEGER,
+                 config_hash TEXT, min_support INTEGER, n_genomes INTEGER, created_at TEXT)""")
+    c.execute("INSERT INTO pipeline_runs(run_id, organism, antibiotic) VALUES ('R0','ecoli','amp')")
+    c.commit()
+    create_schema(c)                       # migration path
+    cols = {r[1] for r in c.execute("PRAGMA table_info(pipeline_runs)")}
+    assert "poppunk_version" in cols and "graph_tool_version" in cols
+    # the pre-existing row survives with an honest NULL — it genuinely cannot say
+    assert c.execute("SELECT poppunk_version FROM pipeline_runs WHERE run_id='R0'").fetchone()[0] is None
+    c.close()
+
+
+def test_populate_run_writes_versions_including_pyseer_from_step14(tmp_path):
+    import sqlite3, importlib.util
+    from lib.kb_schema import create_schema
+    spec = importlib.util.spec_from_file_location(
+        "pop", PROJECT_ROOT / "scripts" / "populate_database.py")
+    pop = importlib.util.module_from_spec(spec); spec.loader.exec_module(pop)
+
+    c = sqlite3.connect(str(tmp_path / "k.db")); create_schema(c)
+    run_meta = {"run_id": "R1", "versions": {
+        "unitig_caller": "unitig-caller 1.3.2", "bcalm": "bcalm 2.2.3",
+        "poppunk": "poppunk 2.7.8", "graph_tool": "3.0", "blastn": "blastn: 2.17.0+",
+        "kmc": "K-Mer Counter 3.2.4", "xgboost": "3.2.0"}}
+    # pyseer comes from 14's summary, NOT from collect_versions (different container)
+    pop.populate_run(c, "ecoli", "ampicillin", run_meta, "4.0.1", 5,
+                     pyseer_version="pyseer 1.4.1")
+    row = c.execute("""SELECT poppunk_version, graph_tool_version, unitig_caller_version,
+                              pyseer_version FROM pipeline_runs WHERE run_id='R1'""").fetchone()
+    assert row == ("poppunk 2.7.8", "3.0", "unitig-caller 1.3.2", "pyseer 1.4.1")
+    c.close()

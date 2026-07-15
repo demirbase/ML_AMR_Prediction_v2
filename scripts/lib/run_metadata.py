@@ -66,7 +66,26 @@ def _pkg_version(name):
 
 
 def collect_versions(config=None):
-    """Best-effort capture of language / library / external-tool versions."""
+    """Best-effort capture of language / library / external-tool versions.
+
+    The tools that DEFINE the science are recorded, not just the incidental ones.
+    This used to capture kmc (a QC-only tool for the abandoned k-mer baseline)
+    while omitting unitig-caller — which builds the features — and PopPUNK —
+    which defines the cross-validation groups. A KB that cannot say which PopPUNK
+    produced its lineage labels has a provenance chain broken exactly where it
+    matters.
+
+    graph-tool is here for a hard-won reason: on 2026-07-15 a container rebuild
+    held poppunk pinned at 2.7.8 while graph-tool — PopPUNK's network backend —
+    re-solved 2.98 -> 3.0 underneath it, and the E. coli clustering moved (324 ->
+    397 lineages, ARI 0.990 vs the old labels). PopPUNK's own version does NOT
+    pin its behaviour; graph-tool's is part of the answer.
+
+    Best-effort by design: a tool living in another container (pyseer is in
+    amr-tools.sif, not amr.sif where populate runs) simply returns None here and
+    is recorded by the step that actually runs it — see 14_pyseer_lmm, which
+    writes its pyseer version into its own summary.
+    """
     versions = {
         "python": sys.version.split()[0],
         "xgboost": _pkg_version("xgboost"),
@@ -75,11 +94,24 @@ def collect_versions(config=None):
         "scipy": _pkg_version("scipy"),
         "kmc": _tool_version("kmc", "-h") or _tool_version("kmc"),
         "blastn": _tool_version("blastn", "-version"),
+        # ── the tools the results actually depend on ──────────────────────────
+        "unitig_caller": _tool_version("unitig-caller"),   # builds the features
+        "bcalm": _tool_version("bcalm"),                   # compacted de Bruijn graph
+        "poppunk": _tool_version("poppunk"),               # defines the CV groups
+        "graph_tool": _pkg_version("graph_tool"),          # changes PopPUNK's clustering
+        "pyseer": _tool_version("pyseer"),                 # None from amr.sif; see docstring
     }
+    # The KB schema version comes from CODE, never from config. As a config key it
+    # rotted to 0.6.1 while the schema was 0.7.1, and this function copied that
+    # stale value into run_metadata.json — i.e. the KB misreported its own schema.
+    try:
+        from lib.kb_schema import KB_SCHEMA_VERSION
+        versions["kb_schema_version"] = KB_SCHEMA_VERSION
+    except Exception:
+        versions["kb_schema_version"] = None
     if config is not None:
         prov = config.get("provenance", {}) or {}
         versions["card_version"] = prov.get("card_version")
-        versions["kb_schema_version"] = prov.get("kb_schema_version")
     return versions
 
 

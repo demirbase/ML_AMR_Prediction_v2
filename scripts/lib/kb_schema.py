@@ -29,7 +29,7 @@ Design notes
 Bump ``KB_SCHEMA_VERSION`` (semantic versioning) on any schema change.
 """
 
-KB_SCHEMA_VERSION = "0.7.0"
+KB_SCHEMA_VERSION = "0.7.1"
 
 # Ordered DDL — parent tables before the children that reference them.
 SCHEMA_SQL = """
@@ -45,6 +45,24 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     card_version    TEXT,                    -- e.g. 4.0.1 (BLAST annotation source)
     kmc_version     TEXT,
     xgboost_version TEXT,
+    -- 0.7.1: the tools the RESULTS depend on. Until now this table recorded kmc
+    -- (a QC-only tool for the abandoned k-mer baseline) but not unitig-caller,
+    -- which builds the features, nor PopPUNK, which defines the CV groups — so
+    -- the KB could not say what produced its own lineage labels.
+    unitig_caller_version TEXT,              -- builds the unitig features
+    bcalm_version         TEXT,              -- compacted de Bruijn graph
+    poppunk_version       TEXT,              -- defines the lineage-CV groups
+    -- NOT redundant with poppunk_version: pinning PopPUNK does NOT pin its
+    -- behaviour. Verified 2026-07-15 — a rebuild held poppunk at 2.7.8 while its
+    -- network backend graph-tool went 2.98 -> 3.0, and E. coli re-clustered
+    -- (324 -> 397 lineages, ARI 0.990). Different clusters = different folds =
+    -- different AUCs, silently.
+    graph_tool_version    TEXT,
+    blast_version         TEXT,              -- BLAST+ used for the CARD/NCBI pass
+    -- Reported by 14_pyseer_lmm into its own summary and read back by populate:
+    -- pyseer ships in amr-tools.sif, populate runs in amr.sif, so only the step
+    -- that invokes pyseer can honestly report its version.
+    pyseer_version        TEXT,
     random_seed     INTEGER,
     config_hash     TEXT,                    -- data/config fingerprint
     min_support     INTEGER,                 -- effective (adaptive) feature filter
@@ -252,6 +270,13 @@ def create_schema(conn):
     if ov and "organism" not in ov:
         conn.execute("DROP TABLE unitig_antibiotic_overlap")
         conn.executescript(SCHEMA_SQL)   # re-creates only the dropped table (others IF NOT EXISTS)
+    # 0.7.1: tool-version provenance for the tools that define the results. Added
+    # here too so a pre-0.7.1 KB gains the columns instead of failing on INSERT.
+    # They stay NULL for runs recorded before this landed — an honest "unknown",
+    # which is the point: those rows genuinely cannot say what produced them.
+    for col in ("unitig_caller_version", "bcalm_version", "poppunk_version",
+                "graph_tool_version", "blast_version", "pyseer_version"):
+        _add_column(conn, "pipeline_runs", col, "TEXT")
     conn.commit()
 
 
