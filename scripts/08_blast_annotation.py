@@ -74,13 +74,17 @@ ORGANISM          = get_target(config=config)[0]
 TOP_N             = config['analysis']['top_n_features']
 
 # Organism-aware path resolution (SCALE_MLOPS_PLAN §4.2)
-from lib.config import resolve_path
+from lib.config import env_bool, resolve_path
 from lib.registry import get_organism
 
 # Resolve BLAST parameters from config
 blast_cfg   = config.get('blast', {})
 CARD_DB_DIR = PROJECT_ROOT / blast_cfg.get('card_db_dir', 'data/blast_db/card_nt')
 CARD_DB     = CARD_DB_DIR / blast_cfg.get('card_db_name', 'card')
+# Escape hatch for a deliberate NCBI-remote-only run. Env rather than a CLI flag
+# because 08 has no argparse — the target itself comes from AMR_ORGANISM/
+# AMR_ANTIBIOTIC — so this matches how every other knob reaches a SLURM job.
+ALLOW_MISSING_CARD_DB = env_bool('AMR_ALLOW_MISSING_CARD_DB', False)
 EVALUE      = blast_cfg.get('evalue',    10)
 WORD_SIZE   = blast_cfg.get('word_size', 11)
 THREADS     = blast_cfg.get('threads',   8)
@@ -236,11 +240,26 @@ def main() -> None:
         or any(CARD_DB.parent.glob(CARD_DB.name + ".*.nhr"))
     )
     if not card_present:
-        print(f"  ⚠ CARD database not found at: {CARD_DB}")
-        print(f"    CARD local BLAST will fail. To build the database:")
-        print(f"      1. Download: https://card.mcmaster.ca/download")
-        print(f"      2. makeblastdb -in <card.fna> -dbtype nucl -out {CARD_DB}")
-        print(f"    Continuing — NCBI remote BLAST will still run.\n")
+        # HARD FAIL by default. The local CARD pass is where tier, gene_symbol and
+        # the ARO mapping come from — the KB's entire biology layer. Skipping it
+        # does not produce a smaller KB, it produces a HOLLOW one: the pipeline
+        # still exits 0, populate still writes rows, and nothing downstream
+        # notices that every annotation is empty. That is the failure mode you
+        # only discover after a full re-populate, which is exactly when it costs
+        # the most. A warning is not enough for something this silent.
+        msg = (
+            f"CARD database not found at: {CARD_DB}\n"
+            f"  The local CARD BLAST pass supplies tier / gene_symbol / ARO — without\n"
+            f"  it the KB's biology layer would be silently empty, so this is fatal.\n"
+            f"  To build the database:\n"
+            f"    1. Download: https://card.mcmaster.ca/download\n"
+            f"    2. makeblastdb -in <card.fna> -dbtype nucl -out {CARD_DB}\n"
+            f"  If you really do want an NCBI-remote-only run, pass --allow-missing-card-db."
+        )
+        if not ALLOW_MISSING_CARD_DB:
+            sys.exit(f"ERROR: {msg}")
+        print(f"  ⚠ {msg}")
+        print(f"    --allow-missing-card-db given — continuing with NCBI remote only.\n")
     else:
         print(f"  ✓ CARD database   : {CARD_DB}")
 
