@@ -30,6 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from lib import kb_queries as Q  # noqa: E402
+from lib.kb_schema import KB_SCHEMA_VERSION  # noqa: E402
 
 DB_PATH = Path(os.environ.get("AMR_KB_DB", PROJECT_ROOT / "results" / "kb" / "amrk.db"))
 
@@ -40,9 +41,9 @@ def _create_app():
 
     app = FastAPI(
         title="AMRK-DB API",
-        version="0.4.0",
+        version=KB_SCHEMA_VERSION,   # single source of truth — never hardcode a copy
         description="Read-only API over the stability-filtered, lineage-validated, "
-                    "unitig-resolution AMR biomarker knowledge base for E. coli.",
+                    "unitig-resolution AMR biomarker knowledge base for ESKAPEE pathogens.",
     )
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"],
                        allow_headers=["*"])
@@ -117,7 +118,7 @@ def _create_app():
 
     @app.get("/")
     def root():
-        return {"name": "AMRK-DB API", "version": "0.4.0", "docs": "/docs",
+        return {"name": "AMRK-DB API", "version": KB_SCHEMA_VERSION, "docs": "/docs",
                 "endpoints": ["/api/v1/metadata", "/api/v1/stats", "/api/v1/kmers",
                               "/api/v1/kmers/{sequence}", "/api/v1/novel",
                               "/api/v1/overlap?ab1=&ab2="]}

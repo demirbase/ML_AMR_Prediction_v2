@@ -77,13 +77,16 @@ def test_load_lineage_missing_genome_raises(tmp_path):
     assert groups.tolist() == ["1", "1", "UNCLUSTERED"]
 
 
-def test_collapse_rare_clusters():
-    groups = np.array(["A", "A", "A", "B", "C", "C"], dtype=object)  # A=3, B=1, C=2
-    out = lineage.collapse_rare_clusters(groups, min_size=2)
-    # B (size 1) pooled into OTHER; A and C kept
-    assert out.tolist() == ["A", "A", "A", "OTHER", "C", "C"]
-    # no-op when min_size <= 1
-    assert lineage.collapse_rare_clusters(groups, min_size=1).tolist() == groups.tolist()
+def test_singleton_clusters_stay_separate_and_leak_free():
+    """PopPUNK clusters are used as-is (no rare-cluster pooling), so a singleton
+    is its own group — it lands wholly on one side of every split."""
+    groups = np.array(["A", "A", "A", "A", "B", "C", "C", "C"], dtype=object)  # B = singleton
+    y = np.array([0, 1, 0, 1, 1, 0, 1, 0])
+    masks = lineage.group_kfold_masks(y, groups, n_splits=2)
+    for train_mask, test_mask in masks:
+        assert lineage.no_group_leakage(train_mask, test_mask, groups)
+    # the singleton is never split across sides, and never silently pooled away
+    assert set(groups.tolist()) == {"A", "B", "C"}
 
 
 def test_lineage_summary():

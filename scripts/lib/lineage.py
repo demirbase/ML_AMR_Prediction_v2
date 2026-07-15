@@ -15,9 +15,14 @@ masks** (one per fold) that plug straight into ``lib.xgb_data`` (``row_mask=``),
 the same mechanism 07b already uses. Lineage labels come from PopPUNK (organism-
 level, antibiotic-independent — computed once, reused for every antibiotic).
 
+PopPUNK clusters are used AS-IS: every cluster, including singletons, stays its
+own group. Pooling rare clusters into one bucket was considered and rejected —
+unrelated singletons would become a single group and therefore all land in the
+same fold, skewing it, whereas separate singletons cost nothing (each still sits
+wholly on one side of a split, so ``no_group_leakage`` holds either way).
+
 Public API:
     load_lineage(genomes_csv, clusters_csv)        -> np.ndarray (groups, genome order)
-    collapse_rare_clusters(groups, min_size)       -> np.ndarray (rare -> pooled)
     group_kfold_masks(y, groups, n_splits)         -> [(train_mask, test_mask), ...]
     lineage_summary(groups)                         -> dict (n_clusters, sizes, ...)
     no_group_leakage(train_mask, test_mask, groups)-> bool
@@ -74,24 +79,6 @@ def load_lineage(genomes_csv: str | Path, clusters_csv: str | Path, *,
         )
     groups = np.array([mapping.get(g, missing_label) for g in genomes], dtype=object)
     return groups
-
-
-def collapse_rare_clusters(groups: np.ndarray, min_size: int = 10, *,
-                           other_label: str = "OTHER") -> np.ndarray:
-    """Pool clusters with fewer than ``min_size`` members into ``other_label``.
-
-    ROADMAP §0.1 lets tiny ST clusters be merged so they do not fragment the fold
-    structure. NOTE the trade-off: pooled genomes become ONE group and therefore
-    all land in the same fold — use a modest ``min_size`` (e.g. 5-10). ``min_size``
-    <= 1 is a no-op. The default policy elsewhere keeps clusters separate; call
-    this explicitly when you want pooling.
-    """
-    groups = np.asarray(groups, dtype=object)
-    if min_size <= 1:
-        return groups.copy()
-    counts = Counter(groups.tolist())
-    return np.array([g if counts[g] >= min_size else other_label for g in groups],
-                    dtype=object)
 
 
 def group_kfold_masks(y: np.ndarray, groups: np.ndarray, n_splits: int = 5, *,

@@ -173,7 +173,11 @@ lineage:
   threads: null          # null -> preprocessing.threads
   # ── consumed by the CV step (lib/lineage, 06/07b wiring) ──
   n_splits: 5            # StratifiedGroupKFold folds (ROADMAP §0.1: 5-10)
-  min_cluster_size: 10   # pool clusters smaller than this (collapse_rare_clusters); 0/1 = keep all
+  # NOTE: PopPUNK clusters are used AS-IS — every cluster, singletons included, is
+  # its own CV group. There is deliberately no rare-cluster pooling key here: an
+  # earlier `min_cluster_size: 10` claimed pooling that no code ever performed.
+  # Pooling is also the weaker option (it would force unrelated singletons into one
+  # group and thus one fold); see lib/lineage.py.
 
 # ----------------------------------------------------------------------------
 # MACHINE LEARNING TRAINING PARAMETERS
