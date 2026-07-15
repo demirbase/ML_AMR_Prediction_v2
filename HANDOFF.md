@@ -5,20 +5,50 @@
 
 ---
 
-# §0.-6 — LATEST STATE (2026-07-15) — DEPLOY-ÖNCESİ SERTLEŞTİRME + YENİ CONTAINER KURULDU — READ FIRST, supersedes ALL below
+# §0.-6 — LATEST STATE (2026-07-15/16) — DEPLOY-ÖNCESİ SERTLEŞTİRME TAMAM · CONTAINER'LAR KİLİTLİ · GENOMLAR İNDİ — READ FIRST, supersedes ALL below
 
-> **Repo HEAD `ebc8526`**, hepsi push'lu. **TRUBA da artık senkron** (`$AMR_HOME` = origin/main; öncesinde HEAD **`5b76f47`** gibi çok eski bir commit'teydi ve dosyalar `git checkout origin/main -- <file>` ile tek tek güncellendiğinden index Frankenstein durumdaydı — `reset --hard` ile temizlendi).
-> Suite **126 passed**, `validate_registry` 0 hata, config'te 0 ölü anahtar.
+> **Repo HEAD `ebed4ed`**, hepsi push'lu. **TRUBA senkron** (`$AMR_HOME` = origin/main; öncesinde HEAD **`5b76f47`** gibi çok eski bir commit'teydi ve dosyalar `git checkout origin/main -- <file>` ile tek tek güncellendiğinden index Frankenstein durumdaydı — `reset --hard` ile temizlendi; o yöntem artık kullanılmıyor).
+> Suite **143 passed**, `validate_registry` 0 hata, config'te 0 ölü anahtar. **KB şeması 0.7.1.**
 
-### ⏳ TEK AÇIK KAPI: container kümeleme doğrulaması (iş `6098297`)
-Yeni container kuruldu (`$AMR_WORK/containers/amr-new.sif`) ama **HENÜZ GÜVENİLİR DEĞİL.** `environment.yml`'in **doğrudan** pinleri birebir tuttu (poppunk 2.7.8, python 3.12.13, pandas 3.0.3, numpy 2.5.0, sklearn 1.9.0, xgboost 3.2.0, unitig-caller 1.3.2, blast 2.17.0, kmc 3.2.4 — build string'lerine kadar aynı; nextflow ve shap yok). **Ama transitif bağımlılıklar kaydı:**
-- **`graph-tool` 2.98 → 3.0** (major) — PopPUNK'ın ağ-analizi backend'i
-- `mandrake` 1.2.5 → **1.2.4** (düşüş), `libprotobuf` 6.33.5 → 7.35.1, `libboost` 1.86 → 1.90
+### ✅ CONTAINER'LAR: üçü de pinli + kurulu + kilitli + terfi etmiş
+Kanonik isimler artık YENİ imajları gösteriyor; eskiler `*.RETIRED_20260715` olarak duruyor (tam koşu bitince silinir; Mac'te `backup/containers_20260715/` + SHA256SUMS var).
 
-**Neden önemli:** PopPUNK kümeleri = CV grupları. graph-tool 3.0 farklı kümelerse **her lineage-CV AUC'si kayar** ve yayımlanmış sonuçlarla kıyaslanamaz hâle gelir — hiçbir hata vermeden. Bu yüzden `verify_container.slurm` (iş **6098297**, barbun79) E. coli'yi **ESKİ parametrelerle** (`--min-k 13 --max-k 29 --k-step 4 --sketch-size 10000 --no-qc`) yeniden kümeliyor; tek değişken container. Sonra `scripts/compare_lineage.py` **Adjusted Rand Index** ile karşılaştırıyor (etiketler yeniden numaralanabilir → bölümleme kıyaslanır).
-- **ARI = 1.0 →** container temiz. `amr-new.sif` → `amr.sif` yap, `amr-pp.sif` emekli. E3 parametreleriyle tam ESKAPEE koşusuna geç.
-- **ARI < 1.0 →** `environment.yml`'e `graph-tool=2.98` + `mandrake=1.2.5` pinle, yeniden kur, tekrar doğrula. (Eski 4 sif Mac'te `backup/containers_20260715/` + SHA256SUMS.)
-- Çıktı: `$AMR_WORK/pp-verify-6098297.out`. `set -euo pipefail` var → kümeleme değişirse iş **FAILED** olur + mail gelir.
+| container | ne koşar | kilit | kritik sürümler |
+|---|---|---|---|
+| `amr.sif` | 00a-13b + **02c PopPUNK** | `environment.lock.yml` (355 pkg) | poppunk 2.7.8 · unitig-caller 1.3.2 · **graph-tool 3.0** · python 3.12.13 · blast 2.17.0 |
+| `amr-tools.sif` | **14 pyseer** + **16 M13** + quast | `environment-tools.lock.yml` (206) | pyseer 1.4.1 · **amrfinder 4.2.7** · resfinder 4.5.0 · kma 1.6.11 · **python 3.8.20** · blast 2.16.0 |
+| `amr-checkm2.sif` | 02d/M15 QC | `environment-checkm2.lock.yml` (127) | checkm2 1.1.0 · diamond 2.1.11 · python 3.12.13 |
+
+**Ortamlar arası sürüm ayrışması KASITLI ve belgelenmiş** (python 3.8 vs 3.12, numpy 1.22 vs 2.5, pandas 2.0 vs 3.0, blast 2.16 vs 2.17): pyseer/resfinder/AMRFinderPlus python 3.8'e çözülüyor, **tek container bu yüzden imkânsız**. Ortamlar birbirine düz metinle veri veriyor (rtab → pyseer → CSV → populate), güvenli. **Methods'ta "hangi adım hangi ortamda" tablosu yazılmalı.** Def dosyalarının eski gerekçesi ("CheckM2 python<3.9'a çakılı") **tam tersiydi**, düzeltildi.
+
+### 🔬 CONTAINER DOĞRULAMASI YAPILDI — graph-tool kümelemeyi DEĞİŞTİRDİ, bilerek kabul edildi
+`amr.sif`'in doğrudan pinleri birebir tuttu ama **transitif bağımlılıklar kaydı**: **graph-tool 2.98 → 3.0** (PopPUNK'ın ağ backend'i), mandrake 1.2.5 → 1.2.4, libprotobuf 6.33.5 → 7.35.1. İş `6098297` E. coli'yi **ESKİ parametrelerle** yeniden kümeledi (tek değişken: container) → `compare_lineage.py`:
+
+```
+ARI 0.990368  |  324 → 397 küme  |  singleton 157 → 234
+en büyük küme: 817 (%14.9) — İKİSİNDE DE AYNI, top5'in 4'ü aynı
+```
+
+Yani fark **saf kuyruk parçalanması**; lineage-CV'nin dayandığı büyük soylar bozulmamış, sızıntı yok, `config.yaml`'ın asıl iddiası ("dbscan bgmm gibi %94'lük mega-kümeye çökmüyor") 3.0'da birebir ayakta. **KARAR (kullanıcı): 3.0 kabul edildi** — zaten her şey yeniden koşuluyor, `environment.lock.yml` 3.0'ı pinliyor. Ölçüm `config.yaml` lineage bloğunda kayıtlı. **Her container rebuild'inden sonra tekrar ölç** (`scripts/compare_lineage.py`).
+
+> **DERS:** build "complete" dedi, 143 test yeşildi, araçlar çalıştı — sürüklenme yalnızca *eski parametrelerle koşup eski etiketlerle karşılaştırdığımız için* göründü. Bunu atlasaydık tüm ESKAPEE panelini farklı bir kümelemeyle koşar, farkı asla bilmezdik.
+
+### ✅ ARAÇ SÜRÜMÜ PROVENANCE'I (şema 0.7.1)
+`pipeline_runs` **kmc'yi** (terk edilmiş k-mer baseline'ının QC aracı) kaydediyordu ama **unitig-caller'ı** (özellikleri üretir) ve **PopPUNK'ı** (CV gruplarını tanımlar) kaydetmiyordu — KB kendi soy etiketlerini neyin ürettiğini söyleyemiyordu. Eklendi: `unitig_caller_version` · `bcalm_version` · `poppunk_version` · **`graph_tool_version`** · `blast_version` · `pyseer_version`. graph-tool ayrı kolon çünkü **PopPUNK'ı pinlemek davranışını pinlemiyor** (yukarıdaki ölçüm). pyseer'i **14 kendi summary'sine yazıyor** (amr-tools.sif'te yaşıyor, populate amr.sif'te — sadece aracı çağıran adım dürüstçe raporlayabilir). Migrasyon yolu var: 0.7.1-öncesi KB kolonları kazanır, eski satırlar NULL kalır (dürüst "bilinmiyor").
+**M13 provenance düzeltildi:** `AFP_SOURCE` **"AMRFinderPlus 2026-05-15.1"** diyordu — o **veritabanı** sürümü, yazılım **4.2.7**. Artık araca sorulup `AMRFinderPlus 4.2.7 (DB 2026-05-15.1)` yazılıyor; probe exit-code kontrol ediyor (yoksa `"No module named resfinder"` hata mesajını sürüm diye KB'ye damgalıyordu).
+**Sürüm drifti kalıcı olarak kapatıldı:** `tests/test_version_alignment.py` — 5 dosyayı `KB_SCHEMA_VERSION`'a çiviler, `.zenodo.json`'ın **prose'unda** gizli şema numarasını yakalar, config'in kopyası geri gelirse kırılır. (config'de **6. bir kopya** vardı: `provenance.kb_schema_version: "0.6.1"` — iki minor bayat ve `collect_versions` onu **KB'ye yazıyordu**; kaldırıldı, kod sabiti tek kaynak.)
+
+### 📥 GENOMLAR İNDİ (yeni filtreyle)
+| organizma | indi / hedef | kayıp | not |
+|---|---|---|---|
+| E. coli | 5681 / 6087 | %6.7 | eski hedef 5470 → **+617** |
+| K. pneumoniae | 4791 / 5167 | %7.3 | eski 4615 → **+552** |
+| S. aureus | 2639 / 2803 | %5.8 | eski 2494 → **+309** |
+| E. faecium | 2078 / 2275 | %8.7 | yeni |
+| A. baumannii | 1171 / 1251 | %6.4 | yeni |
+| P. aeruginosa | ~1486 | — | ilk koşu **yarım kaldı** (rapor yazılmadan öldü), `--workers 8` ile yeniden koşuldu |
+
+Kayıpların **tamamı** `empty or non-FASTA response` — BV-BRC'de o assembly'ler gerçekten yok (bilinen davranış, %6-9 tutarlı). **Filtre düzeltmesinin gerçek kazancı +%11-12** (ilk yazdığım +%23-108 YANLIŞTI: temizleyici-öncesi sayıyı sonrasıyla kıyaslamışım).
 
 ### Bu session ne yaptı — "belge bir şey diyor, kod başka şey yapıyor" sınıfı
 12-modül audit'i kodu inceledi ama **kodun kendisi hakkında söylediklerini** incelemedi. Testler bunları göremez (hiçbiri kod hatası değil). ~13 bulgu, üçü doğrudan tezi vuracaktı:
@@ -34,7 +64,7 @@ Diğerleri: `shap>=0.44` ölü (TreeSHAP XGBoost built-in, `import shap` yok) ·
 - **`environment.yml` TAM PİNLENDİ** + `environment.lock.yml` (355 paket, build-string'li) commit'lendi. `amr.def` tek-container tasarımını belgeliyor (`amr.sif`/`amr-pp.sif` ikiliği **tasarım değil, build-tarihi kazası**: amr-pp = aynı reçete 3 saat sonra, poppunk eklendikten sonra; ortak paketlerin build string'leri birebir aynıydı).
 - **02c PopPUNK parametreleri açıldı** — E3 ayarları panel geneline (k 15-35 step 2), S. aureus `sketch_size: 10^5` registry override'ı, `--qc-db` (daha önce **hiç** koşmuyordu). CLI flag'leri (`--min-k/--max-k/--k-step/--sketch-size/--no-qc/--out-name`) + `scripts/compare_lineage.py`.
 - **HPC kaynakları env'e** — `AMR_KMC_MEM` / `AMR_THREADS` (`load_config`'te, tek noktada). Artık `git reset` HPC ayarlarını silmiyor; HANDOFF'un "reset sonrası elle tekrar uygula" notu **geçersiz**.
-- **Zenodo/CITATION/pyproject/kb_app** → hepsi **0.7.0** + ESKAPEE. `.zenodo.json` "E. coli / schema 0.4.0" diyordu — **DOI ile kalıcılaşacaktı.** `notes` artık sayı tekrarlamıyor, "amrk.db'yi oku" diyor.
+- **Zenodo/CITATION/pyproject/kb_app** → hepsi **0.7.1** + ESKAPEE (artık `test_version_alignment.py` çiviliyor). `.zenodo.json` "E. coli / schema 0.4.0" diyordu — **DOI ile kalıcılaşacaktı.** `notes` artık sayı tekrarlamıyor, "amrk.db'yi oku" diyor.
 - **TRUBA temizliği: 766 GB → 216 GB.** `blast_db/core_nt` **318G** (yarıda bırakılmış NCBI indirmesi, kod referansı sıfır) · `data/interim` 155G · `ecoli/ampicillin/matrix` 49G (eski ham k-mer baseline) · staph rtab 3.6G · smoke artıkları. **KORUNDU:** genomlar 58G, card/amrfinder/resfinder/checkm2 DB'leri, containers.
 - **Yedekler:** 4 sif + SHA256SUMS → `backup/containers_20260715/` (Mac). `$AMR_WORK/backup/predeploy_20260715/` → KB + figures + tables + runs + **eski `poppunk_clusters.csv`** (= container testinin kontrol grubu).
 
@@ -52,7 +82,7 @@ Literatür **BGMM K=2 + refine** diyor, biz **dbscan + refine yok** kullanıyoru
 
 **Panel = 6 organizma** (kodda `registry.is_active` ile çözülüyor, iddia değil): E. coli · K. pneumoniae · S. aureus · A. baumannii · P. aeruginosa · E. faecium. **Enterobacter DIŞLANDI** (`status: excluded_insufficient_data`) — tam ECC kompleksi (6 tür, 466 genom) tarandı, hiçbir antibiyotik minority ≥150'yi geçmiyor (en iyi: gentamicin 89). E4 "taksonomi sorunu, kompleksi aç, kurtulur" dedi → **test edildi, çürüdü**: BV-BRC gönderenin etiketini koruyor, 550 büyük kova (11935 satır), hormaechei küçük (1283) — E4'ün varsaydığının tersi. Gerekçe registry bloğunda tam ölçümle yazılı. Diğer 5 organizmanın taxid'leri de kompleks-kontrolünden geçti: **temiz** (K. pneu 85291 vs variicola 1444; A. baumannii 28237 vs pittii 265 — ayrı türler, birleştirilmemeli).
 
-**🔴 FİLTRE HATASI BULUNDU VE DÜZELTİLDİ.** Eski sorgu `evidence="Laboratory Method"` İSTİYORDU. Ama BV-BRC gerçek CLSI/EUCAST ölçümlerinin çoğunda `evidence` alanını **boş** bırakıyor → o satırlar atılıyordu. Doğru kural: **"computational olanı at"**, "lab olanı iste" değil. Kazanç beklediğimden çok büyük: **S. aureus 2494→5190 (+%108), K. pneu 4615→7135 (+%55), A. baumannii 1126→1824 (+%62), E. coli 5470→6751 (+%23)**. İKİ katmanda birden düzeltildi (`00a` sorgusu + `lib/bvbrc` temizleyicisi — cleaner'ın kendi `contains("laborator")` kontrolü vardı, düzeltilmeseydi 00a düzeltmesi no-op olurdu). Ayrıca "computational" **İKİ kolonda** saklanıyor: `evidence` + `laboratory_typing_method` (K. pneu'da 9814 satır). İkincisi eski filtreden sızıyordu — etiketlere ULAŞMIYOR (hepsinin `testing_standard`'ı boş, standart filtresi eliyor, ölçüldü: 0 geçiyor) ama artık **açıkça** kapatıldı, şansa bırakılmadı.
+**🔴 FİLTRE HATASI BULUNDU VE DÜZELTİLDİ.** Eski sorgu `evidence="Laboratory Method"` İSTİYORDU. Ama BV-BRC gerçek CLSI/EUCAST ölçümlerinin çoğunda `evidence` alanını **boş** bırakıyor → o satırlar atılıyordu. Doğru kural: **"computational olanı at"**, "lab olanı iste" değil. **Gerçek kazanç +%11-12** (E. coli 5470→6087, K. pneu 4615→5167, S. aureus 2494→2803, P. aeruginosa 1312→1486 + 6 antibiyotik). ⚠️ Bu satır önce "+%108 / +%55 / +%62 / +%23" diyordu — **yanlıştı**: temizleyici-ÖNCESİ satır sayılarını temizleyici-SONRASI genom sayılarıyla kıyaslamıştım; `testing_standard` (EUCAST/CLSI) filtresi devreye girince rakam düşüyor. İKİ katmanda birden düzeltildi (`00a` sorgusu + `lib/bvbrc` temizleyicisi — cleaner'ın kendi `contains("laborator")` kontrolü vardı, düzeltilmeseydi 00a düzeltmesi no-op olurdu). Ayrıca "computational" **İKİ kolonda** saklanıyor: `evidence` + `laboratory_typing_method` (K. pneu'da 9814 satır). İkincisi eski filtreden sızıyordu — etiketlere ULAŞMIYOR (hepsinin `testing_standard`'ı boş, standart filtresi eliyor, ölçüldü: 0 geçiyor) ama artık **açıkça** kapatıldı, şansa bırakılmadı.
 
 **Computational satırlar ASLA etikete girmez** — E. coli'de 6.9M(!) vs 243K lab. Girerse model AMRFinder'ı taklit eder ve M13 flagship'i (0.926 vs 0.538) kendi kendini kıyaslamaya döner.
 
@@ -61,17 +91,24 @@ Literatür **BGMM K=2 + refine** diyor, biz **dbscan + refine yok** kullanıyoru
 **⛔ E1 TERSİNE DÖNDÜ — TEMPORAL VALIDATION İMKÂNSIZ.** Detay + rakamlar: `FINAL_AUDIT §E1`. Özet: etiketlenebilir genomlarda **≥2023 → E. coli 28, K. pneu 13, S. aureus 0, A. baumannii 11.** BV-BRC'nin AMR verisi 2021'de bitiyor. E1 doluluğa bakıp "fizibıl" demiş, **dağılıma bakmamış**. **Yıl (collection_year + testing_standard_year) tamamen işlemden çıktı.** Yeni dış-doğrulama stratejisi = **coğrafi + soy hold-out**; `isolation_country` %96-99 dolu. Uyarılar: ülke dominansı (E. coli %58 Norveç, A.b %63 USA → hold-out olamaz; dengeli olanlar S. aureus UK/Çin/USA ve K. pneu), ve **ülke-soy confounding** (coğrafinin PopPUNK-CV üstüne ne kattığı ölçülmeli). **Veri yetmezse coğrafiyi de katma** (kullanıcı kararı). M13 concordance yerinde duruyor.
 
 ### DEPLOY — KALAN ADIMLAR (sıralı)
-1. **⏳ `6098297` sonucu** → ARI 1.0 mı? (yukarıdaki iki yol)
-2. `amr-new.sif` → `amr.sif` (doğrulanınca); `slurm/` **kanonik 4'ü** repoya commit (32 dosyanın 28'i eskimiş tek-seferlik).
-3. **Faz B temizlik** (container doğrulandıktan SONRA): `data/processed/*/{ab}`, `results/{ecoli,kpneumoniae}`, `models/` (~185G, hepsi yeniden üretilecek).
-4. Pilot dry-run (1 ab, `--max-genomes 50`) → **`--qc-db` çağrısını DOĞRULA** (PopPUNK 2.7.8 `--help`'inden yazıldı, hiç koşulmadı) + `cv_method='lineage_group_kfold'` teyidi.
-5. **Tam ESKAPEE koşusu.** ⚡ **`unitig_all` store hiç kurulmamış** (`du` boş döndü; her antibiyotik kendi unitig-caller'ını koşmuş!) → **`03u --build-db` ile organizma başına BİR kez kur**, sonra subset. 7 organizma × çok antibiyotik için devasa tasarruf.
-6. Zenodo deposit + DOI.
+1. **P. aeruginosa indirmesini teyit et** — ilk koşu 966/1486'da rapor yazmadan öldü, `--workers 8` ile yeniden başlatıldı (`screen -r pa`). `$AMR_WORK/dlstat.sh` ile bak; `download_report.csv` oluştuysa bitmiştir. Ölürse yine yeniden koş (resume-safe).
+2. **🔴 Faz B temizlik — koşudan ÖNCE.** `data/processed/*/{ab}`, `results/{ecoli,kpneumoniae}`, `models/` (~185G, hepsi bayat: kod + filtre + genom seti değişti). Kalan tek gerçek blocker.
+3. **PROVISIONAL antibiyotik listelerini kapat** — 6 organizmanın minority tablolarını yeni metadata'dan çıkar (eşik: minority ≥150, K. pneu'da kullanılan), `organisms.yaml`'daki yer tutucu listeleri gerçek hedeflerle değiştir. Ölçülmüş adaylar: E. faecium **vancomycin 931** (VRE bayrak), A. baumannii imipenem 400 / meropenem 185 (carbapenem), P. aeruginosa meropenem 404 / ceftazidime 368.
+4. **A. baumannii `length_range`** — registry'de bilerek boş; genomlar indi, artık gözlenen uzunluk dağılımından türetilebilir (E3 §5).
+5. Pilot dry-run (1 ab, `--max-genomes 50`) → **`--qc-db` çağrısını DOĞRULA** (PopPUNK 2.7.8 `--help`'inden yazıldı, **hiç koşulmadı**) + `cv_method='lineage_group_kfold'` + `pipeline_runs`'ta yeni sürüm kolonlarının dolduğu teyidi.
+6. **Tam ESKAPEE koşusu.** ⚡ **`unitig_all` store hiç kurulmamış** (`du` boş döndü; her antibiyotik kendi unitig-caller'ını koşmuş!) → **`03u --build-db` ile organizma başına BİR kez kur**, sonra subset. 6 organizma × çok antibiyotik için devasa tasarruf.
+7. `slurm/` **kanonik 4'ü** repoya commit (32 dosyanın 28'i eskimiş tek-seferlik) — ayrıca `run_lineage.slurm` hâlâ emekli `amr-pp.sif`'i çağırıyor, `amr.sif`'e çevrilmeli.
+8. Zenodo deposit + DOI.
+
+**Analiz kalemleri (modeller ÇIKTIKTAN sonra, koşuyu bloke etmez):** MIC duyarlılık analizi (§ yukarı) · coğrafi hold-out + soy-CV'ye ne kattığının ölçümü · **random-vs-lineage-aware CV karşılaştırma tablosu** (E3 §8: hakem açıkça bekliyor, hâlâ yok) · H3 hypergeometric (E2 çerçevesi).
+
+**Açık, küçük:** `amr-gpu.def` ölü (M9-4) · 4 def'te de base imaj `condaforge/miniforge3:latest` (digest-pin TODO) · `*.RETIRED_20260715` sif'ler (tam koşu bitince sil) · 19 detached `screen` oturumu birikmiş.
 
 ### OPERASYONEL (bugün öğrenilenler — memory `amr-truba-gotchas`)
 - **Container build giriş düğümünde ÖLÜR** — `mksquashfs` CPU-time ulimit'ine çarpar ("CPU time limit exceeded", solve bittikten *sonra*). **`srun -p debug -N1 -c8 --time=02:00:00 --pty bash`** → orada 2dk13sn'de bitti. (`debug` partition: 4sa limit, internet + fakeroot var.)
 - **SLURM barbun: `--nodes=1` ŞART** — yoksa "node başına 20 çekirdek" QOS kontrolü hesaplayamaz ve reddeder. **`export APPTAINER_BINDPATH=/arf` ŞART** — yoksa container `/arf`'ı görmez. Altın örnek: `$AMR_HOME/slurm/run_lineage.slurm` (PopPUNK'ı daha önce başarıyla koşan script).
-- **Container'a `conda list` ile sorma** — `-p /opt/amr-env` vermezsen miniforge **base** env'ini listeler ve "paket yok" yanılgısı verir. PATH ile sor (`which` / `<tool> --version`) ya da prefix ver. Bu yüzden iki kez yanlış teşhis kondu.
+- **Container'a `conda list` ile sorma** — prefix vermezsen miniforge **base** env'ini listeler ve "paket yok" yanılgısı verir. Prefix'ler def dosyalarında yazılı: `amr.sif`→`/opt/amr-env`, `amr-tools.sif`→`/opt/amr-tools-env`, `amr-checkm2.sif`→`/opt/amr-checkm2-env`. `which` bu container'larda "Illegal option" veriyor — PATH'i `<tool> --version` ile yokla ya da prefix'i doğrudan ver. Bu yüzden iki kez yanlış teşhis kondu.
+- **`00a` indirmesi sessizce ölebilir** — P. aeruginosa 966/1486'da `download_report.csv` yazmadan öldü ve döngü (`set -e` yok) sessizce sonrakine geçti. **Rapor dosyasının varlığı = koşunun bittiğinin kanıtı**; sadece `.fna` saymak yanıltır. Ölürse `--workers` düşürüp yeniden koş (resume-safe, mevcutları atlar).
 - TRUBA'ya `rsync`/`ssh` **IP ile**: `172.16.6.14` (`.11`, `.16` de var); `arf-ui1` küme-içi ad, dışarıdan çözülmez. `.sif` çekerken `-z` **kullanma** (zaten sıkıştırılmış).
 - 19 detached `screen` oturumu birikmiş (`screen -ls`) — eski koşulardan ölü kabuklar, süpürülebilir.
 
