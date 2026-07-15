@@ -166,10 +166,24 @@ unitig:
 # with a lineage cluster; lib/lineage.py then builds GroupKFold folds so an entire
 # lineage stays on one side of train/test (no lineage leakage — ROADMAP §0.1).
 lineage:
-  # dbscan gives proper strain-level resolution on E. coli (324 clusters, largest
-  # ~15%); bgmm collapsed into one ~94% mega-cluster AND its degenerate 2-Gaussian
-  # fit made refine fail (NaN boundary). So: dbscan, no refine (dbscan alone is
-  # already well-distributed for GroupKFold; refine is an optional future sharpen).
+  # dbscan gives proper strain-level resolution on E. coli — MEASURED 2026-07-15
+  # under the pinned container (5470 genomes, PopPUNK 2.7.8 defaults k13-29/4,
+  # sketch 1e4): 397 lineages, largest 817 (14.9%), 234 singletons. bgmm instead
+  # collapsed into one ~94% mega-cluster AND its degenerate 2-Gaussian fit made
+  # refine fail (NaN boundary). So: dbscan, no refine (dbscan alone is already
+  # well-distributed for GroupKFold; refine is an optional future sharpen).
+  #
+  # These counts are graph-tool-dependent, which is not obvious and cost a day to
+  # learn. PopPUNK 2.7.8 pinned, but rebuilding the container re-solved its
+  # network backend graph-tool 2.98 -> 3.0, and the clustering moved: 324 -> 397
+  # lineages, 157 -> 234 singletons (ARI 0.990 vs the 2.98 labels). The BACKBONE
+  # was untouched — largest lineage identical at 817/14.9%, 4 of the top 5
+  # identical — the drift is pure tail fragmentation, so it changes no scientific
+  # claim (big lineages intact = the CV property we rely on; singletons never leak).
+  # DECISION: accept graph-tool 3.0 (pinned in environment.lock.yml) rather than
+  # hold 2.98 back, since every model is being re-populated on it anyway. The
+  # numbers above are 3.0's. Re-measure them after ANY container rebuild —
+  # scripts/compare_lineage.py exists for exactly that.
   model: "dbscan"        # PopPUNK --fit-model: dbscan | bgmm
   refine: false          # dbscan alone suffices; refine on bgmm failed on this data
   threads: null          # null -> preprocessing.threads
