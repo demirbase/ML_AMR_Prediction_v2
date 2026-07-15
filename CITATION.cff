@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use this software or the AMRK-DB knowledge base, please cite it using these metadata."
-title: "ML_AMR_Prediction_v2 / AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base pipeline for ESKAPEE pathogens (E. coli, K. pneumoniae)"
+title: "ML_AMR_Prediction_v2 / AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base pipeline for ESKAPEE pathogens"
 abstract: >-
   An alignment-free, out-of-core machine-learning pipeline that predicts
-  antimicrobial resistance (AMR) in Escherichia coli from whole-genome
+  antimicrobial resistance (AMR) in ESKAPEE pathogens from whole-genome
   assemblies using unitig (compacted de Bruijn graph) presence/absence features
   and XGBoost, then reverse-translates the most important unitigs into biology
   via CPSS stability selection (B=100, pi>=0.6, PFER-bounded), lineage-aware
@@ -19,7 +19,7 @@ authors:
     email: "eren0demirbas@gmail.com"
 repository-code: "https://github.com/demirbase/ML_AMR_Prediction_v2"
 license: MIT
-version: "0.6.1"
+version: "0.7.0"
 date-released: "2026-07-01"
 keywords:
   - antimicrobial resistance
@@ -31,7 +31,7 @@ keywords:
   - lineage-aware validation
   - pyseer
   - knowledge base
-  - Escherichia coli
+  - ESKAPEE
   - CARD
   - ARO ontology
   - reproducible research

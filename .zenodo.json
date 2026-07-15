@@ -1,11 +1,11 @@
 {
-  "title": "AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base for ESKAPEE pathogens (E. coli & K. pneumoniae)",
+  "title": "AMRK-DB: an explainable, multi-organism, FAIR, unitig-resolution AMR biomarker Knowledge Base for ESKAPEE pathogens",
   "upload_type": "dataset",
   "access_right": "open",
   "license": "cc-by-4.0",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "language": "eng",
-  "description": "<p>AMRK-DB is a queryable, confidence-tiered, FAIR knowledge base of machine-learning-derived genomic biomarkers of antimicrobial resistance (AMR) in <em>Escherichia coli</em>. Unitig (compacted de Bruijn graph) presence/absence features are ranked by XGBoost, filtered for reproducibility with Complementary Pairs Stability Selection (CPSS, B=100, &pi;&ge;0.6, PFER-bounded) and lineage-aware cross-validation (PopPUNK + GroupKFold), then reverse-translated into biology via CARD/NCBI BLAST confidence tiering, ARO ontology mapping, resistant-vs-susceptible discriminativeness (Fisher + BH-FDR), CARD variant-model SNP allele checks, MDA/label permutation tests, and pyseer LMM population-structure-corrected significance. Every record carries full provenance (git commit, seed, config hash, CARD version) in a pipeline_runs table.</p><p>This deposit contains the SQLite knowledge base (amrk.db, schema 0.4.0) plus the per-antibiotic candidate/evidence tables and run metadata. Raw genome assemblies are obtained from BV-BRC; the full pipeline reproduces the unitig matrices from those assemblies. Statistical association is not biological causation (confidence tiers are evidence, not mechanism claims).</p>",
+  "description": "<p>AMRK-DB is a queryable, confidence-tiered, FAIR knowledge base of machine-learning-derived genomic biomarkers of antimicrobial resistance (AMR) in <em>ESKAPEE</em> pathogens. Unitig (compacted de Bruijn graph) presence/absence features are ranked by XGBoost, filtered for reproducibility with Complementary Pairs Stability Selection (CPSS, B=100, &pi;&ge;0.6, PFER-bounded) and lineage-aware cross-validation (PopPUNK + GroupKFold), then reverse-translated into biology via CARD/NCBI BLAST confidence tiering, ARO ontology mapping, resistant-vs-susceptible discriminativeness (Fisher + BH-FDR), CARD variant-model SNP allele checks, MDA/label permutation tests, and pyseer LMM population-structure-corrected significance. A composite <em>evidence tier</em> folds the CARD/NCBI hit and the five statistical layers into one grade per (unitig, model), which surfaces <em>strong_novel</em> candidates &mdash; unitigs with no known resistance gene that are nonetheless CPSS-stable and pyseer-significant, i.e. exactly the novel biomarkers a BLAST-only tier hides. Every record carries full provenance (git commit, seed, config hash, CARD version) in a pipeline_runs table.</p><p>This deposit contains the SQLite knowledge base (amrk.db, schema 0.7.0) plus the per-antibiotic candidate/evidence tables and run metadata. Raw genome assemblies are obtained from BV-BRC; the full pipeline reproduces the unitig matrices from those assemblies. Statistical association is not biological causation (confidence tiers are evidence, not mechanism claims).</p>",
   "keywords": [
     "antimicrobial resistance",
     "machine learning",
@@ -20,7 +20,9 @@
     "CARD",
     "ARO ontology",
     "knowledge base",
-    "Escherichia coli",
+    "novel biomarker discovery",
+    "evidence tiering",
+    "ESKAPEE",
     "FAIR",
     "reproducible research"
   ],
@@ -37,5 +39,5 @@
       "scheme": "url"
     }
   ],
-  "notes": "KB schema version 0.6.1 (21 models, 2 organisms). Software released under the MIT License; this data record under CC-BY-4.0. CARD 4.0.1. Bump `version` per release and mint a new Zenodo version DOI."
+  "notes": "KB schema version 0.7.0. Model and organism counts, CARD version and tool versions are NOT restated here — read them from the deposited amrk.db itself (kb_metadata, models, pipeline_runs), which is authoritative and cannot drift from this file. Software released under the MIT License; this data record under CC-BY-4.0. Bump `version` per release and mint a new Zenodo version DOI."
 }

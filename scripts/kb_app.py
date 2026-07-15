@@ -221,11 +221,14 @@ with tab5:
                 "`migrate_kb_050.py` ile KB'ye yükle.")
 
 with tab6:
-    st.caption("KB'nin 13 ham tablosu (şema 0.6.0). Her tablonun/kolonun anlamı: "
+    # Count/version read from the KB itself — a hardcoded "13 tables (schema 0.6.0)"
+    # here was wrong on both counts once 0.7.0 added unitig_evidence_tier.
+    st.caption(f"KB'nin {len(T)} ham tablosu. Her tablonun/kolonun anlamı: "
                "`docs/KB_ACIKLAMA.md`.")
     _order = ["kb_metadata", "organisms", "antibiotics", "pipeline_runs", "models",
               "unitigs", "unitig_model_scores", "blast_annotations",
               "unitig_background_frequency", "variant_snp_check",
+              "unitig_evidence_tier",
               "unitig_antibiotic_overlap", "validation_evidence", "external_concordance"]
     names = [t for t in _order if t in T] + [t for t in sorted(T) if t not in _order]
     tname = st.selectbox("Tablo", names)

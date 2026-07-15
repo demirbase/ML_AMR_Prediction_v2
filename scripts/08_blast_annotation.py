@@ -18,11 +18,10 @@ via subprocess (no Nextflow) in two BLAST searches:
      Captures novel or uncharacterised resistance determinants not yet
      in CARD. Uses -remote flag — no local database needed.
 
-Why Nextflow?
-    Both BLAST searches are embarrassingly parallel and independent.
-    Nextflow manages the parallel execution, retries, and output staging
-    automatically, while this Python script provides the project-standard
-    CLI experience (config loading, step printing, ✓ checkmarks).
+Both BLAST searches are embarrassingly parallel and independent. They are driven
+from this script via subprocess — an earlier Nextflow orchestration (and the
+section here explaining why it was used) was removed in the M9 review; the
+pipeline is deliberately pure Python.
 
 Output Files (inside analysis_results/{antibiotic}/05_explainability/):
     03_card_blast_results_{antibiotic}.tsv   — CARD local hits
