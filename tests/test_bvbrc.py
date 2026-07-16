@@ -22,7 +22,11 @@ from lib.bvbrc import clean_amr_table, pivot_binary  # noqa: E402
 @pytest.mark.unit
 def test_normalize_aliases_and_typos():
     n = registry.normalize_antibiotic
-    assert n("amipicillin_sulbactam") == "ampicillin/sulbactam"
+    # ampicillin/sulbactam canonicalises to the UNDERSCORE form (slash-safe for
+    # file paths), like the other combo drugs. This test used to assert the slash
+    # form — it was encoding the path-breaking bug fixed 2026-07-16.
+    assert n("amipicillin_sulbactam") == "ampicillin_sulbactam"
+    assert n("ampicillin/sulbactam") == "ampicillin_sulbactam"     # BV-BRC spelling -> canonical
     assert n("rifampicin") == "rifampin"
     assert n("cefalotin") == "cephalothin"
     assert n("tigecyklin") == "tigecycline"

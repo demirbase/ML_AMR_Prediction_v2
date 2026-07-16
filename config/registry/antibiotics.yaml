@@ -31,7 +31,7 @@ classes:
       - amoxicillin
       - amoxicillin_clavulanic_acid
       - piperacillin_tazobactam
-      - "ampicillin/sulbactam"
+      - ampicillin_sulbactam
       - penicillin
       - oxacillin
       - carbenicillin
@@ -185,7 +185,11 @@ classes:
 # one canonical to avoid an ambiguous alias mapping.
 aliases:
   amoxicillin_clavulanic_acid: ["amoxicillin/clavulanic acid", "amoxicillin-clavulanic acid", "amoxicillin_clavulanat"]
-  "ampicillin/sulbactam": ["ampicillin_sulbactam", "amipicillin_sulbactam"]
+  # Canonical is the underscore form (slash-safe for file paths), same as the
+  # other combo drugs. It was previously inverted (slash canonical) — the M9 slash
+  # sweep missed it — which broke A. baumannii's paths (ampicillin/sulbactam is a
+  # key sulbactam-based therapy there, minority 405).
+  ampicillin_sulbactam: ["ampicillin/sulbactam", "ampicillin-sulbactam", "amipicillin_sulbactam"]
   cephalothin: ["cefalotin", "cefalothin"]
   cefpirome: ["cefpirom"]
   ceftaroline: ["ceftarolin"]
@@ -225,6 +229,7 @@ amrfinder_keywords:
   ampicillin:                    [AMPICILLIN, BETA-LACTAM]
   amoxicillin_clavulanic_acid:   [AMOXICILLIN, BETA-LACTAM]
   piperacillin_tazobactam:       [PIPERACILLIN, BETA-LACTAM]
+  ampicillin_sulbactam:          [AMPICILLIN, SULBACTAM, BETA-LACTAM]
   cefotaxime:                    [CEFOTAXIME, CEPHALOSPORIN]
   ceftazidime:                   [CEFTAZIDIME, CEPHALOSPORIN]
   cefepime:                      [CEFEPIME, CEPHALOSPORIN]
@@ -281,6 +286,7 @@ who_aware:
   amoxicillin_clavulanic_acid: Access
   penicillin: Access
   oxacillin: Access
+  ampicillin_sulbactam: Access
   piperacillin_tazobactam: Watch
   cefotaxime: Watch
   ceftazidime: Watch
