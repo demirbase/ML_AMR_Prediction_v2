@@ -232,6 +232,12 @@ def main():
         val = getattr(args, key, None)
         if val is not None:
             params[key] = val
+    # model/refine are resolved separately (args.model, and `refine` computed
+    # above), so fold the ACTUAL values back into params — otherwise the printed
+    # provenance line shows config's model/refine while a CLI override ran, i.e.
+    # the log lies about what clustered. Must run after `refine` is computed.
+    params["model"] = args.model
+    params["refine"] = refine
     print("=" * 80)
     print(f"LINEAGE CLUSTERING (PopPUNK) — {organism}")
     print("=" * 80)
