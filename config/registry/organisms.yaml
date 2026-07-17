@@ -116,13 +116,26 @@ organisms:
     # sketch tuning — defaults resolve GC1/GC2 well — EXCEPT a length filter
     # narrowed to its genome size (~3.9 Mb), because its extreme plasmid/integron
     # plasticity makes contamination easy to mistake for accessory content.
-    # NOT SET YET, but now derivable: genomes ARE downloaded (2026-07-16), so the
-    # observed assembly-length distribution can be measured and a range set:
-    #   lineage:
-    #     length_range: [<lo>, <hi>]
-    # Deliberately left empty until measured rather than guessed. Meanwhile the
-    # global `length_sigma: 5` filters length outliers adaptively (5 SD of the
-    # observed distribution), so this is a refinement, not a blocker.
+    # PopPUNK override — MEASURED 2026-07-16, the ONLY organism that needs one.
+    # A. baumannii clinical AMR collections are dominated by the GC2 high-risk
+    # clone, and plain dbscan puts 76.3 % of the genomes in a single lineage —
+    # useless for GroupKFold (one fold would hold 76 % of the data). Boundary
+    # refinement splits it: 76.3 % -> 52.1 % largest lineage (60 -> 84 lineages).
+    #
+    # Sketch size does NOT help here (tested: 10^4 -> 10^5 moved it 76.3 -> 76.4 %),
+    # unlike S. aureus — the GC2 clone is genuinely tight, not under-resolved. bgmm
+    # was also tested and made no difference (76.3 %).
+    #
+    # 52 % is still the panel's worst balance and reflects real biology, not a bad
+    # setting; A. baumannii's lineage-CV is correspondingly the most conservative.
+    # Say so in the Methods rather than hiding it.
+    lineage:
+      refine: true
+    # length_range NOT SET, but now derivable: genomes ARE downloaded (2026-07-16),
+    # so the observed assembly-length distribution can be measured (E3 §5 wants it
+    # narrowed to ~3.9 Mb). Left empty until measured rather than guessed; the
+    # global `length_sigma: 5` filters length outliers adaptively meanwhile, so
+    # this is a refinement, not a blocker.
 
   # ── Phase 2 (2nd SCI paper / advanced optimisation) ───────────────────────
   pseudomonas_aeruginosa:

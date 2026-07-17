@@ -7,8 +7,12 @@ pipeline's genome ids. These verify the reverse mapping against a synthetic
 PopPUNK clusters CSV — no PopPUNK / container needed.
 """
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -84,3 +88,27 @@ def test_qc_args_and_length_range_pair(mod):
     # PopPUNK's --length-range takes TWO values (lower upper)
     assert mod._qc_args({**base, "length_range": [3_500_000, 4_200_000]}).endswith(
         "--length-range 3500000 4200000")
+
+
+def test_only_acinetobacter_overrides_refine(mod):
+    """Refinement is NOT a universal improvement — measured 2026-07-16 it HARMED
+    K. pneumoniae (22.3% -> 58.6% largest lineage, merging its high-risk clones)
+    while it rescued A. baumannii (76.3% -> 52.1%). The global default stays off;
+    only A. baumannii overrides. Pins the rule so a future 'let's just enable
+    refine everywhere' cannot land silently."""
+    from lib.config import load_config
+    cfg = load_config()
+    assert mod.lineage_params("acinetobacter_baumannii", cfg)["refine"] is True
+    for org in ("ecoli", "kpneumoniae", "staphylococcus_aureus",
+                "pseudomonas_aeruginosa", "enterococcus_faecium"):
+        assert mod.lineage_params(org, cfg)["refine"] is False, org
+
+
+def test_registry_lineage_override_is_not_shadowed_by_argparse(mod):
+    """--model/--refine default to None so lineage_params (config + REGISTRY) wins.
+    They used to default to config's value, which silently shadowed the registry —
+    A. baumannii's refine override would have been ignored."""
+    import argparse
+    src = (PROJECT_ROOT / "scripts" / "02c_lineage_poppunk.py").read_text()
+    assert 'ap.add_argument("--model", default=None' in src
+    assert 'default=lin_cfg.get("model"' not in src

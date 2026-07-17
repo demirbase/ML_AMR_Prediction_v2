@@ -170,14 +170,17 @@ unitig:
 # with a lineage cluster; lib/lineage.py then builds GroupKFold folds so an entire
 # lineage stays on one side of train/test (no lineage leakage — ROADMAP §0.1).
 lineage:
-  # dbscan gives proper strain-level resolution on E. coli — MEASURED 2026-07-15
-  # under the pinned container (5470 genomes, PopPUNK 2.7.8 defaults k13-29/4,
-  # sketch 1e4): 397 lineages, largest 817 (14.9%), 234 singletons. bgmm instead
-  # collapsed into one ~94% mega-cluster AND its degenerate 2-Gaussian fit made
-  # refine fail (NaN boundary). So: dbscan, no refine (dbscan alone is already
-  # well-distributed for GroupKFold; refine is an optional future sharpen).
+  # dbscan gives proper strain-level resolution — MEASURED 2026-07-16 under the
+  # pinned container with the E3 sketch settings below (k15-35/2), on the
+  # re-downloaded genomes. Per-organism results are in the model/refine table
+  # further down; E. coli is 294 lineages, largest 860 (15.4%), 94 singletons.
+  # (An earlier note here quoted 397 lineages / 14.9% — that was PopPUNK's OWN
+  # defaults k13-29/4 during the container check, not the settings we ship.)
   #
-  # These counts are graph-tool-dependent, which is not obvious and cost a day to
+  # bgmm was tested and helps nothing: it collapsed E. coli into one ~94%
+  # mega-cluster, and on A. baumannii it matched plain dbscan exactly (76.3%).
+  #
+  # The counts are graph-tool-dependent, which is not obvious and cost a day to
   # learn. PopPUNK 2.7.8 pinned, but rebuilding the container re-solved its
   # network backend graph-tool 2.98 -> 3.0, and the clustering moved: 324 -> 397
   # lineages, 157 -> 234 singletons (ARI 0.990 vs the 2.98 labels). The BACKBONE
@@ -188,8 +191,27 @@ lineage:
   # hold 2.98 back, since every model is being re-populated on it anyway. The
   # numbers above are 3.0's. Re-measure them after ANY container rebuild —
   # scripts/compare_lineage.py exists for exactly that.
+  # ── model / refine: chosen by ONE rule, measured across the whole panel ─────
+  # 2026-07-16 — largest-lineage fraction (the CV-balance criterion), dbscan vs
+  # dbscan+refine, every organism, same container:
+  #     organism        no-refine  refine    chosen
+  #     E. coli           15.4 %   15.4 %    no-refine (tie)
+  #     K. pneumoniae     22.3 %   58.6 %    no-refine   <- refine HARMS it
+  #     S. aureus         20.6 %   20.6 %    no-refine (tie)
+  #     P. aeruginosa     12.4 %   19.3 %    no-refine
+  #     E. faecium        11.4 %    4.2 %    no-refine (refine over-splits:
+  #                                           872 lineages / 668 singletons)
+  #     A. baumannii      76.3 %   52.1 %    REFINE      <- the only override
+  # RULE: dbscan by default; refine only where the default leaves one lineage
+  # dominating (>40 %). Uniform rule, per-organism outcome — refine is NOT a
+  # universal improvement: it merged K. pneumoniae's high-risk clones into one
+  # 58.6 % cluster while splitting A. baumannii's GC2. A. baumannii's override
+  # lives in organisms.yaml; this global default serves the other five.
+  # bgmm was tested too (A. baumannii 76.3 %, i.e. no different from dbscan).
+  # The old note here said "refine on bgmm failed (NaN boundary)" — true, but that
+  # was specific to a degenerate bgmm fit; refine runs fine on dbscan everywhere.
   model: "dbscan"        # PopPUNK --fit-model: dbscan | bgmm
-  refine: false          # dbscan alone suffices; refine on bgmm failed on this data
+  refine: false          # global default; A. baumannii overrides via the registry
   threads: null          # null -> preprocessing.threads
 
   # ── Sketching (PopPUNK --create-db) — docs/literature/E3.md §3.1 ──────────

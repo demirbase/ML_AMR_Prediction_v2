@@ -132,22 +132,41 @@ def run_poppunk(poppunk, refs_path: Path, work_dir: Path, model: str, threads: i
     boundary-refinement step after the initial ``model`` fit. ``reuse_db`` skips
     the expensive re-sketching when a prior run's database is still present.
 
-    MODEL CHOICE — we deviate from the literature, deliberately. E3 §3.2 (and the
-    iterative-PopPUNK papers) recommend BGMM K=2 + refine and warn that HDBSCAN
-    (PopPUNK's ``dbscan``) can fail to converge on highly recombinant species.
-    On OUR data the opposite happened: dbscan gives good strain-level resolution
-    while bgmm collapsed into a single ~94 % mega-cluster whose degenerate
-    2-Gaussian fit then made refine die on a NaN boundary. Note the literature's
-    recommendation assumes iterative-PopPUNK's multi-boundary fit, which is not
-    what we ran. So: ``model: dbscan``, ``refine: false``, justified empirically
-    rather than by convention — and the Methods should say exactly this.
+    MODEL / REFINE — chosen per organism by ONE objective rule, measured across
+    the whole panel on 2026-07-16: keep dbscan (no refinement) unless it leaves a
+    single lineage dominating the collection, since the clusters ARE the CV folds
+    and a dominant group makes one fold hold most of the data.
 
-    Because E3's warning targets high-recombination organisms, dbscan may yet
-    fail on an ESKAPEE member we have not clustered (Enterobacter is the prime
-    suspect). It fails LOUDLY: main() checks n_clusters >= n_splits and tells you
-    to try ``--model bgmm``. Verify the resolution for every new organism — the
-    clusters ARE the CV folds, so a bad clustering silently degrades the split
-    rather than raising.
+    Largest-lineage fraction, dbscan vs dbscan+refine:
+
+        organism          no-refine   refine     chosen
+        E. coli             15.4 %    15.4 %     no-refine (tie)
+        K. pneumoniae       22.3 %    58.6 %     no-refine  <- refine HARMS it
+        S. aureus           20.6 %    20.6 %     no-refine (tie)
+        P. aeruginosa       12.4 %    19.3 %     no-refine
+        E. faecium          11.4 %     4.2 %     no-refine  (refine over-splits:
+                                                  872 lineages, 668 singletons)
+        A. baumannii        76.3 %    52.1 %     REFINE     <- the only one
+
+    So the global default (dbscan, refine off) is right for 5 of 6, and only
+    A. baumannii carries a registry override. Refinement is NOT a universal
+    improvement — it merged K. pneumoniae's high-risk clones into one 58.6 %
+    cluster while splitting A. baumannii's GC2. The rule is uniform even though
+    the resulting setting is not: that is the defensible position, not picking a
+    global setting that suits the average organism.
+
+    bgmm was tested too (A. baumannii: 76.3 %, identical to plain dbscan) and
+    helped nothing. The earlier claim that "refine fails with a NaN boundary" was
+    specific to a degenerate bgmm fit on E. coli — refine itself runs fine on
+    dbscan for every organism here.
+
+    K. pneumoniae (22.3 %) and A. baumannii (52.1 %) stay the least balanced
+    because their clinical AMR populations really are dominated by high-risk
+    clones (CG258/ST258 and GC2). That is biology, not a tuning failure — and
+    holding such a clone out as one group is a hard, honest generalisation test.
+
+    main() still checks n_clusters >= n_splits and fails loudly for a NEW organism
+    whose clustering collapses.
     """
     db = work_dir / "db"
     has_sketch = db.exists() and any(db.glob("*.h5"))
@@ -191,16 +210,19 @@ def main():
     ap = argparse.ArgumentParser(description="PopPUNK lineage clustering (organism-level).")
     ap.add_argument("--organism", default=default_org)
     ap.add_argument("--threads", type=int, default=default_threads)
-    ap.add_argument("--model", default=lin_cfg.get("model", "dbscan"),
-                    help="PopPUNK initial --fit-model (dbscan | bgmm). Default from "
-                         "config lineage.model. Try bgmm if dbscan under-clusters a "
-                         "new organism (n_clusters < n_splits).")
+    # default=None for both: they resolve through lineage_params so a REGISTRY
+    # override (organisms.yaml `lineage:`) is honoured. Baking config's value in
+    # as an argparse default silently shadowed the registry — A. baumannii's
+    # refine override would have been ignored.
+    ap.add_argument("--model", default=None,
+                    help="PopPUNK initial --fit-model (dbscan | bgmm). Precedence: "
+                         "CLI > organisms.yaml lineage.model > config lineage.model.")
     ap.add_argument("--refine", dest="refine", action="store_true", default=None,
-                    help="Chain a refine step after the initial fit (default: config "
-                         "lineage.refine, which is OFF — refine failed on a degenerate "
-                         "bgmm fit here; see run_poppunk).")
+                    help="Chain a refine step after the initial fit. Precedence: "
+                         "CLI > organisms.yaml lineage.refine > config lineage.refine "
+                         "(globally OFF — refine only helps A. baumannii; see run_poppunk).")
     ap.add_argument("--no-refine", dest="refine", action="store_false",
-                    help="Use only the initial model (the validated setting).")
+                    help="Skip refinement (the global default).")
     ap.add_argument("--reuse-db", action="store_true",
                     help="Reuse an existing PopPUNK sketch database from a prior run "
                          "(skip the expensive --create-db re-sketching).")
@@ -223,21 +245,23 @@ def main():
                          "name for a comparison run so it does not clobber the "
                          "canonical labels the pipeline reads.")
     args = ap.parse_args()
-    refine = lin_cfg.get("refine", True) if args.refine is None else args.refine
 
     organism = args.organism
+    # Precedence throughout: CLI > registry (organisms.yaml) > config.yaml.
     params = lineage_params(organism, config)   # globals + this organism's override
-    # CLI wins over config + registry (same precedence as get_target).
-    for key in ("min_k", "max_k", "k_step", "sketch_size", "qc"):
+    for key in ("min_k", "max_k", "k_step", "sketch_size", "qc", "model"):
         val = getattr(args, key, None)
         if val is not None:
             params[key] = val
-    # model/refine are resolved separately (args.model, and `refine` computed
-    # above), so fold the ACTUAL values back into params — otherwise the printed
-    # provenance line shows config's model/refine while a CLI override ran, i.e.
-    # the log lies about what clustered. Must run after `refine` is computed.
-    params["model"] = args.model
-    params["refine"] = refine
+    if args.refine is not None:
+        params["refine"] = args.refine
+    params.setdefault("model", "dbscan")
+    params.setdefault("refine", False)
+    # Everything downstream reads these, so `params` IS the record of what ran —
+    # it is what gets printed as provenance. model/refine used to be resolved from
+    # config directly, which both ignored the registry override and made the
+    # printed line disagree with the actual run.
+    model, refine = params["model"], params["refine"]
     print("=" * 80)
     print(f"LINEAGE CLUSTERING (PopPUNK) — {organism}")
     print("=" * 80)
@@ -272,10 +296,10 @@ def main():
         work_dir.mkdir(parents=True, exist_ok=True)
         refs_path = work_dir / "refs.txt"
         write_refs(genome_ids, genomes_dir, refs_path)
-        print(f"  Running PopPUNK (model={args.model}, refine={refine}, "
+        print(f"  Running PopPUNK (model={model}, refine={refine}, "
               f"reuse_db={args.reuse_db}, threads={args.threads})...")
         print(f"  Lineage params: {params}")   # provenance: what actually clustered
-        raw_clusters = run_poppunk(poppunk, refs_path, work_dir, args.model, args.threads,
+        raw_clusters = run_poppunk(poppunk, refs_path, work_dir, model, args.threads,
                                    params=params, refine=refine, reuse_db=args.reuse_db)
 
     print(f"  Normalizing clusters (un-mangling '.'→'_') from: {raw_clusters.name}")
