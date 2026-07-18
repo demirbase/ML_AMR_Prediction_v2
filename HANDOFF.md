@@ -5,10 +5,15 @@
 
 ---
 
-# §0.-6 — LATEST STATE (2026-07-15/16) — DEPLOY-ÖNCESİ SERTLEŞTİRME TAMAM · CONTAINER'LAR KİLİTLİ · GENOMLAR İNDİ — READ FIRST, supersedes ALL below
+# §0.-6 — LATEST STATE (2026-07-16) — DEPLOY-ÖNCESİ HAZIR · CONTAINER'LAR KİLİTLİ · GENOMLAR İNDİ · PANEL KÜRE · LINEAGE AYARLANDI — READ FIRST, supersedes ALL below
 
-> **Repo HEAD `ebed4ed`**, hepsi push'lu. **TRUBA senkron** (`$AMR_HOME` = origin/main; öncesinde HEAD **`5b76f47`** gibi çok eski bir commit'teydi ve dosyalar `git checkout origin/main -- <file>` ile tek tek güncellendiğinden index Frankenstein durumdaydı — `reset --hard` ile temizlendi; o yöntem artık kullanılmıyor).
-> Suite **143 passed**, `validate_registry` 0 hata, config'te 0 ölü anahtar. **KB şeması 0.7.1.**
+> **Repo HEAD `b9c0720`**, hepsi push'lu. **TRUBA senkron** (`$AMR_HOME` = origin/main; `git fetch && git reset --hard origin/main` ile; eski `git checkout origin/main -- <file>` yöntemi ARTIK KULLANILMIYOR).
+> Suite **145 passed**, `validate_registry` 0 hata, config'te 0 ölü anahtar. **KB şeması 0.7.1.**
+
+### ⏭️ SIRADAKI İŞ (tek cümle): pilotun ML-yarısı — bir antibiyotik zincirini (A. baumannii amikacin) baştan sona koş, `cv_method='lineage_group_kfold'` + `pipeline_runs`'ta yeni sürüm kolonlarının dolduğunu teyit et. Sonra Faz-2 organizmalarını + tam koşuyu başlat. AYRINTI: en aşağıdaki "PILOT ML-YARISI" bölümü.
+
+### ⚡ KANONİK LINEAGE ETİKETLERİ HENÜZ ÜRETİLMEDİ — İLK İŞ BU OLABİLİR
+02c pilot testleri `--out-name poppunk_clusters_*.csv` ile koştu (karşılaştırma için); pipeline'ın okuduğu kanonik `poppunk_clusters.csv` **6 organizma için de yeniden üretilmeli** (yeni container + yeni genomlar + kürasyonlu ayarlar). Mevcut `poppunk_clusters.csv`'ler: A. baumannii + E. coli **eski parametre/refine testlerinden kalma** (kanonik ayarla üretilmedi), K. pneu/Sa/Pa/Efm'de belki hiç yok ya da bayat. **`--out-name` VERMEDEN** (kanonik isme yazsın), `--reuse-db` ile sketch'i tekrar kullanarak, registry'nin çözdüğü ayarlarla (A. baumannii otomatik refine alır) her organizma için 02c koş. SLURM ya da debug node — **login node'da ASLA** (sketching CPU-ulimit'ine takılıp ölür).
 
 ### ✅ CONTAINER'LAR: üçü de pinli + kurulu + kilitli + terfi etmiş
 Kanonik isimler artık YENİ imajları gösteriyor; eskiler `*.RETIRED_20260715` olarak duruyor (tam koşu bitince silinir; Mac'te `backup/containers_20260715/` + SHA256SUMS var).
@@ -90,27 +95,54 @@ Literatür **BGMM K=2 + refine** diyor, biz **dbscan + refine yok** kullanıyoru
 
 **⛔ E1 TERSİNE DÖNDÜ — TEMPORAL VALIDATION İMKÂNSIZ.** Detay + rakamlar: `FINAL_AUDIT §E1`. Özet: etiketlenebilir genomlarda **≥2023 → E. coli 28, K. pneu 13, S. aureus 0, A. baumannii 11.** BV-BRC'nin AMR verisi 2021'de bitiyor. E1 doluluğa bakıp "fizibıl" demiş, **dağılıma bakmamış**. **Yıl (collection_year + testing_standard_year) tamamen işlemden çıktı.** Yeni dış-doğrulama stratejisi = **coğrafi + soy hold-out**; `isolation_country` %96-99 dolu. Uyarılar: ülke dominansı (E. coli %58 Norveç, A.b %63 USA → hold-out olamaz; dengeli olanlar S. aureus UK/Çin/USA ve K. pneu), ve **ülke-soy confounding** (coğrafinin PopPUNK-CV üstüne ne kattığı ölçülmeli). **Veri yetmezse coğrafiyi de katma** (kullanıcı kararı). M13 concordance yerinde duruyor.
 
-### DEPLOY — KALAN ADIMLAR (sıralı)
-1. **P. aeruginosa indirmesini teyit et** — ilk koşu 966/1486'da rapor yazmadan öldü, `--workers 8` ile yeniden başlatıldı (`screen -r pa`). `$AMR_WORK/dlstat.sh` ile bak; `download_report.csv` oluştuysa bitmiştir. Ölürse yine yeniden koş (resume-safe).
-2. **🔴 Faz B temizlik — koşudan ÖNCE.** `data/processed/*/{ab}`, `results/{ecoli,kpneumoniae}`, `models/` (~185G, hepsi bayat: kod + filtre + genom seti değişti). Kalan tek gerçek blocker.
-3. **PROVISIONAL antibiyotik listelerini kapat** — 6 organizmanın minority tablolarını yeni metadata'dan çıkar (eşik: minority ≥150, K. pneu'da kullanılan), `organisms.yaml`'daki yer tutucu listeleri gerçek hedeflerle değiştir. Ölçülmüş adaylar: E. faecium **vancomycin 931** (VRE bayrak), A. baumannii imipenem 400 / meropenem 185 (carbapenem), P. aeruginosa meropenem 404 / ceftazidime 368.
-4. **A. baumannii `length_range`** — registry'de bilerek boş; genomlar indi, artık gözlenen uzunluk dağılımından türetilebilir (E3 §5).
-5. Pilot dry-run (1 ab, `--max-genomes 50`) → **`--qc-db` çağrısını DOĞRULA** (PopPUNK 2.7.8 `--help`'inden yazıldı, **hiç koşulmadı**) + `cv_method='lineage_group_kfold'` + `pipeline_runs`'ta yeni sürüm kolonlarının dolduğu teyidi.
-6. **Tam ESKAPEE koşusu.** ⚡ **`unitig_all` store hiç kurulmamış** (`du` boş döndü; her antibiyotik kendi unitig-caller'ını koşmuş!) → **`03u --build-db` ile organizma başına BİR kez kur**, sonra subset. 6 organizma × çok antibiyotik için devasa tasarruf.
-7. `slurm/` **kanonik 4'ü** repoya commit (32 dosyanın 28'i eskimiş tek-seferlik) — ayrıca `run_lineage.slurm` hâlâ emekli `amr-pp.sif`'i çağırıyor, `amr.sif`'e çevrilmeli.
-8. Zenodo deposit + DOI.
+### ✅ 2026-07-16 BİTENLER (bu maddeler ARTIK YAPILDI — yeniden yapma)
+- **P. aeruginosa indirmesi:** 1382/1486 (%7 kayıp, normal — ilk koşu login-node/rapor sorunuyla 966'da ölmüştü, `--workers 8` ile toparlandı).
+- **Faz B temizlik YAPILDI:** disk **230→102 GB** (128 GB açıldı). `data/processed/*` (matrisler + lineage), `results/{ecoli,kpneumoniae,staph,kb,figures,tables}`, `models/*`, `runs/*` içerikleri silindi (DİZİNLER değil — symlink hedefleri). KORUNDU: `data/raw` genomlar 79G, `data/external` DB'leri 3.3G, `containers` 6.7G, `backup` 6.2G.
+- **Panel KÜRE EDİLDİ — 45 model, 14/14 sınıf** (`organisms.yaml` commit `1d11cc3`): Ec 8 · Kp 11 · Sa 8 · Ab 8 · Pa 4 · Efm 6. Ham minority≥150 listesi 73 çiftti; sınıf-showcase için kırpıldı (Ec/Kp'de 6 sefalosporin → 2-3). Tüm çapraz-organizma ilaçlar (cipro/tetra 5x, gent/tmp-smx 4x, mero/ceftaz 3x) + flagshipler korundu (carbapenem mero+imi Kp/Ab, MRSA cefoxitin+oxacillin, VRE vanco+teico). Dışlanan: "extended spectrum beta lactamase" (fenotip etiketi, ilaç değil), linezolid Efm (minority 67). **BUG düzeltildi:** `ampicillin/sulbactam` slash-kanonik kayıtlıydı (yol kırıcı, M9 taraması atlamış) → underscore-kanonik yapıldı (A. baumannii'nin kilit ilacı, minority 405).
+- **`--qc-db` DOĞRULANDI:** A. baumannii pilotunda hatasız koştu, genom eliyor (1171→1133/1138). Kör yazılmıştı, artık kanıtlı.
+- **⭐ LINEAGE model/refine per-organism AYARLANDI** (commit `b9c0720`) — aşağıdaki ayrı bölüme bak. **A. baumannii `refine: true` registry override aldı**, gerisi global dbscan/no-refine. Registry-override-gölgeleme bug'ı düzeltildi.
+
+### DEPLOY — KALAN ADIMLAR (sıralı — GÜNCEL)
+1. **⏭️ KANONİK lineage etiketlerini üret** — 6 organizma için `poppunk_clusters.csv` (yukarıdaki "KANONİK LINEAGE" kutusu). `--out-name` VERME, `--reuse-db` kullan (sketch DB'ler `data/processed/{org}/lineage/_poppunk_work/db`'de duruyor → dakikalar). A. baumannii otomatik refine alır. **Login node'da ASLA.**
+2. **⏭️ PILOT ML-YARISI** — bir antibiyotik zinciri (A. baumannii **amikacin**, minority 467) baştan sona: `03u → 04-07b → (07-09) → 10-13b → 14 → populate`. DOĞRULA: (a) `07b` logunda `cv_method='lineage_group_kfold_5fold'` (fallback DEĞİL), (b) `pipeline_runs`'ta yeni sürüm kolonları dolu (`poppunk_version`, `unitig_caller_version`, `graph_tool_version`, `pyseer_version` vb.), (c) `unitig_evidence_tier` tablosu doluyor + `strong_novel` adaylar var mı. Detay: EN ALT "PILOT ML-YARISI".
+3. **Tam ESKAPEE koşusu.** ⚡ **`unitig_all` store hiç kurulmamış** → **`03u --build-db` ile organizma başına BİR kez kur**, sonra her antibiyotik subset eder. 45 model, per-antibiyotik zincir env-parametrik SLURM (memory `amr-truba-gotchas`: zincir KESİN SIRALI, pyseer bio'yu okur, PARALEL DEĞİL).
+4. **A. baumannii `length_range`** (opsiyonel rafinman) — genomlar indi, gözlenen uzunluk dağılımından türet (E3 §5); global `length_sigma:5` şu an adaptif filtreliyor, blocker değil.
+5. `slurm/` **kanonik 4'ü** repoya commit — `run_lineage.slurm` hâlâ emekli `amr-pp.sif`'i çağırıyor, `amr.sif`'e çevir.
+6. Zenodo deposit + DOI.
 
 **Analiz kalemleri (modeller ÇIKTIKTAN sonra, koşuyu bloke etmez):** MIC duyarlılık analizi (§ yukarı) · coğrafi hold-out + soy-CV'ye ne kattığının ölçümü · **random-vs-lineage-aware CV karşılaştırma tablosu** (E3 §8: hakem açıkça bekliyor, hâlâ yok) · H3 hypergeometric (E2 çerçevesi).
 
-**Açık, küçük:** `amr-gpu.def` ölü (M9-4) · 4 def'te de base imaj `condaforge/miniforge3:latest` (digest-pin TODO) · `*.RETIRED_20260715` sif'ler (tam koşu bitince sil) · 19 detached `screen` oturumu birikmiş.
+**Açık, küçük:** `amr-gpu.def` ölü (M9-4) · 4 def'te de base imaj `condaforge/miniforge3:latest` (digest-pin TODO) · `*.RETIRED_20260715` sif'ler (3 tane: amr/amr-pp/amr-tools/amr-checkm2'nin eskileri; tam koşu bitince sil) · biriken `screen` oturumları · `$AMR_WORK/`'te pilot log'ları + `minority.py`/`geo.py`/`leak.py`/`measure.py` (silinebilir).
+
+### ⭐ LINEAGE model/refine — PER-ORGANIZMA, ÖLÇÜMLE (2026-07-16, commit `b9c0720`)
+Pilot A. baumannii'de dbscan'in **%76 mega-küme** verdiğini yakaladı (GC2 klonu). Kullanıcı doğru sordu: "değiştirirsek hepsinde bakmak lazım değil mi?" → tüm panel ölçüldü, **en büyük soy oranı** (CV-denge kriteri), dbscan vs dbscan+refine:
+
+| organizma | no-refine | refine | SEÇİLEN |
+|---|---|---|---|
+| E. coli | 15.4% | 15.4% | no-refine (berabere) |
+| K. pneumoniae | **22.3%** | 58.6% | no-refine — **refine BOZUYOR** (ST258 klonlarını birleştiriyor) |
+| S. aureus | 20.6% | 20.6% | no-refine (berabere) |
+| P. aeruginosa | 12.4% | 19.3% | no-refine |
+| E. faecium | 11.4% | 4.2% | no-refine (refine aşırı böler: 872 soy/668 singleton) |
+| **A. baumannii** | 76.3% | **52.1%** | **REFINE** — tek override |
+
+**KARAR: ayar değil, KURAL tek tip** — "dbscan varsayılan; refine yalnızca varsayılan tek soyu domine bırakırsa (>%40)". Nesnel kriter, hepsine aynı uygulandı, sadece A. baumannii'de farklı çıktı. Hakem-savunulabilir (gerekçesiz per-organism = cherry-picking). Global default (dbscan/no-refine) 6'nın 5'i için doğru; A. baumannii `organisms.yaml`'da `lineage: refine: true`. **Kp %22 + Ab %52 en dengesizler ama BİYOLOJİ** (yüksek-riskli klonlar CG258/ST258, GC2) — Methods'ta "klonal-domine, lineage-CV en muhafazakâr" diye yaz. sketch 10⁵ A. baumannii'de yardım etmedi (76.3→76.4), bgmm de (76.3, dbscan'le aynı). **Sketch/model/refine bir organizma için değişirse: tümünde yeniden ölç** (`compare_lineage.py` + en-büyük-soy).
 
 ### OPERASYONEL (bugün öğrenilenler — memory `amr-truba-gotchas`)
-- **Container build giriş düğümünde ÖLÜR** — `mksquashfs` CPU-time ulimit'ine çarpar ("CPU time limit exceeded", solve bittikten *sonra*). **`srun -p debug -N1 -c8 --time=02:00:00 --pty bash`** → orada 2dk13sn'de bitti. (`debug` partition: 4sa limit, internet + fakeroot var.)
+- **Container build VE PopPUNK sketching giriş düğümünde ÖLÜR** — CPU-time ulimit'i uzun/ağır işlemi keser. Build'de `mksquashfs`, 02c'de `poppunk --create-db` çakılıyor ("Command failed", sebep gizli). **`srun -p debug -N1 -c8 --time=02:00:00 --pty bash`** ile compute node'a geç (2026-07-16: 4 organizmanın 02c'si login node'da hep `--create-db`'de öldü; debug'da sorunsuz). İlk satırda `hostname` ile teyit et — `arf-ui1` ÇIKMAMALI.
+- **Yeni `srun --pty` oturumu ENV'i SIFIRLAR** — `AMR_HOME`/`AMR_WORK`/`APPTAINER_BINDPATH` gitmiş olur; her yeni debug oturumunda yeniden `export` et yoksa komutlar sessizce düşer (2026-07-16 bunu bir kez yaşadık).
 - **SLURM barbun: `--nodes=1` ŞART** — yoksa "node başına 20 çekirdek" QOS kontrolü hesaplayamaz ve reddeder. **`export APPTAINER_BINDPATH=/arf` ŞART** — yoksa container `/arf`'ı görmez. Altın örnek: `$AMR_HOME/slurm/run_lineage.slurm` (PopPUNK'ı daha önce başarıyla koşan script).
 - **Container'a `conda list` ile sorma** — prefix vermezsen miniforge **base** env'ini listeler ve "paket yok" yanılgısı verir. Prefix'ler def dosyalarında yazılı: `amr.sif`→`/opt/amr-env`, `amr-tools.sif`→`/opt/amr-tools-env`, `amr-checkm2.sif`→`/opt/amr-checkm2-env`. `which` bu container'larda "Illegal option" veriyor — PATH'i `<tool> --version` ile yokla ya da prefix'i doğrudan ver. Bu yüzden iki kez yanlış teşhis kondu.
 - **`00a` indirmesi sessizce ölebilir** — P. aeruginosa 966/1486'da `download_report.csv` yazmadan öldü ve döngü (`set -e` yok) sessizce sonrakine geçti. **Rapor dosyasının varlığı = koşunun bittiğinin kanıtı**; sadece `.fna` saymak yanıltır. Ölürse `--workers` düşürüp yeniden koş (resume-safe, mevcutları atlar).
 - TRUBA'ya `rsync`/`ssh` **IP ile**: `172.16.6.14` (`.11`, `.16` de var); `arf-ui1` küme-içi ad, dışarıdan çözülmez. `.sif` çekerken `-z` **kullanma** (zaten sıkıştırılmış).
-- 19 detached `screen` oturumu birikmiş (`screen -ls`) — eski koşulardan ölü kabuklar, süpürülebilir.
+- Biriken `screen` oturumları (`screen -ls`) — eski koşulardan ölü kabuklar, süpürülebilir.
+
+### 🎯 PILOT ML-YARISI — sıradaki oturumun ilk ML işi (ayrıntı)
+02c/`--qc-db`/lineage tarafı bitti; şimdi bir antibiyotik zincirini uçtan uca koşup ML+KB tarafını doğrula. **Hedef: A. baumannii amikacin** (en küçük organizma 1171 genom + güçlü split minority 467 + refine override'ını test eder). Zincir env-parametrik SLURM (memory `amr-truba-gotchas`'taki reçete): `sbatch --chdir=$AMR_WORK --export=ALL,AMR_ORGANISM=acinetobacter_baumannii,AMR_ANTIBIOTIC=amikacin,AMR_FEATURE_REPR=unitig $AMR_HOME/slurm/<script>`. Sıra KESİN: Faz1(03u→04-07b) → Faz2a(07→08→09, screen, 08 NCBI ister) → bio(10-13b) → pyseer(14) → populate → rm rtab. **DOĞRULANACAK 3 ŞEY:**
+  1. **`07b` lineage-CV gerçek mi:** logda `cv_method='lineage_group_kfold_5fold'` (fallback `repeated_holdout_5seed` DEĞİL). Kanonik `poppunk_clusters.csv` üretilmiş olmalı (adım 1) yoksa fallback'e düşer.
+  2. **Yeni provenance kolonları dolu mu:** populate sonrası `pipeline_runs`'ta `poppunk_version`, `unitig_caller_version`, `bcalm_version`, `graph_tool_version`, `blast_version`, `pyseer_version` NULL DEĞİL. (pyseer'i 14 kendi summary'sine yazıyor → populate oradan okuyor; container sqlite3 CLI yok → `python -c "import sqlite3..."`.)
+  3. **`unitig_evidence_tier` (0.7.1) doluyor mu:** `strong_novel` adaylar (CPSS+pyseer geçen, CARD geni olmayan) görünüyor mu — evidence_tier feature'ının asıl amacı.
+- populate NOT: **idempotent değil** model child-row'ları varsa (memory'de detay) — zincir pyseer'e KADAR koşulup öyle populate edilmeli, TEK kez. Env inline şart (`AMR_ORGANISM=... AMR_ANTIBIOTIC=... AMR_FEATURE_REPR=unitig apptainer exec ...`) yoksa config default'a (ecoli/gentamicin) düşer.
 
 ---
 
