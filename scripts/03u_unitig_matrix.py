@@ -98,11 +98,38 @@ def select_genomes(config, organism, antibiotic):
     else:
         print(f"  ⚠ Outlier file not found at {outlier_file} (none excluded).")
 
+    # Lineage-cluster intersection. PopPUNK's --qc-db (02c) drops distance/length
+    # outliers from the sketch DB, so those genomes carry NO lineage label. They are
+    # low quality by PopPUNK's own QC and must not train the model: if they stay,
+    # 07b finds genomes with no cluster and silently falls back from lineage-CV to a
+    # 5-seed holdout (lineage-INFLATED AUC). Dropping them here keeps the matrix,
+    # pyseer (14) and the CV (07b) on ONE consistent population — the QC-passed,
+    # clustered, labelled genomes. Skipped when no cluster file exists yet (e.g. the
+    # synthetic integration test, or a first run before 02c) so prior behaviour holds
+    # and the run still completes (07b then warns and falls back, as before).
+    clustered_ids = None
+    try:
+        lineage_dir = resolve_path("lineage_dir", organism=organism, config=config)
+    except KeyError:
+        lineage_dir = resolve_path("data_dir", config=config) / "processed" / organism / "lineage"
+    cluster_file = lineage_dir / "poppunk_clusters.csv"
+    if cluster_file.exists():
+        cdf = pd.read_csv(cluster_file, encoding="utf-8")
+        id_col = "Genome ID" if "Genome ID" in cdf.columns else cdf.columns[0]
+        clustered_ids = set(cdf[id_col].astype(str))
+        print(f"  ✓ Loaded {len(clustered_ids)} clustered genomes (lineage intersection).")
+    else:
+        print(f"  ⚠ No lineage clusters at {cluster_file}; skipping intersection "
+              f"(07b will fall back to holdout CV — run 02c first for lineage-CV).")
+
     valid_genomes, valid_labels = [], []
-    missing_fna = skipped_outliers = 0
+    missing_fna = skipped_outliers = skipped_unclustered = 0
     for gid, label in zip(meta["Genome ID"].values, meta[antibiotic].astype(int).values):
         if gid in outlier_ids:
             skipped_outliers += 1
+            continue
+        if clustered_ids is not None and gid not in clustered_ids:
+            skipped_unclustered += 1
             continue
         if not (raw_genomes_dir / f"{gid}.fna").exists():
             missing_fna += 1
@@ -112,6 +139,9 @@ def select_genomes(config, organism, antibiotic):
 
     if skipped_outliers:
         print(f"  ✓ Skipped {skipped_outliers} QC-outlier genomes.")
+    if skipped_unclustered:
+        print(f"  ✓ Skipped {skipped_unclustered} genomes absent from the lineage "
+              f"clusters (PopPUNK --qc-db failures; excluded from the model).")
     if missing_fna:
         print(f"  ⚠ Skipped {missing_fna} genomes: .fna missing in {raw_genomes_dir}.")
     if not valid_genomes:

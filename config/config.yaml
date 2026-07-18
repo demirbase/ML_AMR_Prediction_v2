@@ -230,9 +230,15 @@ lineage:
 
   # ── Quality control (PopPUNK --qc-db, a SEPARATE mode) — E3 §3.4 ──────────
   # Contamination/length outliers corrupt the distance estimates and can make
-  # PopPUNK infer a core distance of 0. Until now 02c ran NO PopPUNK QC at all.
-  # CheckM2 (M15) already filters completeness/contamination upstream; this is the
-  # distance-level guard PopPUNK applies to its own sketches.
+  # PopPUNK infer a core distance of 0. MEASURED 2026-07-18: with qc:false the
+  # A. baumannii clustering COLLAPSED to a single 96.7% mega-cluster (31 lineages,
+  # useless for lineage-CV); qc:true keeps it at 39.5% / 122 lineages. So --qc-db
+  # is ESSENTIAL, not redundant with CheckM2 — it guards the distance sketches.
+  # CONSEQUENCE: --qc-db drops ~3% of genomes from the cluster labels (1171->1133),
+  # and the downstream model MUST drop the same genomes (07b's --drop-uncovered),
+  # otherwise a QC-failed genome that still has a phenotype has no lineage and 07b
+  # falls back to holdout. QC-failed == low quality, so dropping it from the model
+  # is correct, not a workaround.
   qc: true
   max_a_dist: 0.5        # drop pairs with accessory distance above this (E3 §3.4)
   length_sigma: 5        # SD of the length distribution beyond which a genome is cut
