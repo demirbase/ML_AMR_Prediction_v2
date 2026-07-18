@@ -1,6 +1,6 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `ebc8526`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `16ca031`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
 
 ---
