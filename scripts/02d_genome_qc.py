@@ -138,8 +138,11 @@ def classify_row(gid, comp, cont, n50, nctg, tlen, thr):
     pass_cont = None if cont is None else cont <= thr["contamination_max"]
     pass_n50 = None if n50 is None else n50 >= thr["n50_min"]   # advisory only
     pass_ctg = None if nctg is None else nctg <= thr["max_contigs"]  # advisory only
-    gates = [c for c in (pass_comp, pass_cont) if c is not None]
-    overall = bool(gates) and all(gates)
+    # Fail ONLY if a CheckM2 gate is affirmatively violated. A missing metric (None,
+    # e.g. CheckM2 didn't assess this genome) does not fail — "missing metric is not a
+    # failure" — and N50/contigs never gate (advisory). In the real run CheckM2 is
+    # present for every genome, so this is exactly "completeness>=95 AND contamination<=5".
+    overall = (pass_comp is not False) and (pass_cont is not False)
     return {
         "genome_id": gid, "completeness": comp, "contamination": cont,
         "n50": n50, "n_contigs": nctg, "total_length": tlen,
