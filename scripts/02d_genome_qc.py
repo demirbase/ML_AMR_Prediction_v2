@@ -174,6 +174,17 @@ def do_post(organism, config, thr):
     with open(exclude_path, "w", encoding="utf-8") as f:
         f.write("\n".join(fails) + ("\n" if fails else ""))
 
+    # The canonical outlier file 03u actually consumes:
+    # dir_global_exploration/global_qc_outliers.csv, a CSV with a 'Genome' column.
+    # 02d previously wrote ONLY the exclude .txt above (different name, in the qc/
+    # subdir, headerless) — 03u looks for global_qc_outliers.csv one level up, so it
+    # never found it and the CheckM2/QUAST QC was computed but SILENTLY NOT applied
+    # to the models. Write the exact artifact 03u reads (an empty-but-headed file
+    # when nothing fails, so 03u reads it cleanly and excludes zero).
+    outliers_path = qc_out.parent / "global_qc_outliers.csv"
+    pd.DataFrame({"Genome": fails}).to_csv(outliers_path, index=False, encoding="utf-8")
+    logger.info("post: wrote %d QC outliers -> %s", len(fails), outliers_path)
+
     def _dist(colname):
         s = df[colname].dropna()
         if s.empty:
