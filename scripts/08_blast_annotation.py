@@ -107,10 +107,11 @@ def organism_entrez_query(organism_id):
     """Build an NCBI entrez_query that restricts the remote search to the study
     organism, derived from the registry (never hardcoded, so it auto-adjusts per
     organism). Prefer a TAXID filter ``txid<N>[Organism:exp]`` because it has NO
-    spaces: a scientific-name filter like ``Escherichia coli[organism]`` breaks
-    the Nextflow CLI launcher, which word-splits the value on its space. ':exp'
-    explodes the taxon to include all descendant strains. Returns '' (no
-    restriction) if the organism is unknown or has neither taxid nor name."""
+    spaces and passes as a single CLI token; a scientific-name filter like
+    ``Escherichia coli[organism]`` contains a space that would be word-split into a
+    broken ``-entrez_query`` argument. ':exp' explodes the taxon to include all
+    descendant strains. Returns '' (no restriction) if the organism is unknown or
+    has neither taxid nor name."""
     try:
         block = get_organism(organism_id)
     except Exception:
@@ -151,9 +152,6 @@ EXPLAINABILITY_DIR = resolve_path('dir_05_explainability', organism=ORGANISM,
 # Hardcoding 50 silently broke this step whenever top_n_features != 50.
 FASTA_INPUT = EXPLAINABILITY_DIR / f"02_top_{TOP_N}_features_{TARGET_ANTIBIOTIC}.fasta"
 
-# Nextflow pipeline path
-PIPELINE_PATH = PROJECT_ROOT / "scripts" / "08_blast_pipeline.nf"
-
 # Expected output files (for final confirmation print)
 CARD_OUT  = EXPLAINABILITY_DIR / f"03_card_blast_results_{TARGET_ANTIBIOTIC}.tsv"
 NCBI_OUT  = EXPLAINABILITY_DIR / f"04_ncbi_blast_results_{TARGET_ANTIBIOTIC}.tsv"
@@ -167,10 +165,10 @@ def main() -> None:
     Orchestrate the BLAST annotation pipeline for AMR k-mer features.
 
     Workflow:
-        1. Validate tool availability (nextflow, blastn)
+        1. Validate tool availability (blastn)
         2. Validate input FASTA from Step 07
         3. Validate CARD local database
-        4. Execute Nextflow pipeline (CARD + NCBI in parallel)
+        4. Run the two BLAST passes via subprocess (CARD local, NCBI remote)
         5. Confirm output files were created
     """
     print("=" * 80)
@@ -189,7 +187,7 @@ def main() -> None:
     print("\n[STEP 1/4] Checking required tool availability...")
 
     missing_tools = []
-    for tool in ("nextflow", "blastn"):
+    for tool in ("blastn",):
         path = shutil.which(tool)
         if path:
             print(f"  ✓ {tool:12s} found: {path}")
@@ -200,10 +198,7 @@ def main() -> None:
     if missing_tools:
         print("\nERROR: The following required tools are not installed or not on PATH:")
         for tool in missing_tools:
-            if tool == "nextflow":
-                print("  • nextflow  → Install: https://www.nextflow.io/docs/latest/getstarted.html")
-                print("                Quick:   curl -s https://get.nextflow.io | bash && mv nextflow /usr/local/bin/")
-            elif tool == "blastn":
+            if tool == "blastn":
                 print("  • blastn    → Install BLAST+: https://www.ncbi.nlm.nih.gov/books/NBK569861/")
                 print("                macOS:   brew install blast")
                 print("                conda:   conda install -c bioconda blast")
@@ -282,62 +277,69 @@ def main() -> None:
             print(f"    ⚠ Could not record CARD DB version: {e}")
 
     # -------------------------------------------------------------------------
-    # STEP 4: Execute Nextflow pipeline
+    # STEP 4: Run the two BLAST passes directly (CARD local + NCBI remote)
     # -------------------------------------------------------------------------
-    print("\n[STEP 4/4] Launching Nextflow pipeline (CARD + NCBI in parallel)...")
+    # blastn is called via subprocess — NO Nextflow. The earlier .nf orchestration
+    # was deleted but main() still shelled out to `nextflow run <the missing .nf>`,
+    # so 08 could not run at all (nextflow is not even in the pinned amr.sif). The
+    # pipeline only ever ran two blastn passes; doing them here directly is simpler
+    # and drops the whole JVM/Nextflow dependency.
+    print("\n[STEP 4/4] Running BLAST (CARD local + NCBI remote)...")
     print("=" * 80)
+
+    # 09 reads outfmt-6 with exactly these columns (09_biological_summary.TSV_COLS);
+    # 'qlen' before 'stitle' lets 09 compute query coverage for the tier cutoffs.
+    OUTFMT = ("6 qseqid sseqid pident length mismatch gapopen qstart qend "
+              "sstart send evalue bitscore qlen stitle")
 
     blast_task = choose_blast_task(FASTA_INPUT, BLAST_TASK_OVERRIDE)
     # blastn-short needs a small word_size (7) to seed short queries; the config
     # word_size (11+) truncated/missed full-length hits on ~30-50 bp unitigs.
     word_size = 7 if blast_task == "blastn-short" else WORD_SIZE
-    # NCBI remote pass: organism-restricted entrez_query (registry display_name).
+    # NCBI remote pass: organism-restricted entrez_query (registry taxid/name).
     entrez_query = organism_entrez_query(ORGANISM)
-    cmd = [
-        "nextflow", "run", str(PIPELINE_PATH),
-        "--fasta",           str(FASTA_INPUT),
-        "--card_db",         str(CARD_DB),
-        "--outdir",          str(EXPLAINABILITY_DIR),
-        "--antibiotic",      TARGET_ANTIBIOTIC,
-        "--threads",         str(THREADS),
-        "--evalue",          str(EVALUE),
-        "--word_size",       str(word_size),     # CARD (local) pass
-        "--task",            str(blast_task),    # CARD (local) pass
-        "--ncbi_task",       str(NCBI_TASK),     # NCBI (remote) pass — decoupled
-        "--ncbi_word_size",  str(NCBI_WORD_SIZE),
-        "--max_target_seqs", str(MAX_TARGET_SEQS),
-        "--entrez_query",    entrez_query,
-    ]
     print(f"  CARD task: {blast_task} | word_size: {word_size} "
           f"(auto from median query length; override=blast.task)")
     print(f"  NCBI task: {NCBI_TASK} | word_size: {NCBI_WORD_SIZE} | "
           f"max_target_seqs: {MAX_TARGET_SEQS} | "
           f"entrez_query: {entrez_query or '(none)'}")
 
-    print(f"  Command: {' '.join(cmd)}\n")
+    def run_blast(cmd, label, out_path):
+        print(f"\n  → {label}: {' '.join(cmd)}")
+        r = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+        if r.returncode != 0:
+            sys.exit(f"ERROR: {label} blastn exited with status {r.returncode}.")
+        # blastn writes an empty output file when there are no hits — a valid,
+        # meaningful result (a novel k-mer with no DB match), NOT an error; 09
+        # already tolerates empty TSVs. Only a truly missing file is fatal.
+        if not out_path.exists():
+            sys.exit(f"ERROR: {label} produced no output file at {out_path}.")
+        print(f"    ✓ {out_path.name} ({out_path.stat().st_size / 1024:.1f} KB)")
 
-    # Force English locale for the JVM that Nextflow spawns.
-    # On systems with a Turkish locale, Java's String.toLowerCase() converts
-    # 'I' → 'ı' (dotless-i), which breaks Nextflow's errorStrategy keyword
-    # matching ('ignore' fails because the JVM sees 'ıgnore').
-    # (os is already imported at module level.)
-    nxf_env = os.environ.copy()
-    # .strip() so a leading space doesn't become an empty token the Nextflow
-    # launcher reports as "Illegal option --" (benign but noisy).
-    nxf_env['NXF_OPTS'] = (nxf_env.get('NXF_OPTS', '') + ' -Duser.language=en -Duser.country=US').strip()
-    # Disable the ANSI console. Under nohup / no-tty (HPC background runs) the
-    # ANSI renderer does terminal ioctls and the backgrounded JVM gets SIGTTOU
-    # and STOPS (process state 'T') before it ever submits the BLAST processes.
-    # Plain logging keeps background/HPC runs unblocked. Respect a user override.
-    nxf_env.setdefault('NXF_ANSI_LOG', 'false')
+    # CARD local pass (skipped only when the DB is absent AND --allow-missing-card-db;
+    # otherwise STEP 3 already hard-failed).
+    if card_present:
+        run_blast(
+            ["blastn", "-query", str(FASTA_INPUT), "-db", str(CARD_DB),
+             "-out", str(CARD_OUT), "-outfmt", OUTFMT,
+             "-task", blast_task, "-word_size", str(word_size),
+             "-evalue", str(EVALUE), "-max_target_seqs", str(MAX_TARGET_SEQS),
+             "-num_threads", str(THREADS)],
+            "CARD local", CARD_OUT)
+    else:
+        CARD_OUT.write_text("", encoding="utf-8")  # empty file so 09 finds the path
+        print("\n  → CARD local: SKIPPED (no DB, --allow-missing-card-db).")
 
-    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=nxf_env)
-
-    if result.returncode != 0:
-        print("\nERROR: Nextflow pipeline exited with a non-zero status.")
-        print(f"  Return code: {result.returncode}")
-        print("  Check Nextflow logs in the .nextflow.log file for details.")
-        sys.exit(result.returncode)
+    # NCBI remote pass. -remote runs server-side, so -num_threads is NOT allowed
+    # (blastn errors if both are given). This is the slow pass (~10-20 min).
+    ncbi_cmd = ["blastn", "-query", str(FASTA_INPUT), "-db", "nt", "-remote",
+                "-out", str(NCBI_OUT), "-outfmt", OUTFMT,
+                "-task", NCBI_TASK, "-word_size", str(NCBI_WORD_SIZE),
+                "-evalue", str(EVALUE), "-max_target_seqs", str(MAX_TARGET_SEQS)]
+    if entrez_query:
+        ncbi_cmd += ["-entrez_query", entrez_query]
+    print("\n  (NCBI remote BLAST over nt can take ~10-20 min — not a hang.)")
+    run_blast(ncbi_cmd, "NCBI remote", NCBI_OUT)
 
     # -------------------------------------------------------------------------
     # COMPLETION: Confirm output files
@@ -352,7 +354,7 @@ def main() -> None:
             size_kb = out_path.stat().st_size / 1024
             print(f"  ✓ {out_path.name}  ({size_kb:.1f} KB)")
         else:
-            print(f"  ⚠ Not found: {out_path.name}  (check Nextflow logs)")
+            print(f"  ⚠ Not found: {out_path.name}  (unexpected — blastn should have written it)")
 
     print(f"\nAll outputs in: {EXPLAINABILITY_DIR}")
     print("\nNext step:")
