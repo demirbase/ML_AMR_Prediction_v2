@@ -1,7 +1,43 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `16ca031`** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`).
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `06a38f8`+** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Pilot uçtan uca geçti — **READ §0.-7 FIRST.**
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
+
+---
+
+# §0.-7 — LATEST STATE (2026-07-19) — PİLOT UÇTAN UCA GEÇTİ · 4 GİZLİ BUG DÜZELTİLDİ · TAM KOŞUYA HAZIR — READ FIRST, supersedes ALL below
+
+> **Repo HEAD `06a38f8`** (+ bu handoff commit'i), hepsi push'lu. TRUBA senkron (`git fetch && git reset --hard origin/main`). **KB şeması 0.7.1.** §0.-6 ve altı geçerli arka plan; bu bölüm pilot-sonrası GÜNCEL durum.
+
+### ✅ PİLOT (A. baumannii amikacin) UÇTAN UCA KOŞTU — 3 DOĞRULAMANIN HEPSİ GEÇTİ
+Zincir: 03u → ML(04-07b) → 07 → 08 → 09 → bio(10-13b) → pyseer(14) → populate.
+- **#1 lineage-CV ✓** — `models.auc_mean_seeds=0.916`, `cv_method='lineage_group_kfold_5fold'` (fallback DEĞİL). roc_auc=0.972 ayrı kolon (holdout, KB metriği DEĞİL). 5 fold 0.735/0.962/0.979/0.925/0.980 — GC2 klonunu tutan fold dürüst düşük.
+- **#2 provenance ✓** — pipeline_runs 8/9 gerçek sürüm (poppunk 2.7.8, unitig-caller 1.3.2, graph-tool 3.0, blast 2.17, kmc, xgboost, card, pyseer 1.4.1). bcalm = dürüst None (sürüm CLI'si yok; unitig-caller'a gömülü + lockfile'da pinli).
+- **#3 evidence_tier ✓** — weak 50/confirmed 21/candidate 8/**strong_novel 1**/none 1. Biyoloji: APH(3')-VIa/VIb aminoglikozit %100 CARD, recovery 0.64, H2_pass, novel_fraction 0.36, 10 stabil novel.
+
+### 🐛 PİLOTTA BULUNAN + DÜZELTİLEN 4 GİZLİ BUG (hepsi tezi vururdu; testler göremiyordu)
+1. **`7ef05f7` — 03u lineage kesişimi.** `--qc-db` (02c) sketch DB'den 38 genom budar → kümesiz kalırlar; 03u model genomlarını AMR etiketinden seçtiği için 34 amikacin genomu kümesiz → **07b SESSİZCE lineage-CV'den holdout'a düşüyordu**. `--no-qc` denendi → A.b **%96.7 mega-kümeye ÇÖKTÜ** (qc ŞART, redundant değil). Fix: 03u seçtiği genomları `poppunk_clusters.csv` ile kesiştirir (kümesiz=QC-fail → modele girmez). **config `lineage.qc: true` KALIR.**
+2. **`c3ecf9c` — 08 nextflow → subprocess.** 08 main() `nextflow run <olmayan .nf>` çağırıyordu; nextflow yeni amr.sif'te yok → 08 hiç koşamıyordu. Fix: CARD local + NCBI remote blastn doğrudan subprocess (outfmt-6, 09'un okuduğu kolonlar). nextflow bağımlılığı kalktı.
+3. **`06a38f8` — provenance card/bcalm/pyseer.** bcalm probe `--version` (yanlış flag) hata string'i saklıyordu → `-version` + hata-reddi (bcalm yine None, dürüst). card_version NULL → `card_db_version.txt`'ten okunuyor. pyseer_version NULL → 14 artık `AMR_PYSEER_VERSION` env'ini tercih ediyor.
+4. **`run_pyseer_env.slurm` PATCHED (TRUBA)** — pyseer sürümünü yakalayıp `AMR_PYSEER_VERSION` ile 14 post'a geçiyor. ⚠️ **UNTRACKED** — kanonik slurm'lerle commit edilmeli.
+
+### ⚠️ AYRICA BULUNANLAR (tam koşu öncesi)
+- **`amr_phenotypes.csv`**: `00_prepare_metadata` yeni organizmalarda (Ab/Pa/Efm) koşmamıştı (pilotta A.b üretildi). **Ec/Kp/Sa phenotypes Jul-5 BAYAT** (filtre-düzeltmesi öncesi).
+- **02d/M15 CheckM2 QC koşmadı** — 03u "global_qc_outliers.csv yok" dedi; registry'nin QC gate'i, pilot atladı.
+- **09 kırılgan** — NCBI Entrez efetch (markdown rapor) uzun + internet; SSH koparsa ölür. `config.ncbi.entrez_email` SET DEĞİL (NCBI ban riski). KB-kritik çıktılar (07_kb_candidates, 08_metrics) rapordan ÖNCE yazılır → populate etkilenmez.
+
+### ⏭️ TAM KOŞU ÖNCESİ CHECKLIST (temiz koşu)
+1. **6 organizmada `00_prepare_metadata`** yeniden (3 eski bayat).
+2. **02d/M15 CheckM2 QC** → her organizma `global_qc_outliers.csv` (03u eler; 03u-kesişim kümesizleri ayrıca eler → çift güvenli).
+3. **Lineage etiketleri:** 6'sı da qc:true ÜRETİLDİ + geçerli (A.b refine 39.5%). Re-cluster GEREKMEZ.
+4. **`03u --build-db`** organizma başına BİR kez (hiç kurulmadı). Build slurm YOK → yazılmalı (`-c40 --mem=300G`, --build-db, yalnız AMR_ORGANISM).
+5. **09'u nohup/screen'de** + `config.ncbi.entrez_email` set.
+6. **Kanonik slurm'leri commit** (run_03u_env, run_ml_env, run_bio_env, run_pyseer_env[patched], build) — TRUBA'da untracked.
+7. **45-model per-antibiyotik zincir** env-parametrik, KESİN SIRALI (memory `amr-truba-gotchas`).
+
+### 🔧 OPERASYONEL
+- **barbun QOS: -c 20-40 ZORUNLU** (-c16 reddedildi). node 40-çekirdek/384GB/9.5GB-core/3-gün. Dolu cluster'da -c20 --mem=180G küçük işleri hızlı sokar (ML MaxRSS ~21G). Alt kuyruklar orfoz/hamsi/orkinos/sardalya/palamut. (memory güncel.)
+- populate, NULL sürüm kolonlarını `run_metadata.json`'dan okur (04 yazar) → kod fix'i ancak 04 yeniden koşunca yansır (tam koşuda otomatik). card/pyseer populate-anında ayrı kaynaktan okunur.
 
 ---
 

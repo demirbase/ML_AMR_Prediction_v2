@@ -106,8 +106,12 @@ def collect_versions(config=None):
         "blastn": _tool_version("blastn", "-version"),
         # ── the tools the results actually depend on ──────────────────────────
         "unitig_caller": _tool_version("unitig-caller"),   # builds the features
-        "bcalm": _tool_version("bcalm", "-version"),       # compacted de Bruijn graph
-                                                           # (bcalm rejects --version)
+        # bcalm (unitig-caller's internal cDBG builder) has NO usable version CLI:
+        # --version errors, -version prints nothing, and the banner omits it. So this
+        # is an honest None; bcalm's version is implied by unitig-caller (captured
+        # above) and pinned exactly in environment.lock.yml. Kept as a probe in case
+        # a future bcalm build adds one — _tool_version rejects the error line if not.
+        "bcalm": _tool_version("bcalm", "-version"),
         "poppunk": _tool_version("poppunk"),               # defines the CV groups
         "graph_tool": _pkg_version("graph_tool"),          # changes PopPUNK's clustering
         "pyseer": _tool_version("pyseer"),                 # None from amr.sif; see docstring
