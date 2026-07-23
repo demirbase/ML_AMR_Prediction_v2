@@ -558,6 +558,37 @@ def populate_external_concordance(conn, model_id, organism, antibiotic):
     return cnt
 
 
+def _card_version_from_file(organism, antibiotic, config):
+    """CARD DB provenance distilled from the file 08 writes (blastdbcmd -info) into
+    one short string, e.g. 'CARD card.fna | 6,052 seqs | built Mar 21, 2026', so
+    pipeline_runs.card_version records WHICH CARD snapshot annotated this model
+    rather than a NULL. This is the auto-captured source; the env/config knobs stay
+    as manual overrides. Best-effort — returns None if the file is absent."""
+    try:
+        d = resolve_path("dir_05_explainability", organism=organism,
+                         antibiotic=antibiotic, config=config)
+        txt = (d / "card_db_version.txt").read_text(encoding="utf-8")
+    except Exception:
+        return None
+    name = date = seqs = None
+    for raw in txt.splitlines():
+        s = raw.strip()
+        if s.startswith("Database:"):
+            name = s.split(":", 1)[1].strip()
+        elif s.startswith("Date:"):
+            date = s.split(":", 1)[1].split("\t")[0].strip()
+        elif "sequences;" in s:
+            seqs = s.split("sequences;")[0].strip()
+    if not name:
+        return None
+    parts = [f"CARD {name}"]
+    if seqs:
+        parts.append(f"{seqs} seqs")
+    if date:
+        parts.append(f"built {date}")
+    return " | ".join(parts)
+
+
 def main():
     config = load_config()
     ap = argparse.ArgumentParser(description="Populate the AMRK-DB knowledge base.")
@@ -570,9 +601,12 @@ def main():
 
     k_length = int(config["preprocessing"]["k_length"])
     # CARD version (M6) — AMR_CARD_VERSION env override wins over config.yaml so
-    # HPC can record it without editing the (manually-tuned) config. May be None.
+    # HPC can record it without editing the (manually-tuned) config. Neither is
+    # usually set, so fall back to the file 08 auto-writes (blastdbcmd -info): that
+    # keeps card_version a real value instead of the NULL it was.
     card_version = (os.environ.get("AMR_CARD_VERSION")
-                    or (config.get("blast", {}) or {}).get("card_version"))
+                    or (config.get("blast", {}) or {}).get("card_version")
+                    or _card_version_from_file(organism, antibiotic, config))
     drug_class = antibiotic_to_class(antibiotic)  # registry class_id (e.g. 'penicillins')
 
     # Resolve roots (organism/antibiotic-scoped) and glob the artefacts.

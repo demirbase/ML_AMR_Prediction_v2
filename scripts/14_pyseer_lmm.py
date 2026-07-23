@@ -37,6 +37,7 @@ Output (results/{org}/{ab}/05_explainability/)
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -51,11 +52,16 @@ from lib.config import load_config, resolve_path, get_target  # noqa: E402
 def _pyseer_version():
     """The pyseer version that produced this run's associations, or None.
 
-    Recorded HERE rather than in lib.run_metadata.collect_versions because pyseer
-    ships in amr-tools.sif while populate runs in amr.sif — only this step can see
-    the binary it actually called. Best-effort: a missing version must never fail
-    the run, it just leaves the provenance field empty.
+    `--mode post` runs in amr.sif, where pyseer is ABSENT — it ships in
+    amr-tools.sif and is invoked separately (run_pyseer_env.slurm). So the direct
+    probe below returns None here; the step that ACTUALLY ran pyseer exports
+    AMR_PYSEER_VERSION, which we prefer. (The old code claimed "only this step can
+    see the binary it called" and then probed a binary that isn't there, leaving
+    pyseer_version null in every summary.) Best-effort: never fails the run.
     """
+    env_ver = os.environ.get("AMR_PYSEER_VERSION")
+    if env_ver and env_ver.strip():
+        return env_ver.strip()
     import subprocess
     try:
         r = subprocess.run(["pyseer", "--version"], capture_output=True,

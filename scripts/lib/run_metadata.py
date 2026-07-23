@@ -52,7 +52,17 @@ def _tool_version(cmd, flag="--version"):
     try:
         out = subprocess.run([cmd, flag], capture_output=True, text=True, check=False)
         text = (out.stdout or out.stderr or "").strip().splitlines()
-        return text[0] if text else None
+        line = text[0].strip() if text else ""
+        # A wrong flag makes some tools echo an error as their first line (bcalm with
+        # --version -> "ERROR: Unknown parameter '--version'"). Storing that as the
+        # version is worse than a NULL, so reject error-shaped output and record an
+        # honest "unknown" instead.
+        low = line.lower()
+        if (not line
+                or low.startswith(("error", "unknown", "unrecognized", "invalid", "usage"))
+                or "unknown parameter" in low):
+            return None
+        return line
     except Exception:
         return None
 
@@ -96,7 +106,8 @@ def collect_versions(config=None):
         "blastn": _tool_version("blastn", "-version"),
         # ── the tools the results actually depend on ──────────────────────────
         "unitig_caller": _tool_version("unitig-caller"),   # builds the features
-        "bcalm": _tool_version("bcalm"),                   # compacted de Bruijn graph
+        "bcalm": _tool_version("bcalm", "-version"),       # compacted de Bruijn graph
+                                                           # (bcalm rejects --version)
         "poppunk": _tool_version("poppunk"),               # defines the CV groups
         "graph_tool": _pkg_version("graph_tool"),          # changes PopPUNK's clustering
         "pyseer": _tool_version("pyseer"),                 # None from amr.sif; see docstring
