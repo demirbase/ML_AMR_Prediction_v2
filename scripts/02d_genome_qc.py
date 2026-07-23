@@ -126,14 +126,20 @@ def classify_row(gid, comp, cont, n50, nctg, tlen, thr):
 
     A check passes if its metric is present AND within threshold; a MISSING
     metric is ``None`` (its tool didn't run) and is not counted as a failure.
-    ``pass_overall`` requires at least one present check and all present checks
-    to pass."""
+
+    ``pass_overall`` (the EXCLUSION gate) is CheckM2 completeness+contamination ONLY.
+    QUAST N50/contigs are reported for information but are ADVISORY, not exclusion
+    criteria: unitig features are ~30-60 bp and survive fragmented assemblies intact,
+    so contiguity says little about presence/absence AMR content. Gating on N50 (>=50 kb)
+    dropped ~63% of E. faecium (N50<50 kb draft assemblies whose AMR genes are fine),
+    which would gut the VRE panel. CheckM2 completeness (missing content) and
+    contamination (chimeric/mixed) are the quality signals that actually matter."""
     pass_comp = None if comp is None else comp >= thr["completeness_min"]
     pass_cont = None if cont is None else cont <= thr["contamination_max"]
-    pass_n50 = None if n50 is None else n50 >= thr["n50_min"]
-    pass_ctg = None if nctg is None else nctg <= thr["max_contigs"]
-    checks = [c for c in (pass_comp, pass_cont, pass_n50, pass_ctg) if c is not None]
-    overall = bool(checks) and all(checks)
+    pass_n50 = None if n50 is None else n50 >= thr["n50_min"]   # advisory only
+    pass_ctg = None if nctg is None else nctg <= thr["max_contigs"]  # advisory only
+    gates = [c for c in (pass_comp, pass_cont) if c is not None]
+    overall = bool(gates) and all(gates)
     return {
         "genome_id": gid, "completeness": comp, "contamination": cont,
         "n50": n50, "n_contigs": nctg, "total_length": tlen,
