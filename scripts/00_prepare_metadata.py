@@ -27,6 +27,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from lib.bvbrc import pivot_binary               # noqa: E402
 from lib.config import load_config, resolve_path  # noqa: E402
+from lib.registry import normalize_antibiotic    # noqa: E402
 
 log = logging.getLogger("prepare")
 
@@ -66,6 +67,13 @@ def main():
         sys.exit(1)
 
     cleaned = pd.read_csv(cleaned_csv, dtype={"genome_id": str})
+    # Re-normalise antibiotic names to canonical registry spelling BEFORE pivoting.
+    # 00a's clean_amr_table already normalises, but an amr_cleaned_long.csv written
+    # before an alias was added keeps the raw name — e.g. 'ampicillin/sulbactam'
+    # instead of 'ampicillin_sulbactam' — which then becomes a phenotype column the
+    # registry panel (and 03u) can't match, failing that model. Applying the current
+    # alias here makes the matrix self-healing against a stale cleaned table.
+    cleaned["antibiotic"] = cleaned["antibiotic"].map(normalize_antibiotic)
     wide = pivot_binary(cleaned)
     n_candidates = len(wide)
 
