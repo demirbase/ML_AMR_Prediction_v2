@@ -331,15 +331,23 @@ def main() -> None:
         print("\n  → CARD local: SKIPPED (no DB, --allow-missing-card-db).")
 
     # NCBI remote pass. -remote runs server-side, so -num_threads is NOT allowed
-    # (blastn errors if both are given). This is the slow pass (~10-20 min).
-    ncbi_cmd = ["blastn", "-query", str(FASTA_INPUT), "-db", "nt", "-remote",
-                "-out", str(NCBI_OUT), "-outfmt", OUTFMT,
-                "-task", NCBI_TASK, "-word_size", str(NCBI_WORD_SIZE),
-                "-evalue", str(EVALUE), "-max_target_seqs", str(MAX_TARGET_SEQS)]
-    if entrez_query:
-        ncbi_cmd += ["-entrez_query", entrez_query]
-    print("\n  (NCBI remote BLAST over nt can take ~10-20 min — not a hang.)")
-    run_blast(ncbi_cmd, "NCBI remote", NCBI_OUT)
+    # (blastn errors if both are given). This is the slow pass (~10-20 min/model),
+    # so a whole-panel run can skip it (AMR_SKIP_NCBI=1) for a fast CARD-only build:
+    # the KB's tier / gene_symbol / ARO all come from the CARD pass, and NCBI only
+    # adds genomic context for novel candidates, fillable by a later targeted pass.
+    # An empty 04_ncbi is written so 09 finds the path and reads it cleanly.
+    if env_bool("AMR_SKIP_NCBI", False):
+        NCBI_OUT.write_text("", encoding="utf-8")
+        print("\n  → NCBI remote: SKIPPED (AMR_SKIP_NCBI=1) — CARD-only annotation.")
+    else:
+        ncbi_cmd = ["blastn", "-query", str(FASTA_INPUT), "-db", "nt", "-remote",
+                    "-out", str(NCBI_OUT), "-outfmt", OUTFMT,
+                    "-task", NCBI_TASK, "-word_size", str(NCBI_WORD_SIZE),
+                    "-evalue", str(EVALUE), "-max_target_seqs", str(MAX_TARGET_SEQS)]
+        if entrez_query:
+            ncbi_cmd += ["-entrez_query", entrez_query]
+        print("\n  (NCBI remote BLAST over nt can take ~10-20 min — not a hang.)")
+        run_blast(ncbi_cmd, "NCBI remote", NCBI_OUT)
 
     # -------------------------------------------------------------------------
     # COMPLETION: Confirm output files
