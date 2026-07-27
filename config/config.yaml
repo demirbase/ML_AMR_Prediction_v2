@@ -398,5 +398,5 @@ blast:
 # An optional API key raises the rate limit from 3 to 10 requests/sec:
 #   https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
 ncbi:
-  entrez_email: ""    # REQUIRED — set to your real e-mail before running Step 09
+  entrez_email: "eren0demirbas@gmail.com"    # NCBI Entrez identity (Step 09) — avoids throttling/bans
   api_key:      ""     # OPTIONAL — NCBI API key for a higher rate limit
