@@ -365,9 +365,30 @@ def subset_store_to_antibiotic(store_dir, out_dir, antibiotic, valid_genomes,
     # features.txt: keep the store's unitig sequences at the surviving column indices.
     all_feats = [ln.split("\t")[0] for ln in
                  (store_dir / "features.txt").read_text(encoding="utf-8").splitlines()]
+    kept_feats = [all_feats[ci] for ci in keep]
     with open(out_dir / "features.txt", "w", encoding="utf-8") as f:
-        for ci in keep:
-            f.write(f"{all_feats[ci]}\t1\n")
+        for seq in kept_feats:
+            f.write(f"{seq}\t1\n")
+
+    # unitigs.rtab — pyseer (14) consumes the unitig×genome presence table in
+    # unitig-caller's Rtab format (header 'Unitig_sequence<TAB>samples', then one
+    # 0/1 row per unitig). The fallback path gets it straight from unitig-caller, but
+    # the store-subset path built ONLY the npz chunks, so pyseer failed with 'unitig
+    # Rtab not found'. Emit it here from the subset so both 03u paths leave the same
+    # artefacts. (Big text file — the per-antibiotic chain rm's it after populate.)
+    Xt = X_kept.T.tocsr()                       # (n_unitigs × n_genomes), 0/1
+    n_g = Xt.shape[1]
+    with open(out_dir / "unitigs.rtab", "w", encoding="utf-8") as rf:
+        rf.write("Unitig_sequence\t" + "\t".join(valid_genomes) + "\n")
+        indptr, indices = Xt.indptr, Xt.indices
+        for j in range(Xt.shape[0]):
+            row = np.zeros(n_g, dtype=np.int8)
+            row[indices[indptr[j]:indptr[j + 1]]] = 1
+            rf.write(kept_feats[j])
+            rf.write("\t")
+            row.tofile(rf, sep="\t")
+            rf.write("\n")
+    print(f"  ✓ Wrote unitigs.rtab ({Xt.shape[0]:,} unitigs × {n_g} genomes) for pyseer (14).")
 
     pd.DataFrame(valid_labels, columns=["label"]).to_csv(
         out_dir / f"y_{antibiotic}.csv", index=False, encoding="utf-8")
