@@ -43,9 +43,13 @@ def test_classify_row_missing_metric_not_a_failure(mod):
     r = mod.classify_row("g", None, None, 120000, 50, 5_000_000, THR)
     assert r["pass_completeness"] is None and r["pass_contamination"] is None
     assert r["pass_overall"] is True
-    # all metrics missing -> no present checks -> not a pass
+    # All metrics missing -> still a pass: exclusion requires AFFIRMATIVE evidence of
+    # low quality, never absence of evidence. The old semantics (no present check ->
+    # fail) meant that if CheckM2's report were missing, EVERY genome became a QC
+    # outlier and 03u would drop the entire organism. The real guard against a
+    # missing tool is do_post, which hard-errors when neither report exists.
     empty = mod.classify_row("g", None, None, None, None, None, THR)
-    assert empty["pass_overall"] is False
+    assert empty["pass_overall"] is True
 
 
 def test_read_checkm2_and_quast(mod, tmp_path):
