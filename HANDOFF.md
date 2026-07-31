@@ -1,7 +1,33 @@
 # AMR k-mer Knowledge Base — Project Handoff Document
 
-> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `06a38f8`+** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). Pilot uçtan uca geçti — **READ §0.-7 FIRST.**
+> **Repo:** `ML_AMR_Prediction_v2` · branch **`main`** · **HEAD `5e3101f`+** (pushed to `github.com/demirbase/ML_AMR_Prediction_v2`). ✅ 45-model KB COMPLETE — **READ §0.-8 FIRST.**
 > **Local (Mac) path:** `~/Desktop/IU_master/projects/ML_project_kopyasi`
+
+---
+
+# §0.-8 — LATEST STATE (2026-07-31) — ✅ 45-MODEL KB COMPLETE — READ FIRST, supersedes ALL below
+
+> **Repo HEAD `5e3101f`**, hepsi push'lu. KB `results/kb/amrk.db` (TRUBA) schema **0.7.1**, **populate 45/45 FAIL=0**. §0.-7 ve altı tarihsel arka plan.
+
+### ✅ NİHAİ KB (tezin çekirdek deliverable'ı)
+- **45 model · 6 ESKAPEE · 14 sınıf · hepsi `lineage_group_kfold_5fold`.** lineage-CV AUC: min 0.429 · ort **0.842** · max 0.975.
+- **Organizma:** Efm 0.933 · Ec 0.917 · Sa 0.836 · Kp 0.834 · Ab 0.759 · Pa 0.755. (Ab/Pa düşük = intrinsik/klonal; lineage-CV dürüstçe ifşa.)
+- **⭐ MANŞET — A. baumannii ceftazidime: holdout 0.985 vs lineage-CV 0.429** (Jaccard 0.04) = ders-kitabı klonal-confounding, lineage-CV'nin var-oluş kanıtı (E3 §8 random-vs-lineage tablosunun canlı örneği).
+- **evidence_tier:** confirmed 349 · candidate 942 · weak 1920 · none 337 · **strong_novel 23**.
+- **provenance:** 8/9 kolon 45/45 dolu (card·xgboost·unitig-caller·poppunk·graph-tool·blast·pyseer). **bcalm 0/45 = dürüst NULL** (bcalm sürüm CLI'si yok; `_tool_version` hata-string'i reddediyor).
+- **Biyoloji doğrulandı:** MRSA→mecA · VRE→vanA kümesi · ESBL→CTX-M · KPC/NDM · A.b OXA hepsi geldi. CARD-conf=0 olanlar = mutasyon-tabanlı/intrinsik (gyrA/pbp5/porin) → CARD-nükleotid yakalamaz, tutarlı.
+
+### 🐛 FAZ-B'DE ÖĞRENİLENLER (kritik)
+1. **bio, Faz2a'ya BAĞIMLI** — bio adım 10 `07_kb_candidates`'i (09'un çıktısı) okur; paralel-dal DEĞİL. Sıra: 03u→ML→**Faz2a(07-09)**→bio(10-13b)→pyseer(14)→populate.
+2. **`5e3101f` — store-subset 03u `unitigs.rtab` yazmıyordu** (fallback yazıyordu) → 45 pyseer "unitig Rtab not found" ile patladı. Fix eklendi. **rtab BÜYÜK** (ecoli ~36GB, yazımı ~50dk python-loop yavaş — opt. adayı) ama disk 3.5PB, sorun yok.
+3. **SLURM "launch failed requeued held"** tekrarladı (geçici bozuk node) — `scontrol release` çalışmadı ("interaktif iş" hatası) → **scancel + taze resubmit** (63 idle node varken düzgün node'a düşer) çözdü.
+4. Faz2a NCBI seri ~saatler, **detached screen**'de gözetimsiz koştu (`faz2a_all.sh` + `faz2a_retry.sh` 3-geçiş self-healing, `07_kb_candidates` eksik olanı yeniden koşar). 09 markdown-rapor efetch'i kırılgan (kozmetik, kb_candidates rapordan önce yazılır).
+
+### ⏭️ YAYIN-ÖNCESİ KALAN
+- **Kanonik slurm'leri COMMIT et** (TRUBA'da untracked): `run_03uml_env` · `run_03ubio_env` · `run_m15_qc_env` · `run_03u_build_env` · `faz2a_all.sh` · `faz2a_retry.sh` · `run_pyseer_env`(AMR_PYSEER_VERSION patch'li).
+- KB figürleri/tabloları: `scripts/kb_figures.py` + `kb_tables.py` (tez showcase).
+- Analiz kalemleri: MIC duyarlılık · coğrafi hold-out · random-vs-lineage-CV tablosu (**A.b ceftazidime hazır örnek**) · H3 hypergeometric (E2 çerçevesi).
+- Zenodo deposit + DOI. Suite/`test_version_alignment` yeşil tut.
 
 ---
 
