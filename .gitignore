@@ -211,3 +211,21 @@ work/
 # Thesis / website drafts (not code)
 WebSite_Icerik_Part_*.txt
 Danisman_Toplanti_Raporu_*.md
+
+# ============================================================================
+# INTERNAL WORKING DOCS — kept local, not published
+# ============================================================================
+# Session handoffs, planning, audits, literature notes and Turkish explainers:
+# working material for the thesis, not part of the released software. The public
+# docs stay tracked: README.md, METHODOLOGY.md, QUICKSTART.md, CHANGELOG.md,
+# CONTRIBUTING.md, LICENSE, CITATION.cff, docs/RELEASE_ZENODO.md.
+HANDOFF.md
+docs/ROADMAP.md
+docs/SCALE_MLOPS_PLAN.md
+docs/TECHNICAL_REVIEW.md
+docs/KB_ACIKLAMA.md
+docs/KB_KAVRAMLAR.md
+docs/KB_AKIS_SEMASI.html
+docs/TRUBA_Kurulum_ve_Calistirma_Rehberi.md
+docs/literature/
+docs/review/

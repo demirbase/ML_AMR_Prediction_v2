@@ -84,14 +84,14 @@ ML_AMR_Prediction_v2/
 ├── slurm/                       # env-parametric HPC job scripts (see below)
 ├── tests/                       # pytest suite (smoke / unit / integration)
 ├── docs/
-│   ├── ROADMAP.md               # thesis roadmap
-│   ├── METHODOLOGY.md           # methods write-up
-│   ├── literature/              # E2 (H3 stats), E3 (PopPUNK), E4 (data sources)
-│   └── review/                  # module audits + pre-deploy final audit
+│   └── RELEASE_ZENODO.md        # how a KB release is archived (DOI, FAIR)
+│   # NB: some code comments cite internal planning notes (ROADMAP §…, MODULE_… audits,
+│   #     literature memos E1-E4). Those are thesis working documents, kept unpublished;
+│   #     everything needed to run and understand the pipeline is in README + METHODOLOGY.
 ├── data/                        # raw genomes, metadata, CARD DB, matrices, lineage
 ├── models/  results/  logs/  runs/   # generated (gitignored; on HPC these are symlinks to scratch)
 ├── environment.yml + environment{,-tools,-checkm2}.lock.yml   # pinned envs
-└── README.md, QUICKSTART.md, HANDOFF.md, METHODOLOGY.md
+└── README.md, QUICKSTART.md, METHODOLOGY.md, CHANGELOG.md
 ```
 
 ### Data layout (organism-scoped)
@@ -273,10 +273,11 @@ AMR_KB_DB=results/kb/amrk.db uvicorn scripts.kb_api:app   # http://localhost:800
 # GET /api/v1/stats                GET /api/v1/metadata   (FAIR: schema ver, DOI, license)
 ```
 
-> **Feature unit = unitig** (compacted de Bruijn graph; ROADMAP §0). The pipeline
-> runs per antibiotic (set `project.target_antibiotic` in `config.yaml`); the KB
-> is organism-level and multi-antibiotic. Each run is reproducible — `pipeline_runs`
-> stamps the git commit, seed, config hash and CARD version.
+> **Feature unit = unitig** (compacted de Bruijn graph; see `METHODOLOGY.md`). The
+> pipeline runs per antibiotic (`AMR_ANTIBIOTIC`, or `project.target_antibiotic` in
+> `config.yaml`); the KB is unified across organisms and antibiotics. Each run is
+> reproducible — `pipeline_runs` stamps the git commit, seed, config hash and every
+> tool version.
 
 See `QUICKSTART.md` for prerequisites, HPC notes and expected outputs.
 

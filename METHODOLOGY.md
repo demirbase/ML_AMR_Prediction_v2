@@ -3,7 +3,7 @@
 > **A rigorous technical exposition of the biological, mathematical, and statistical foundations of the AMR prediction pipeline.**
 
 > ⚠️ **Canonical pipeline (2026-07, schema 0.4.0) vs this document.** After the
-> literature-review pivot (`docs/ROADMAP.md` §0), the *canonical* feature unit is
+> literature-review pivot, the *canonical* feature unit is
 > the **unitig** (compacted de Bruijn graph, `bcalm2`/`unitig-caller`; step 03u),
 > the *canonical* validation is **lineage-aware CV** (PopPUNK + StratifiedGroupKFold,
 > step 07b), stability is **CPSS** (B=100, π≥0.6, PFER-bounded; step 13) with
@@ -12,7 +12,7 @@
 > and external AMRFinderPlus/ResFinder concordance (step 16, M13). **Sections 1–3
 > below describe the raw-k-mer / Gain / single-split *baseline* (still a valid,
 > runnable path) — read them as the foundation, not the current canonical method;**
-> §4.4 and `docs/ROADMAP.md` §0 are authoritative where they differ. A full rewrite
+> §4.4 is authoritative where they differ. A full rewrite
 > to unitig-first is tracked (audit Issue 1).
 
 ---
@@ -302,7 +302,7 @@ To bridge the gap between raw alignment metrics (BLAST `outfmt 6` TSV format) an
 
 ### 4.4 Statistical Signal ≠ Biological Causation (reification safeguard)
 
-Every claim the knowledge base makes about a unitig is **associational, not causal**, and the pipeline is worded and structured to keep that distinction explicit (ROADMAP S10; cf. Takefuji 2025 on the over-interpretation of feature-importance). A high XGBoost gain, a stable CPSS selection frequency, or a large SHAP value means only that a feature *carries predictive signal for the resistance label in this population* — it does **not** establish that the sequence *causes*, *confers*, or *mechanistically determines* resistance. Reporting therefore uses associational verbs ("is associated with", "is predictive of", "co-occurs with") and never causal ones ("causes", "confers", "is responsible for") outside of determinants independently confirmed by an orthogonal, mechanism-aware line of evidence.
+Every claim the knowledge base makes about a unitig is **associational, not causal**, and the pipeline is worded and structured to keep that distinction explicit (cf. Takefuji 2025 on the over-interpretation of feature-importance). A high XGBoost gain, a stable CPSS selection frequency, or a large SHAP value means only that a feature *carries predictive signal for the resistance label in this population* — it does **not** establish that the sequence *causes*, *confers*, or *mechanistically determines* resistance. Reporting therefore uses associational verbs ("is associated with", "is predictive of", "co-occurs with") and never causal ones ("causes", "confers", "is responsible for") outside of determinants independently confirmed by an orthogonal, mechanism-aware line of evidence.
 
 Three structural safeguards operationalise this:
 
@@ -334,4 +334,4 @@ This makes the KB's epistemic status auditable: it is a ranked, confidence-tiere
 
 ---
 
-*Document version: July 2026 (§4.4 + canonical-pipeline banner added; KB schema 0.4.0). Sections 1–3 document the raw-k-mer baseline; the canonical unitig / lineage-CV / CPSS pipeline is authoritative per `docs/ROADMAP.md` §0. Maintained alongside `scripts/` as the mathematical reference for the pipeline.*
+*Document version: July 2026 (§4.4 + canonical-pipeline banner added; KB schema 0.4.0). Sections 1–3 document the raw-k-mer baseline; the canonical unitig / lineage-CV / CPSS pipeline (§4.4) is authoritative. Maintained alongside `scripts/` as the mathematical reference for the pipeline.*
