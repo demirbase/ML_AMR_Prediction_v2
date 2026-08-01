@@ -8,8 +8,8 @@ Run kb_tables.py FIRST, then:
     python scripts/kb_figures.py --tables results/tables --results results \
         --out figures [--only performance,cpss_pfer,cross_org,mechanism,null_hist]
 
-Each figure is saved as PNG (200 dpi) + PDF. Colours: E. coli blue, K. pneumoniae
-red (+ a 3rd colour auto-assigned for any further organism). Edit CLASS_ORDER /
+Each figure is saved as PNG (200 dpi) + PDF. Colours come from PALETTE (registry slugs); any organism not listed there gets an
+auto-assigned colour, and display names come from the registry. Edit CLASS_ORDER /
 palette below to taste — this is a scaffold you own, not a black box.
 """
 import argparse
@@ -28,9 +28,13 @@ from matplotlib.patches import Patch
 CLASS_ORDER = ["penicillins", "cephalosporins", "beta_lactams_carbapenems_others",
                "quinolones", "aminoglycosides", "tetracyclines",
                "folate_pathway_inhibitors"]
+# Keys are REGISTRY SLUGS (organisms.yaml / pipeline_runs.organism). They used to be
+# short forms ("saureus", "paeruginosa") that never matched the real slugs, so four of
+# the six organisms silently fell through to the auto-assigned _EXTRA colours.
 PALETTE = {"ecoli": "#2c7fb8", "kpneumoniae": "#de2d26",
-           "paeruginosa": "#31a354", "saureus": "#756bb1"}
-_EXTRA = ["#e6ab02", "#a6761d", "#666666"]
+           "staphylococcus_aureus": "#756bb1", "acinetobacter_baumannii": "#e6ab02",
+           "pseudomonas_aeruginosa": "#31a354", "enterococcus_faecium": "#a6761d"}
+_EXTRA = ["#666666", "#1b9e77", "#d95f02"]
 
 # The 7 orthogonal validation layers (evidence_type in the KB) in pipeline order,
 # biological → statistical. Label used on the evidence-layer heatmap (fig 06).
@@ -55,18 +59,47 @@ def _short(ab):
     return ab.replace("_", "/")[:18]
 
 
+def _display(org, _cache={}):
+    """'Escherichia coli' for a slug — from the registry, never hardcoded, so the
+    figures follow the panel instead of naming two organisms forever."""
+    if org not in _cache:
+        name = org
+        try:
+            from lib.registry import get_organism
+            name = (get_organism(org) or {}).get("display_name") or org
+        except Exception:
+            name = {"ecoli": "Escherichia coli",
+                    "kpneumoniae": "Klebsiella pneumoniae"}.get(org, org.replace("_", " ").title())
+        _cache[org] = name
+    return _cache[org]
+
+
 def _abbr(org):
-    return {"ecoli": "Ec", "kpneumoniae": "Kp", "paeruginosa": "Pa", "saureus": "Sa"}.get(org, org[:2].title())
+    """'Ec' from 'Escherichia coli' — genus+species initials of the display name."""
+    parts = _display(org).split()
+    if len(parts) >= 2:
+        return parts[0][0].upper() + parts[1][0].lower()
+    return org[:2].title()
+
+
+def _class_order(series):
+    """Drug classes present in the data: the curated CLASS_ORDER first, then anything
+    else alphabetically. CLASS_ORDER lists 7 classes while the panel now spans 14, and
+    filtering *to* it silently dropped half the classes from the overview figure —
+    a figure must never quietly narrow the KB it claims to summarise."""
+    present = set(str(c) for c in series.dropna())
+    known = [c for c in CLASS_ORDER if c in present]
+    return known + sorted(present - set(known))
 
 
 def _sortkey(df):
     df = df.copy()
-    df["_c"] = df["drug_class"].map({c: i for i, c in enumerate(CLASS_ORDER)}).fillna(99)
+    df["_c"] = df["drug_class"].map({c: i for i, c in enumerate(_class_order(df["drug_class"]))}).fillna(99)
     return df.sort_values(["_c", "organism", "antibiotic"])
 
 
 def _legend(ax, orgs):
-    ax.legend(handles=[Patch(color=_colour(o), label={"ecoli": "E. coli", "kpneumoniae": "K. pneumoniae"}.get(o, o))
+    ax.legend(handles=[Patch(color=_colour(o), label=_display(o))
                        for o in orgs], fontsize=9, loc="lower left")
 
 
@@ -142,14 +175,14 @@ def fig_overview(tables, out, db):
     """Cover slide: scope of the KB (models / organisms / classes / genomes) +
     models-per-drug-class stacked by organism."""
     ms = pd.read_csv(tables / "models_summary.csv")
-    order = [c for c in CLASS_ORDER if c in set(ms.drug_class)]
+    order = _class_order(ms.drug_class)
     orgs = list(ms.organism.unique())
     fig = plt.figure(figsize=(13, 4.8))
     gs = fig.add_gridspec(1, 2, width_ratios=[0.85, 1.7], wspace=0.28)
     a0 = fig.add_subplot(gs[0]); a1 = fig.add_subplot(gs[1])
     a0.axis("off")
     cards = [(str(len(ms)), "AMR models"),
-             (str(ms.organism.nunique()), "organisms  (E. coli, K. pneumoniae)"),
+             (str(ms.organism.nunique()), "ESKAPEE organisms"),
              (str(len(order)), "drug classes"),
              (f"{int(ms.n_genomes.sum()):,}", "genome–phenotype pairs")]
     for k, (num, lab) in enumerate(cards):
@@ -162,7 +195,7 @@ def fig_overview(tables, out, db):
     for org in orgs:
         vals = piv[org].values if org in piv.columns else np.zeros(len(order))
         a1.barh(y, vals, left=left, color=_colour(org), edgecolor="white",
-                label={"ecoli": "E. coli", "kpneumoniae": "K. pneumoniae"}.get(org, org))
+                label=_display(org))
         left += vals
     a1.set_yticks(y); a1.set_yticklabels([CLASS_SHORT.get(c, c.replace("_", " ")) for c in order], fontsize=9.5)
     a1.invert_yaxis(); a1.set_xlabel("models"); a1.legend(fontsize=9, loc="lower right")
