@@ -98,9 +98,16 @@ def _sortkey(df):
     return df.sort_values(["_c", "organism", "antibiotic"])
 
 
-def _legend(ax, orgs):
-    ax.legend(handles=[Patch(color=_colour(o), label=_display(o))
-                       for o in orgs], fontsize=9, loc="lower left")
+def _legend(ax, orgs, outside=False):
+    """`outside=True` parks the legend right of the axes: with 45 bars a legend drawn
+    inside covers real data (it sat on top of the low-AUC bars, which are exactly the
+    ones a reader needs to see)."""
+    handles = [Patch(color=_colour(o), label=_display(o)) for o in orgs]
+    if outside:
+        ax.legend(handles=handles, fontsize=9, loc="upper left",
+                  bbox_to_anchor=(1.005, 1.0), frameon=False)
+    else:
+        ax.legend(handles=handles, fontsize=9, loc="lower left")
 
 
 def _save(fig, out, name):
@@ -119,12 +126,16 @@ def fig_performance(tables, out):
     ax.bar(x, df["lineage_cv_auc"], yerr=df["lineage_cv_std"], color=col,
            capsize=3, edgecolor="black", linewidth=0.4, alpha=0.9)
     ax.axhline(0.5, ls="--", c="grey", lw=0.8)
-    ax.set_ylim(0.4, 1.0)
+    ax.text(len(df) - 0.4, 0.505, "chance", fontsize=8, color="grey", va="bottom", ha="right")
+    # Floor below the weakest model (0.429 for A. baumannii ceftazidime): a 0.4 floor
+    # clipped that bar to an invisible sliver, hiding the panel's most informative
+    # result — the clonally-confounded model lineage-CV is supposed to expose.
+    ax.set_ylim(min(0.40, float(df["lineage_cv_auc"].min()) - 0.06), 1.02)
     ax.set_xticks(x)
     ax.set_xticklabels([f"{_short(a)}\n({_abbr(o)})" for a, o in zip(df.antibiotic, df.organism)], rotation=90, fontsize=7.5)
     ax.set_ylabel("Lineage-aware CV ROC-AUC (mean ± SD)")
     ax.set_title("Per-antibiotic generalisation performance")
-    _legend(ax, df["organism"].unique())
+    _legend(ax, df["organism"].unique(), outside=True)
     _save(fig, out, "01_performance_lineageCV")
 
 
@@ -142,7 +153,7 @@ def fig_cpss_pfer(tables, out):
     a2.set_ylabel("PFER bound (E[false positives], log)")
     a2.set_xticks(x)
     a2.set_xticklabels([f"{_short(a)} ({_abbr(o)})" for a, o in zip(df.antibiotic, df.organism)], rotation=90, fontsize=7.5)
-    _legend(a1, df["organism"].unique())
+    _legend(a1, df["organism"].unique(), outside=True)
     _save(fig, out, "02_cpss_pfer")
 
 
