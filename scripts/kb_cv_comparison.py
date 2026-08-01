@@ -145,7 +145,8 @@ def main():
                  f"across {len(df)} models (sorted by gap)", fontsize=11)
     ax.legend(handles=[
         Line2D([], [], marker="o", ls="", color="#999999", label="random 5-fold CV (lineage-blind)"),
-        Line2D([], [], marker="o", ls="", color="#444444", label="lineage-aware CV (reported)"),
+        Line2D([], [], marker="o", ls="", color="#444444",
+               label="lineage-aware CV (reported; dot coloured by organism)"),
     ], fontsize=8.5, loc="lower left", frameon=False)
     ax.invert_yaxis()
     out = Path(args.out)
