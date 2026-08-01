@@ -162,10 +162,21 @@ _FAM_MAP = {
     "General Bacterial Porin with reduced permeability to beta-lactams": "porin loss",
     "aminoglycoside bifunctional resistance protein": "AAC(6')-APH",
     "major facilitator superfamily (MFS) antibiotic efflux pump": "MFS efflux",
+    "resistance-nodulation-cell division (RND) antibiotic efflux pump": "RND efflux",
+    "ATP-binding cassette (ABC) antibiotic efflux pump": "ABC efflux",
+    "small multidrug resistance (SMR) antibiotic efflux pump": "SMR efflux",
     "OXA beta-lactamase;OXA-48-like beta-lactamase": "OXA-48-like",
     "sulfonamide resistant sul": "sul",
     "trimethoprim resistant dihydrofolate reductase dfr": "dfr",
 }
+
+
+# Last words that carry no information on their own. Taking the final token of an ARO
+# family name is a decent shortener ("...APH(3')" -> "APH(3')"), but for families that
+# end in a generic noun it produced labels like "protein" and "pump" on the figures —
+# unreadable, and indistinguishable between families.
+_GENERIC_TAIL = {"protein", "proteins", "pump", "pumps", "enzyme", "gene", "genes",
+                 "family", "system", "transporter", "determinant", "cluster"}
 
 
 def _fam(s):
@@ -175,7 +186,17 @@ def _fam(s):
         return _FAM_MAP[s]
     if "beta-lactamase" in s:
         return s.replace(" beta-lactamase", "").strip()
-    return s.split()[-1] if s else s
+    if not s:
+        return s
+    parts = s.split()
+    if parts[-1].lower() in _GENERIC_TAIL:
+        # Drop the trailing generic words, then keep the two that identify the family:
+        #   "tetracycline-resistant ribosomal protection protein" -> "ribosomal protection"
+        #   "glycopeptide resistance gene cluster"                -> "glycopeptide resistance"
+        while parts and parts[-1].lower() in _GENERIC_TAIL:
+            parts.pop()
+        return " ".join(parts[-2:]) if parts else s
+    return parts[-1]
 
 
 CLASS_SHORT = {"beta_lactams_carbapenems_others": "carbapenems / others",
