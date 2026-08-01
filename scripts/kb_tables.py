@@ -126,7 +126,22 @@ def main():
              f.odds_ratio, f.fisher_p, f.discriminative,
              et.evidence_tier, et.n_evidence_layers, et.evidence_layers, et.is_novel_candidate
       FROM unitig_model_scores s
-      LEFT JOIN blast_annotations b ON b.unitig_id=s.unitig_id AND b.model_id=s.model_id
+      LEFT JOIN (
+          -- ONE BLAST row per (unitig, model). A unitig can carry both a CARD and an
+          -- NCBI hit, and joining the raw table multiplied those biomarkers into
+          -- several rows: biomarkers.csv came out at 3693 rows for 3571 biomarkers and
+          -- every tier count was inflated (strong_novel read 88 instead of the KB's 23).
+          -- Best hit = CARD first (gene_symbol/tier/ARO come from there), then higher
+          -- identity, then lower e-value.
+          SELECT * FROM (
+              SELECT *, ROW_NUMBER() OVER (
+                         PARTITION BY unitig_id, model_id
+                         ORDER BY (source_db='card') DESC,
+                                  COALESCE(identity_pct, -1) DESC,
+                                  COALESCE(evalue, 1e9) ASC) AS _rn
+              FROM blast_annotations
+          ) WHERE _rn = 1
+      ) b ON b.unitig_id=s.unitig_id AND b.model_id=s.model_id
       LEFT JOIN unitig_background_frequency f ON f.unitig_id=s.unitig_id AND f.model_id=s.model_id
       LEFT JOIN unitig_evidence_tier et ON et.unitig_id=s.unitig_id AND et.model_id=s.model_id
       LEFT JOIN unitigs u ON u.unitig_id=s.unitig_id
@@ -156,6 +171,15 @@ def main():
              "gene_symbol", "tier", "identity_pct", "coverage", "aro_accession",
              "aro_gene_family", "aro_drug_class", "aro_resistance_mechanism",
              "evidence_tier", "n_evidence_layers", "evidence_layers", "is_novel_candidate"]
+    # Guard: biomarkers.csv is one row per (model, unitig). A LEFT JOIN that fans out
+    # silently double-counts biomarkers in every downstream table, figure and thesis
+    # number, and nothing else would notice — so fail loudly instead.
+    _pairs = {(d["model_id"], d["unitig_id"]) for d in bio}
+    if len(_pairs) != len(bio):
+        raise SystemExit(
+            f"ERROR: biomarkers rows ({len(bio)}) != distinct (model, unitig) pairs "
+            f"({len(_pairs)}) — a join is fanning out; tier counts would be inflated."
+        )
     _write(bio, bcols, out / "biomarkers.csv")
 
     # ---- mechanisms: on-target confirmed genes (class-filtered) ------------
