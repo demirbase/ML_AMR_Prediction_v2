@@ -23,6 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 CLASS_ORDER = ["penicillins", "cephalosporins", "beta_lactams_carbapenems_others",
@@ -380,9 +381,14 @@ def fig_evidence_layers(tables, out, db):
 
 
 def fig_significance(tables, out, db):
-    """05 redesign — single panel: REAL lineage-CV AUC vs label-shuffle null_max
-    per model (parsed from the KB's label_permutation evidence_source). Shows the
-    gap = model-level significance, far clearer than 20 tiny histograms."""
+    """05 — model-level significance: the observed AUC of step 12b's label-permutation
+    test vs its shuffled-label null, per model.
+
+    The observed value is 12b's OWN split AUC, NOT the lineage-CV score: the two differ
+    sharply exactly where it matters (A. baumannii ceftazidime is 0.91 here and 0.429
+    under lineage-CV). This figure used to call it 'REAL lineage-CV AUC', which invited
+    the reader to conclude that a clonally-confounded model generalises. The lineage-CV
+    value is now drawn as a separate black tick so both are visible and distinct."""
     import re, sqlite3
     ms = _sortkey(pd.read_csv(tables / "models_summary.csv")).reset_index(drop=True)
     conn = sqlite3.connect(str(db))
@@ -399,18 +405,26 @@ def fig_significance(tables, out, db):
     r = [real[i] for i in ms["run_id"]]
     nm = [nullmax[i] for i in ms["run_id"]]
     col = [_colour(o) for o in ms["organism"]]
-    fig, ax = plt.subplots(figsize=(9, 0.42 * len(ms) + 1.2))
-    for yi, ri, ni, ci in zip(y, r, nm, col):
+    lcv = list(ms["lineage_cv_auc"])
+    fig, ax = plt.subplots(figsize=(9.5, 0.42 * len(ms) + 1.4))
+    for yi, ri, ni, ci, li in zip(y, r, nm, col, lcv):
         ax.plot([ni, ri], [yi, yi], color="lightgrey", lw=2, zorder=1)
         ax.scatter(ni, yi, color="#999999", s=28, zorder=2)
         ax.scatter(ri, yi, color=ci, s=46, zorder=3)
+        ax.scatter(li, yi, marker="|", color="black", s=90, linewidths=1.4, zorder=4)
     ax.axvline(0.5, ls="--", c="grey", lw=0.8)
     ax.set_yticks(y)
     ax.set_yticklabels([f"{_short(a)} ({_abbr(o)})" for a, o in zip(ms.antibiotic, ms.organism)], fontsize=7.5)
-    ax.set_xlim(0.4, 1.0)
+    ax.set_xlim(min(0.4, float(min(lcv)) - 0.03), 1.0)
     ax.set_xlabel("ROC-AUC")
-    ax.set_title("Model-level significance: REAL lineage-CV AUC (colour) ≫ "
-                 "label-shuffle null max (grey)\nall p ≈ 0.02 (N=50 permutations)", fontsize=10)
+    ax.set_title("Model-level significance: observed AUC (colour) ≫ label-shuffle null max (grey)\n"
+                 "black tick = lineage-aware CV AUC (the reported, generalisation metric)\n"
+                 "all p ≈ 0.02 (N=50 permutations)", fontsize=10)
+    ax.legend(handles=[
+        Line2D([], [], marker="o", ls="", color="#444444", label="observed AUC (12b split)"),
+        Line2D([], [], marker="o", ls="", color="#999999", label="label-shuffle null max"),
+        Line2D([], [], marker="|", ls="", color="black", markeredgewidth=1.4, label="lineage-CV AUC"),
+    ], fontsize=8, loc="lower left", frameon=False)
     ax.invert_yaxis()
     _save(fig, out, "05_significance_real_vs_null")
 
