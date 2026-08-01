@@ -60,3 +60,37 @@ def test_lineage_falls_back_when_too_few_clusters(mod, tmp_path):
     y = np.array([0, 1] * 50)
     splits, method, labels = mod.build_cv_splits(y, n, tmp_path / "g.csv", tmp_path / "l.csv", 5)
     assert method == "repeated_holdout_5seed"
+
+
+def test_random_cv_mode_is_lineage_blind_and_suffixes_outputs(load_script, tmp_path, monkeypatch):
+    """AMR_CV_MODE=random must ignore lineage labels AND write to suffixed paths.
+
+    The suffix is the safety property: this mode exists to produce the inflated
+    comparison baseline, so if it ever wrote to the canonical filenames it would
+    overwrite the lineage-CV numbers the KB is populated from.
+    """
+    monkeypatch.setenv("AMR_CV_MODE", "random")
+    mod = load_script("07b_feature_stability.py")
+    assert mod.RANDOM_CV is True
+    assert mod.OUT_SUFFIX == "_randomcv"
+
+    n = 100
+    genomes = [f"g{i}" for i in range(n)]
+    pd.DataFrame({"Genome ID": genomes}).to_csv(tmp_path / "genomes_x.csv", index=False)
+    # One lineage per half: a lineage-aware split would never mix them; random does.
+    pd.DataFrame({"Genome ID": genomes,
+                  "Cluster": ["A"] * (n // 2) + ["B"] * (n // 2)}).to_csv(
+        tmp_path / "poppunk_clusters.csv", index=False)
+
+    y = np.array([0, 1] * (n // 2))
+    splits, method, labels = mod.build_cv_splits(
+        y, n, tmp_path / "genomes_x.csv", tmp_path / "poppunk_clusters.csv", 5)
+
+    assert method == "random_stratified_kfold_5fold"
+    assert len(splits) == 5 and labels == list(range(5))
+    seen_test = np.zeros(n, dtype=bool)
+    for tr, te in splits:
+        assert not (tr & te).any()                 # disjoint
+        assert tr.sum() + te.sum() == n            # a partition
+        seen_test |= te
+    assert seen_test.all()                         # every sample tested exactly once

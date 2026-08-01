@@ -37,6 +37,7 @@ Outputs:
 """
 
 import gc
+import os
 import shutil
 import sys
 from collections import Counter
@@ -49,13 +50,21 @@ import xgboost as xgb
 import yaml
 from scipy.sparse import load_npz
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 from lib.config import load_config, resolve_path, env_bool, get_target
 from lib.xgb_data import build_quantile_dmatrix, global_pos_weight
 
 SEEDS = [42, 123, 777, 1024, 2025]
 TEST_SIZE = 0.20
+
+# AMR_CV_MODE=random runs the SAME 5-fold machinery with the lineage grouping removed
+# (plain StratifiedKFold), for the random-vs-lineage-aware comparison reviewers expect.
+# It is a measurement mode, not a pipeline mode: every artefact it writes is suffixed
+# so it can never overwrite the canonical lineage-CV outputs the KB is populated from.
+CV_MODE = os.environ.get("AMR_CV_MODE", "lineage").strip().lower()
+RANDOM_CV = CV_MODE == "random"
+OUT_SUFFIX = "_randomcv" if RANDOM_CV else ""
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 config = load_config()
@@ -203,6 +212,19 @@ def build_cv_splits(y_all, n_total, genomes_csv, lineage_csv, n_splits, seed=42)
 
     Returns (splits, method_label, split_labels).
     """
+    if RANDOM_CV:
+        # Deliberately lineage-BLIND: same n_splits, same stratification, same models —
+        # the ONLY difference from the canonical path is that lineages are ignored, so
+        # the AUC gap between the two is attributable to lineage leakage and nothing
+        # else. This is the comparison a reviewer asks for; it is never the KB metric.
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        masks = []
+        for tr_idx, te_idx in skf.split(np.zeros(n_total), y_all):
+            tr = np.zeros(n_total, dtype=bool); tr[tr_idx] = True
+            te = np.zeros(n_total, dtype=bool); te[te_idx] = True
+            masks.append((tr, te))
+        return masks, f"random_stratified_kfold_{n_splits}fold", list(range(len(masks)))
+
     if lineage_csv.exists() and genomes_csv.exists():
         try:
             from lib.lineage import load_lineage, group_kfold_masks, no_group_leakage
@@ -269,7 +291,14 @@ def main():
     splits, cv_method, split_labels = build_cv_splits(
         y_all, n_total, genomes_csv, lineage_dir / "poppunk_clusters.csv", n_splits)
     print(f"  CV scheme: {cv_method} ({len(splits)} splits)")
-    if not cv_method.startswith("lineage_group_kfold"):
+    if RANDOM_CV:
+        print("  " + "=" * 74)
+        print("  MEASUREMENT MODE (AMR_CV_MODE=random): lineage-BLIND CV on purpose.")
+        print("  The AUC produced here is the INFLATED comparison baseline; it is not")
+        print(f"  the KB metric and is written to *{OUT_SUFFIX}.csv so the canonical")
+        print("  lineage-CV outputs stay untouched. Do NOT populate from these files.")
+        print("  " + "=" * 74)
+    elif not cv_method.startswith("lineage_group_kfold"):
         print("  " + "!" * 74)
         print("  ⚠ WARNING: NO lineage-aware CV (PopPUNK clusters absent/unusable).")
         print("  ⚠ The reported AUC is a 5-seed holdout and may be lineage-INFLATED —")
@@ -295,7 +324,7 @@ def main():
             for idx, g in idx_gain.items():
                 gain_accum.setdefault(idx, []).append(g)
 
-            split_dir = MODELS_DIR / f"split{label}"
+            split_dir = MODELS_DIR / f"split{label}{OUT_SUFFIX}"
             split_dir.mkdir(parents=True, exist_ok=True)
             model.save_model(str(split_dir / f"xgboost_{TARGET_ANTIBIOTIC}_split{label}.json"))
             print(f"  ROC-AUC: {auc:.4f} | top features: {len(idx_set)}")
@@ -324,7 +353,7 @@ def main():
     # lineage-CV AUC from a fallback holdout — auc_mean_seeds is only "lineage-CV"
     # when cv_method == lineage_group_kfold_* (M3-3).
     summary['cv_method'] = cv_method
-    summary_path = EVAL_DIR / f"10_repeated_holdout_summary_{TARGET_ANTIBIOTIC}.csv"
+    summary_path = EVAL_DIR / f"10_repeated_holdout_summary_{TARGET_ANTIBIOTIC}{OUT_SUFFIX}.csv"
     summary.to_csv(summary_path, index=False)
 
     n_seeds = len(seed_sets)
@@ -348,7 +377,7 @@ def main():
                                             'selection_frequency', 'mean_gain', 'stable'])
     if not stab.empty:
         stab = stab.sort_values(['selection_frequency', 'mean_gain'], ascending=False)
-    stab_path = EXPLAIN_DIR / f"06_feature_stability_{TARGET_ANTIBIOTIC}.csv"
+    stab_path = EXPLAIN_DIR / f"06_feature_stability_{TARGET_ANTIBIOTIC}{OUT_SUFFIX}.csv"
     stab.to_csv(stab_path, index=False)
 
     print("\n" + "=" * 80)
