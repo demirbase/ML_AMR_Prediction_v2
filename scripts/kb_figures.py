@@ -126,7 +126,7 @@ def fig_performance(tables, out):
     ax.bar(x, df["lineage_cv_auc"], yerr=df["lineage_cv_std"], color=col,
            capsize=3, edgecolor="black", linewidth=0.4, alpha=0.9)
     ax.axhline(0.5, ls="--", c="grey", lw=0.8)
-    ax.text(len(df) - 0.4, 0.505, "chance", fontsize=8, color="grey", va="bottom", ha="right")
+    ax.text(0.3, 0.505, "chance", fontsize=8, color="grey", va="bottom", ha="left")
     # Floor below the weakest model (0.429 for A. baumannii ceftazidime): a 0.4 floor
     # clipped that bar to an invisible sliver, hiding the panel's most informative
     # result — the clonally-confounded model lineage-CV is supposed to expose.
@@ -222,22 +222,36 @@ def fig_cross_org(tables, out):
     if not abs_:
         print("  (cross_org: no drug shared across organisms yet — skipped)")
         return
-    fig, ax = plt.subplots(figsize=(11, 1.0 + 1.0 * len(abs_)))
+    fig, ax = plt.subplots(figsize=(13, 1.0 + 1.0 * len(abs_)))
     ax.axis("off")
     for i, ab in enumerate(abs_):
         yy = len(abs_) - 1 - i
         sub = ot[ot.antibiotic == ab]
-        fam = {o: set(_fam(x) for x in g["aro_gene_family"].dropna()) for o, g in sub.groupby("organism")}
-        ec, kp = fam.get("ecoli", set()), fam.get("kpneumoniae", set())
-        shared = sorted(ec & kp); eo = sorted(ec - kp); ko = sorted(kp - ec)
+        # {gene family -> organisms that recovered it}. This used to intersect two
+        # hardcoded organisms (ecoli/kpneumoniae) and label everything else "-only",
+        # which silently ignored the other four organisms of the panel: a drug like
+        # ciprofloxacin is assayed in five.
+        fam_orgs = {}
+        for o, g in sub.groupby("organism"):
+            for f in {_fam(x) for x in g["aro_gene_family"].dropna()}:
+                fam_orgs.setdefault(f, set()).add(o)
+        shared = sorted((f for f, o in fam_orgs.items() if len(o) >= 2),
+                        key=lambda f: (-len(fam_orgs[f]), f))
+        single = sorted((f for f, o in fam_orgs.items() if len(o) == 1), key=str)
         ax.text(0.0, yy, _short(ab), fontsize=12, fontweight="bold", va="center")
-        ax.text(0.24, yy, "   ".join(shared) or "—", fontsize=13, fontweight="bold",
-                color="#2ca25f", va="center")
-        extra = []
-        if eo: extra.append("Ec-only: " + ", ".join(eo))
-        if ko: extra.append("Kp-only: " + ", ".join(ko))
-        ax.text(0.24, yy - 0.30, "     ".join(extra), fontsize=8.5, color="#888", va="center")
-    ax.text(0.24, len(abs_) - 0.30, "SHARED gene family — recovered in BOTH organisms (concordant)",
+        txt = "   ".join(f"{f} ({','.join(sorted(_abbr(o) for o in fam_orgs[f]))})"
+                         for f in shared) or "—"
+        ax.text(0.26, yy, txt, fontsize=12, fontweight="bold", color="#2ca25f", va="center")
+        if single:
+            per = ", ".join(f"{_abbr(next(iter(fam_orgs[f])))}: {f}" for f in single[:6])
+            if len(single) > 6:
+                per += f", +{len(single) - 6} more"
+            ax.text(0.26, yy - 0.30, "single-organism — " + per,
+                    fontsize=8.5, color="#888", va="center")
+    n_org = ot.groupby("antibiotic")["organism"].nunique().reindex(abs_)
+    ax.text(0.26, len(abs_) - 0.30,
+            f"SHARED gene family — recovered in ≥2 organisms (concordant); "
+            f"drugs span up to {int(n_org.max())} organisms",
             fontsize=9.5, color="#2ca25f", fontweight="bold", va="center")
     ax.set_xlim(-0.02, 1.0); ax.set_ylim(-0.6, len(abs_) - 0.05)
     ax.set_title("Cross-organism concordance: same drug → same resistance gene family", fontsize=12.5)
