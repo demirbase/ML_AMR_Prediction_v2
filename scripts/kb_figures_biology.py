@@ -63,11 +63,15 @@ def fig_novel(bio, out):
     if strength is None:
         strength, s_label = pd.Series(np.nan, index=nov.index), "(no effect-size column)"
     n_missing = int(strength.isna().sum())
-    smax = float(strength.max()) if strength.notna().any() else 1.0
+    # Size on MAGNITUDE: delta_prevalence is signed (two biomarkers here are enriched in
+    # susceptible genomes, i.e. negative), and scaling a marker size by a negative number
+    # yields a negative size — silently invalid.
+    smax = float(strength.abs().max()) if strength.notna().any() else 1.0
+    smax = smax or 1.0
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.4),
                                  gridspec_kw={"width_ratios": [1.15, 1]})
-    sizes = 40 + 260 * (strength / smax).fillna(0)      # NaN -> smallest dot, not zero-value
+    sizes = 40 + 260 * (strength.abs() / smax).fillna(0)   # NaN -> smallest dot, not zero-value
     for org, g in nov.groupby("organism"):
         a1.scatter(g["selection_frequency"], g["neglogp"], s=sizes.loc[g.index],
                    color=_colour(org), edgecolor="k", lw=0.4, alpha=0.85,
@@ -75,7 +79,7 @@ def fig_novel(bio, out):
     a1.axvline(0.6, ls="--", c="grey", lw=0.8)
     a1.set_xlabel("CPSS selection frequency"); a1.set_ylabel("pyseer LMM  −log10(p)")
     a1.set_title(f"{len(nov)} strong_novel biomarkers\n"
-                 f"stable + LMM-significant + no CARD hit (dot size = {s_label})",
+                 f"stable + LMM-significant + no CARD hit (dot size = |{s_label}|)",
                  fontsize=10.5)
     a1.legend(fontsize=8, frameon=False, title="organism", title_fontsize=8)
 
