@@ -329,7 +329,7 @@ def fig_pyseer_qq(results, ms, orgs, out):
     effect failed to absorb population structure."""
     fig, axes = _grid(len(orgs))
     for ax, org in zip(axes, orgs):
-        drawn = 0
+        drawn, xmax = 0, 1.0
         for r in ms[ms.organism == org].itertuples():
             p = _pyseer_assoc(results, org, r.antibiotic)
             if p is None or len(p) < 50:
@@ -337,9 +337,14 @@ def fig_pyseer_qq(results, ms, orgs, out):
             obs = -np.log10(np.sort(p.to_numpy()))
             exp = -np.log10(np.linspace(1 / len(obs), 1, len(obs)))
             ax.plot(exp, obs, lw=0.9, alpha=0.8, label=_short(r.antibiotic))
+            xmax = max(xmax, float(exp.max()))
             drawn += 1
-        lim = max(1, *(ax.get_xlim() + ax.get_ylim()))
-        ax.plot([0, lim], [0, lim], ls="--", c="grey", lw=0.8)
+        # The expected axis can only reach log10(n_tested) ≈ 3.7 for 5 000 variants while
+        # the observed tail reaches 250+. Forcing a square view (the old max-of-both
+        # limit) squashed the expected axis to nothing and every curve looked like a
+        # vertical line. Scale each axis to its own range and draw y=x over x only.
+        ax.plot([0, xmax], [0, xmax], ls="--", c="grey", lw=0.8)
+        ax.set_xlim(0, xmax * 1.05)
         ax.set_xlabel("expected  −log10(p)"); ax.set_ylabel("observed  −log10(p)")
         ax.set_title(f"{_display(org)} ({drawn})", fontsize=9.5, style="italic")
         if drawn:
