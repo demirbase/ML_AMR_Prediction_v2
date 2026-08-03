@@ -45,9 +45,26 @@ def fig_novel(bio, out):
         print("  (novel: no strong_novel rows — skipped)"); return
     nov["neglogp"] = -np.log10(pd.to_numeric(nov.get("pyseer_lrt_p"), errors="coerce")
                                .replace(0, np.nan))
+    # Effect size: prevalence stats (step 10) only cover step 09's candidate list, and
+    # the strong_novel set comes from CPSS (13) — so delta_prevalence is empty for
+    # exactly these biomarkers. Drawing it anyway produced a panel of zero-length bars
+    # that looked like "no effect" when it actually meant "not measured". Fall back to
+    # the strength that IS defined for every biomarker, and say which one is plotted.
+    strength, s_label = None, ""
+    for col, lab in (("mean_abs_shap", "mean |TreeSHAP|"),
+                     ("composite_score", "composite score"),
+                     ("gain", "XGBoost gain")):
+        v = pd.to_numeric(nov.get(col), errors="coerce")
+        if v is not None and v.notna().any():
+            strength, s_label = v.fillna(0), lab
+            break
+    if strength is None:
+        strength, s_label = pd.Series(1.0, index=nov.index), "(no effect-size column)"
+    smax = float(strength.max()) or 1.0
+
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.4),
                                  gridspec_kw={"width_ratios": [1.15, 1]})
-    sizes = 40 + 300 * pd.to_numeric(nov.get("delta_prevalence"), errors="coerce").abs().fillna(0)
+    sizes = 40 + 260 * (strength / smax)
     for org, g in nov.groupby("organism"):
         a1.scatter(g["selection_frequency"], g["neglogp"], s=sizes.loc[g.index],
                    color=_colour(org), edgecolor="k", lw=0.4, alpha=0.85,
@@ -55,20 +72,21 @@ def fig_novel(bio, out):
     a1.axvline(0.6, ls="--", c="grey", lw=0.8)
     a1.set_xlabel("CPSS selection frequency"); a1.set_ylabel("pyseer LMM  −log10(p)")
     a1.set_title(f"{len(nov)} strong_novel biomarkers\n"
-                 "stable + LMM-significant + no CARD hit (dot size = prevalence gap)",
+                 f"stable + LMM-significant + no CARD hit (dot size = {s_label})",
                  fontsize=10.5)
     a1.legend(fontsize=8, frameon=False, title="organism", title_fontsize=8)
 
     lab = [f"{_short(r.antibiotic)} ({_abbr(r.organism)})" for r in nov.itertuples()]
-    dp = pd.to_numeric(nov.get("delta_prevalence"), errors="coerce").fillna(0).to_numpy()
-    order = np.argsort(dp)
+    v = strength.to_numpy()
+    order = np.argsort(v)
     y = np.arange(len(nov))
-    a2.barh(y, dp[order], color=[_colour(nov.iloc[i]["organism"]) for i in order],
+    a2.barh(y, v[order], color=[_colour(nov.iloc[i]["organism"]) for i in order],
             edgecolor="k", lw=0.35)
     a2.set_yticks(y); a2.set_yticklabels([lab[i] for i in order], fontsize=7)
-    a2.axvline(0, c="grey", lw=0.8)
-    a2.set_xlabel("prevalence(resistant) − prevalence(susceptible)")
-    a2.set_title("Each novel biomarker's discriminative gap", fontsize=10.5)
+    a2.set_xlabel(s_label)
+    a2.set_title(f"Effect size of each novel biomarker ({s_label})\n"
+                 "prevalence stats are not computed for CPSS-only biomarkers",
+                 fontsize=10)
     fig.tight_layout()
     _save(fig, out, "32_novel_candidates")
 
@@ -119,6 +137,12 @@ def fig_prevalence(bio, out):
     ax.set_ylabel("prevalence in resistant genomes")
     ax.set_title("Biomarker prevalence, resistant vs susceptible\n"
                  "distance from the diagonal = discriminative power", fontsize=10.5)
+    # Step 10 scores step 09's candidate list, so CPSS-only biomarkers (including the
+    # strong_novel set) have no prevalence row. Say so rather than letting the reader
+    # read their absence as an absence of signal.
+    ax.text(0.02, 0.96, f"{len(d):,} of {len(bio):,} biomarkers have prevalence stats\n"
+                        "(step 10 covers the step-09 candidate list; CPSS-only ones are absent)",
+            transform=ax.transAxes, fontsize=7.5, color="#666", va="top")
     ax.legend(fontsize=8, frameon=False, loc="lower right")
     fig.tight_layout()
     _save(fig, out, "34_prevalence")
