@@ -191,6 +191,19 @@ def main():
         "permutations": args.permutations,
         "universe_definition": "ARO gene families observed across the organism's models",
         "correction": "Benjamini-Yekutieli (arbitrary dependence)",
+        # Two caveats that must travel WITH the result, not be discovered by a reviewer:
+        # (1) the panel was curated to maximise CLASS coverage, which by construction
+        #     leaves very few same-class pairs — H3's within group is small;
+        # (2) each pair compares a handful of gene families drawn from a small universe,
+        #     so a single pair has almost no power and BY (correctly conservative under
+        #     dependence) leaves none individually significant. H3 rests on the CONTRAST
+        #     between the two groups, not on any pair's p-value.
+        "caveat_within_group_size": (
+            "few same-class pairs by construction: the panel was curated for class "
+            "coverage, trimming redundant same-class drugs"),
+        "caveat_per_pair_power": (
+            "per-pair tests are underpowered at these set sizes; the H3 claim is the "
+            "within- vs cross-class contrast, not individual pair significance"),
     }
     if len(within) and len(cross):
         try:
@@ -212,8 +225,16 @@ def main():
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.2),
                                  gridspec_kw={"width_ratios": [0.8, 1.6]})
     if len(within) and len(cross):
-        a1.boxplot([cross.values, within.values], labels=["cross-class", "within-class"],
-                   widths=0.55, showfliers=False)
+        # matplotlib >=3.9 renamed boxplot's `labels` to `tick_labels`; support both so
+        # the figure does not depend on which matplotlib the container resolved.
+        try:
+            a1.boxplot([cross.values, within.values],
+                       tick_labels=["cross-class", "within-class"],
+                       widths=0.55, showfliers=False)
+        except TypeError:                                    # pragma: no cover
+            a1.boxplot([cross.values, within.values],
+                       labels=["cross-class", "within-class"],
+                       widths=0.55, showfliers=False)
         for xi, vals in ((1, cross.values), (2, within.values)):
             a1.scatter(np.random.default_rng(1).normal(xi, 0.06, len(vals)), vals,
                        s=18, alpha=0.55, color="#2c7fb8" if xi == 1 else "#de2d26")
