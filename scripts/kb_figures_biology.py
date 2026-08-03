@@ -131,8 +131,9 @@ def fig_blast(bio, out):
     ax.set_title(f"Biomarker BLAST hits and the confidence-tier cutoffs "
                  f"({len(d):,} of {len(bio):,} biomarkers have a hit)\n"
                  "dashed = confirmed 95/95, dotted = candidate 90/80 — "
-                 "the cutoffs grade the CARD pass (circles); NCBI hits (×) give context",
-                 fontsize=9.5)
+                 "the cutoffs grade the CARD pass (circles); NCBI hits (×) give context\n"
+                 "strong_novel points are CARD ALIGNMENTS that did not qualify as gene "
+                 "hits — that is what makes them novel", fontsize=9)
     ax.legend(fontsize=7, frameon=False, loc="lower left", ncol=2)
     fig.tight_layout()
     _save(fig, out, "33_blast_identity")
