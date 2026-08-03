@@ -110,7 +110,9 @@ def fig_params(results, ms, out):
         print("  (params: no importance files — skipped)"); return
     order = sorted(imp, key=lambda k: -np.median(imp[k]))
     fig, ax = plt.subplots(figsize=(8.5, 4.6))
-    ax.boxplot([imp[k] for k in order], vert=True, widths=0.6, showfliers=False)
+    # `vert` is deprecated in matplotlib 3.11 and removed in 3.13; vertical is the
+    # default, so simply not passing it works on every version.
+    ax.boxplot([imp[k] for k in order], widths=0.6, showfliers=False)
     for i, k in enumerate(order, start=1):
         ax.scatter(np.random.default_rng(0).normal(i, 0.05, len(imp[k])), imp[k],
                    s=12, alpha=0.5, color="#2c7fb8")
