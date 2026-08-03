@@ -89,9 +89,13 @@ def fig_optuna(results, ms, out):
                 alpha=0.55, color=_colour(r.organism))
         n += 1
     ax.set_xlabel("Optuna trial"); ax.set_ylabel("best objective so far (validation AUC)")
-    ax.set_title(f"Hyperparameter search converges early ({n} models)\n"
-                 "early stopping after 15 non-improving trials is why runs end before trial 30",
-                 fontsize=10.5)
+    # Describe what the curves show, not what the config allows: patience=15 exists, but
+    # most searches keep finding small improvements and run the full 30 trials, so the
+    # earlier caption ("early stopping is why runs end before trial 30") contradicted
+    # the very lines it labelled.
+    ax.set_title(f"Hyperparameter search plateaus within a few trials ({n} models)\n"
+                 "most of the achievable objective is reached by trial ~5; "
+                 "the remainder are marginal gains", fontsize=10.5)
     fig.tight_layout()
     _save(fig, out, "20_optuna_convergence")
 
@@ -273,13 +277,14 @@ def fig_mda(results, ms, out):
     """MDA permutation importance: how many candidates survive their own null.
     Few do — correlated unitigs cover for each other when one is permuted, which is
     exactly why CPSS + pyseer carry the selection argument instead."""
-    rows = []
+    rows, pooled = [], []
     for r in ms.itertuples():
         df = _read(_p(results, r.organism, r.antibiotic, "05_explainability",
                       f"12_permutation_test_{r.antibiotic}.csv"))
         if df is None or "mda_auc_drop" not in df:
             continue
         sig = int(df.get("permutation_significant", pd.Series(dtype=int)).sum())
+        pooled += pd.to_numeric(df["mda_auc_drop"], errors="coerce").dropna().tolist()
         rows.append({"organism": r.organism, "antibiotic": r.antibiotic,
                      "tested": len(df), "significant": sig,
                      "median_drop": float(df["mda_auc_drop"].median()),
@@ -296,12 +301,20 @@ def fig_mda(results, ms, out):
                                          rotation=90, fontsize=6)
     a1.set_ylabel("largest single-feature AUC drop")
     a1.set_title("MDA permutation: strongest individual effect", fontsize=10)
-    a2.hist(df.significant, bins=np.arange(-0.5, max(3, df.significant.max() + 1.5)),
-            color="#756bb1", edgecolor="k")
-    a2.set_xlabel("features significant after FDR (per model)")
-    a2.set_ylabel("models")
-    a2.set_title("Almost no single unitig is individually indispensable\n"
-                 "(linked features substitute for each other — see CPSS/pyseer)", fontsize=10)
+    # A histogram of the per-model significant COUNT is a single bar at zero — true but
+    # empty. Show the distribution of the effects themselves, which is what "no single
+    # unitig is indispensable" actually means.
+    if pooled:
+        a2.hist(pooled, bins=60, color="#756bb1", edgecolor="k")
+        a2.set_yscale("log")
+        a2.axvline(0, c="grey", lw=0.9)
+        n_sig = int(df.significant.sum())
+        a2.set_xlabel("AUC drop when a single feature is permuted")
+        a2.set_ylabel("features (log)")
+        a2.set_title("Almost no single unitig is individually indispensable\n"
+                     f"{len(pooled):,} candidates tested · {n_sig} pass FDR in "
+                     f"{int((df.significant > 0).sum())}/{len(df)} models — linked features "
+                     "substitute for each other (hence CPSS/pyseer)", fontsize=9)
     fig.tight_layout()
     _save(fig, out, "28_mda_permutation")
 

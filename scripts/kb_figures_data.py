@@ -350,29 +350,37 @@ def fig_feature_counts(db, ms, out):
     _save(fig, out, "18_feature_counts")
 
 
-def fig_unitig_lengths(data, ms, out, sample=40000):
+def fig_unitig_lengths(data, ms, out, sample=40000, stride=25):
     """Unitig length distribution — why 'blastn-short' is the right BLAST task."""
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    drawn = 0
+    drawn, all_lens = 0, []
     for org, g in ms.groupby("organism"):
         lens = []
         for r in g.itertuples():
             f = Path(data) / r.organism / r.antibiotic / "matrix_unitig" / "features.txt"
             if not f.exists():
                 continue
+            # Stride through the file instead of reading its head: features.txt is
+            # written in matrix-column order, so the first N lines are one contiguous
+            # slice of the feature space, not a sample of it.
             with open(f, encoding="utf-8", errors="replace") as fh:
                 for i, line in enumerate(fh):
-                    if i >= sample:
-                        break
+                    if i % stride:
+                        continue
                     lens.append(len(line.split("\t")[0]))
+                    if len(lens) >= sample:
+                        break
             break                                   # one model per organism is enough
         if not lens:
             continue
-        ax.hist(lens, bins=60, range=(20, 200), histtype="step", lw=1.5,
+        all_lens += lens
+        ax.hist(lens, bins=60, range=(20, 120), histtype="step", lw=1.5,
                 density=True, color=_colour(org), label=f"{_display(org)} (n={len(lens):,})")
         drawn += 1
     if not drawn:
         plt.close(fig); print("  (lengths: no features.txt — skipped)"); return
+    hi = float(np.percentile(all_lens, 99.5)) if all_lens else 120
+    ax.set_xlim(min(all_lens) - 2, max(35, hi) + 5)
     ax.set_xlabel("unitig length (bp)"); ax.set_ylabel("density")
     ax.set_title("Unitig length distribution (sampled)\n"
                  "short unitigs are why BLAST runs in 'blastn-short' mode", fontsize=10.5)

@@ -55,6 +55,14 @@ import pandas as pd  # noqa: E402
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
+try:
+    # Same organism abbreviations as every other figure (Ab/Ec/Ef/Kp/Pa/Sa, derived from
+    # the registry). A local slug slice produced "Ac"/"En"/"Ps"/"St" here and nowhere else.
+    from kb_figures import _abbr
+except Exception:                                            # pragma: no cover
+    def _abbr(org):
+        return org[:2].title()
+
 TIERS = ("confirmed", "candidate")
 
 
@@ -244,17 +252,33 @@ def main():
         ttl += f"\nMann-Whitney p = {summary['mannwhitney_p_within_gt_cross']:.3g}"
     a1.set_title(ttl, fontsize=10)
 
-    top = df.dropna(subset=["overlap_coefficient"]).nlargest(18, "overlap_coefficient")
-    y = np.arange(len(top))
-    col = ["#de2d26" if s else "#2c7fb8" for s in top.same_class]
-    a2.barh(y, top["overlap_coefficient"], color=col, edgecolor="k", lw=0.4)
-    a2.set_yticks(y)
-    a2.set_yticklabels([f"{r.ab1[:14]}–{r.ab2[:14]} ({r.organism[:2].title()})"
-                        for r in top.itertuples()], fontsize=7.5)
-    a2.invert_yaxis()
-    a2.set_xlabel("Overlap coefficient")
-    a2.set_title("Strongest shared-mechanism pairs "
-                 "(red = same class, blue = cross-class)", fontsize=10)
+    # Rank by how MANY families are shared, not by the coefficient: with sets of one or
+    # two families k/min(K,n) is 1.0 for any overlap at all, so ranking on it produced 18
+    # bars of identical length that separated nothing. Pairs where the smaller set has a
+    # single family are dropped for the same reason — their coefficient is uninformative.
+    cand = df.dropna(subset=["overlap_coefficient"]).copy()
+    cand = cand[(cand[["n_families_ab1", "n_families_ab2"]].min(axis=1) >= 2)
+                & (cand["n_shared"] >= 1)]
+    top = cand.sort_values(["n_shared", "fold_enrichment"], ascending=False).head(18)
+    if top.empty:
+        a2.axis("off")
+        a2.text(0.5, 0.5, "no pair has ≥2 families on both sides", ha="center", fontsize=10)
+    else:
+        y = np.arange(len(top))
+        col = ["#de2d26" if s else "#2c7fb8" for s in top.same_class]
+        a2.barh(y, top["n_shared"], color=col, edgecolor="k", lw=0.4)
+        a2.set_yticks(y)
+        a2.set_yticklabels([f"{r.ab1[:14]}–{r.ab2[:14]} ({_abbr(r.organism)})"
+                            for r in top.itertuples()], fontsize=7.5)
+        for yi, r in zip(y, top.itertuples()):
+            a2.text(r.n_shared + 0.06, yi, f"OC {r.overlap_coefficient:.2f} · FE {r.fold_enrichment:g}",
+                    va="center", fontsize=6.5, color="#555")
+        a2.invert_yaxis()
+        a2.set_xlim(0, top["n_shared"].max() * 1.55)
+        a2.set_xlabel("shared gene families (k)")
+        a2.set_title("Pairs sharing the most gene families "
+                     "(red = same class, blue = cross-class)\n"
+                     "OC = overlap coefficient, FE = fold enrichment", fontsize=9.5)
     figs = Path(args.figures); figs.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(figs / "08_h3_overlap.png", dpi=200, bbox_inches="tight")
