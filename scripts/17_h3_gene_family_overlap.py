@@ -58,10 +58,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 try:
     # Same organism abbreviations as every other figure (Ab/Ec/Ef/Kp/Pa/Sa, derived from
     # the registry). A local slug slice produced "Ac"/"En"/"Ps"/"St" here and nowhere else.
-    from kb_figures import _abbr
+    from kb_figures import _abbr, _short
 except Exception:                                            # pragma: no cover
     def _abbr(org):
         return org[:2].title()
+
+    def _short(ab):
+        return str(ab).replace("_", "/")[:18]
 
 TIERS = ("confirmed", "candidate")
 
@@ -268,8 +271,8 @@ def main():
         col = ["#de2d26" if s else "#2c7fb8" for s in top.same_class]
         a2.barh(y, top["n_shared"], color=col, edgecolor="k", lw=0.4)
         a2.set_yticks(y)
-        a2.set_yticklabels([f"{r.ab1[:14]}–{r.ab2[:14]} ({_abbr(r.organism)})"
-                            for r in top.itertuples()], fontsize=7.5)
+        a2.set_yticklabels([f"{_short(r.ab1)}–{_short(r.ab2)} ({_abbr(r.organism)})"
+                            for r in top.itertuples()], fontsize=7)
         for yi, r in zip(y, top.itertuples()):
             a2.text(r.n_shared + 0.06, yi, f"OC {r.overlap_coefficient:.2f} · FE {r.fold_enrichment:g}",
                     va="center", fontsize=6.5, color="#555")

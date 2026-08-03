@@ -75,11 +75,17 @@ def fig_qc_scatter(results, orgs, out):
         ok = (df["Completeness"] >= 95) & (df["Contamination"] <= 5)
         ax.scatter(df.loc[ok, "Completeness"], df.loc[ok, "Contamination"], s=6,
                    alpha=0.45, color=_colour(org), label=f"pass ({int(ok.sum())})")
-        ax.scatter(df.loc[~ok, "Completeness"], df.loc[~ok, "Contamination"], s=14,
-                   alpha=0.85, color="#d62728", marker="x", label=f"fail ({int((~ok).sum())})")
+        # Black, not red: K. pneumoniae's own palette colour IS red, so red crosses were
+        # indistinguishable from its passing genomes in that panel.
+        ax.scatter(df.loc[~ok, "Completeness"], df.loc[~ok, "Contamination"], s=16,
+                   alpha=0.9, color="black", marker="x", linewidths=0.9,
+                   label=f"fail ({int((~ok).sum())})")
         ax.axvline(95, ls="--", c="grey", lw=0.8)
         ax.axhline(5, ls="--", c="grey", lw=0.8)
         ax.set_yscale("symlog", linthresh=1)
+        # Contamination is a percentage >= 0; symlog's default view drew a negative
+        # decade under the axis, which is not a value the metric can take.
+        ax.set_ylim(bottom=0)
         ax.set_xlim(0, 102)
         ax.set_xlabel("completeness (%)"); ax.set_ylabel("contamination (%)")
         ax.set_title(_display(org), fontsize=10, style="italic")
@@ -312,6 +318,7 @@ def fig_clonality_vs_inflation(data, tables, orgs, out):
     z = np.polyfit(df.largest_pct, df.inflation, 1)
     xs = np.linspace(df.largest_pct.min() - 2, df.largest_pct.max() + 4, 50)
     ax.plot(xs, np.polyval(z, xs), ls="--", c="grey", lw=1, zorder=1)
+    ax.margins(x=0.16)          # the right-most label ran into the axis edge
     ax.set_xlabel("largest lineage (% of the organism's genomes)")
     ax.set_ylabel("mean AUC inflation when the lineage grouping is removed")
     ax.set_title("The more clonal the organism, the more a random split flatters it\n"

@@ -120,7 +120,7 @@ def main():
     q = """
       SELECT s.model_id, s.unitig_id, u.sequence, s.gain, s.mean_abs_shap,
              s.selection_frequency, s.stable, s.composite_score, s.selection_method,
-             b.gene_symbol, b.tier, b.identity_pct, b.coverage, b.aro_accession,
+             b.gene_symbol, b.tier, b.source_db, b.identity_pct, b.coverage, b.aro_accession,
              b.aro_gene_family, b.aro_drug_class, b.aro_resistance_mechanism,
              f.prevalence_resistant, f.prevalence_susceptible,
              -- Derive the gap when the KB has none: step 10 did not emit
@@ -191,7 +191,7 @@ def main():
                  "selection_method",
              "mda_auc_drop", "pyseer_lrt_p", "prevalence_resistant", "prevalence_susceptible",
              "delta_prevalence", "odds_ratio", "fisher_p", "discriminative",
-             "gene_symbol", "tier", "identity_pct", "coverage", "aro_accession",
+             "gene_symbol", "tier", "source_db", "identity_pct", "coverage", "aro_accession",
              "aro_gene_family", "aro_drug_class", "aro_resistance_mechanism",
              "evidence_tier", "n_evidence_layers", "evidence_layers", "is_novel_candidate"]
     # Guard: biomarkers.csv is one row per (model, unitig). A LEFT JOIN that fans out

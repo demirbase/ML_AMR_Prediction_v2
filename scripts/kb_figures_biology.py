@@ -106,21 +106,34 @@ def fig_blast(bio, out):
     d = bio.dropna(subset=["identity_pct", "coverage"]).copy()
     if d.empty:
         print("  (blast: no identity/coverage — skipped)"); return
-    fig, ax = plt.subplots(figsize=(8, 5.6))
+    d["cov_pct"] = 100 * pd.to_numeric(d["coverage"], errors="coerce")
+    src = d["source_db"].astype(str).str.lower() if "source_db" in d.columns \
+        else pd.Series("card", index=d.index)
+    fig, ax = plt.subplots(figsize=(8.6, 5.8))
+    # CARD and NCBI hits share this space but only the CARD pass feeds the tier cutoffs
+    # — a strong_novel biomarker has NO CARD hit, so the point plotted for it is its NCBI
+    # hit. Drawing both with one marker implied all of them were graded against CARD.
     for tier in TIER_ORDER:
-        g = d[d.evidence_tier == tier]
-        if g.empty:
-            continue
-        ax.scatter(g["identity_pct"], 100 * pd.to_numeric(g["coverage"], errors="coerce"),
-                   s=18, alpha=0.55, color=TIER_COLOURS.get(tier, "#888888"),
-                   label=f"{tier} ({len(g)})", edgecolor="none")
+        for source, marker, alpha in (("card", "o", 0.55), ("ncbi", "x", 0.7)):
+            g = d[(d.evidence_tier == tier) & (src == source)]
+            if g.empty:
+                continue
+            ax.scatter(g["identity_pct"], g["cov_pct"], s=18 if marker == "o" else 22,
+                       alpha=alpha, marker=marker, linewidths=0.7,
+                       color=TIER_COLOURS.get(tier, "#888888"),
+                       label=f"{tier} · {source.upper()} ({len(g)})",
+                       edgecolor="none" if marker == "o" else None)
     ax.axvline(95, ls="--", c="grey", lw=0.8); ax.axhline(95, ls="--", c="grey", lw=0.8)
     ax.axvline(90, ls=":", c="grey", lw=0.7); ax.axhline(80, ls=":", c="grey", lw=0.7)
     ax.set_xlabel("BLAST identity (%)"); ax.set_ylabel("query coverage (%)")
-    ax.set_xlim(70, 101)
-    ax.set_title("Biomarker BLAST hits and the confidence-tier cutoffs\n"
-                 "(dashed = confirmed 95/95, dotted = candidate 90/80)", fontsize=10.5)
-    ax.legend(fontsize=8, frameon=False, loc="lower left")
+    lo = float(np.nanmin(d["identity_pct"]))
+    ax.set_xlim(max(60, lo - 2), 101)
+    ax.set_title(f"Biomarker BLAST hits and the confidence-tier cutoffs "
+                 f"({len(d):,} of {len(bio):,} biomarkers have a hit)\n"
+                 "dashed = confirmed 95/95, dotted = candidate 90/80 — "
+                 "the cutoffs grade the CARD pass (circles); NCBI hits (×) give context",
+                 fontsize=9.5)
+    ax.legend(fontsize=7, frameon=False, loc="lower left", ncol=2)
     fig.tight_layout()
     _save(fig, out, "33_blast_identity")
 

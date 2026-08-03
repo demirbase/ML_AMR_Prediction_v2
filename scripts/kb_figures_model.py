@@ -201,6 +201,7 @@ def fig_opchar(results, ms, out):
             ax.annotate(f"{_short(t.antibiotic)} ({_abbr(t.organism)})", (t.spec, t.sens),
                         textcoords="offset points", xytext=(6, 2), fontsize=6.5, color="#555")
     ax.axhline(0.9, ls=":", c="grey", lw=0.8); ax.axvline(0.9, ls=":", c="grey", lw=0.8)
+    ax.margins(0.12)            # annotations near the corners were being clipped
     ax.set_xlabel("specificity (TNR)"); ax.set_ylabel("sensitivity (TPR)")
     ax.set_title("Operating characteristics at each model's threshold\n(single split; dotted = 0.9)",
                  fontsize=10.5)
@@ -414,7 +415,8 @@ def fig_cpss(results, ms, out):
         print("  (cpss: no stability files — skipped)"); return
     a1.hist(pooled, bins=40, range=(0, 1), color="#31a354", edgecolor="k")
     a1.axvline(0.6, ls="--", c="#d62728", lw=1.2)
-    a1.text(0.61, a1.get_ylim()[1] * 0.9, "π = 0.6\n(stable)", fontsize=8, color="#d62728")
+    a1.text(0.62, 0.86, "π = 0.6\n(stable)", transform=a1.transAxes,
+            fontsize=8, color="#d62728")
     a1.set_yscale("log")
     a1.set_xlabel("CPSS selection frequency"); a1.set_ylabel("features (log)")
     a1.set_title(f"Selection frequency across all candidates ({len(pooled):,})", fontsize=10)
