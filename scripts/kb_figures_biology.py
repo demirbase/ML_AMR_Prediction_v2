@@ -159,26 +159,34 @@ def fig_funnel(bio, db, out):
         with sqlite3.connect(db) as c:
             n_models = c.execute("SELECT COUNT(*) FROM models").fetchone()[0] or n_models
 
+    # NOT a nested funnel: 'CARD hit' and 'CPSS-stable' are cross-cutting attributes
+    # (2,045 stable > 1,567 with a CARD hit), so tapering the bars by position would
+    # assert a subset relation that does not hold. Bar width encodes the COUNT.
     stages = [
-        (f"{n_models}", "AMR models", "#2c7fb8"),
-        (f"{n_bio:,}", "biomarkers graded", "#41ab5d"),
-        (f"{n_card:,}", "with a CARD hit", "#fdae61"),
-        (f"{n_stable:,}", "CPSS-stable", "#756bb1"),
-        (f"{int(counts.get('confirmed', 0))}", "confirmed", "#238b45"),
-        (f"{int(counts.get('strong_novel', 0))}", "strong_novel", "#d62728"),
+        (n_bio, "biomarkers graded", "#41ab5d"),
+        (n_stable, "CPSS-stable", "#756bb1"),
+        (n_card, "with a CARD hit", "#fdae61"),
+        (int(counts.get("confirmed", 0)), "confirmed", "#238b45"),
+        (int(counts.get("strong_novel", 0)), "strong_novel", "#d62728"),
     ]
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.8),
                                  gridspec_kw={"width_ratios": [1.25, 1]})
     a1.axis("off")
-    widths = np.linspace(1.0, 0.28, len(stages))
-    for i, ((num, lab, col), w) in enumerate(zip(stages, widths)):
-        yy = 1 - (i + 0.5) / len(stages)
-        a1.barh(yy, w, height=1 / len(stages) * 0.72, left=(1 - w) / 2,
-                color=col, edgecolor="white")
-        a1.text(0.5, yy, f"{num}  {lab}", ha="center", va="center",
-                fontsize=11, color="white", fontweight="bold")
-    a1.set_xlim(0, 1); a1.set_ylim(0, 1)
-    a1.set_title("From models to novel biomarkers", fontsize=12)
+    top = max(v for v, _, _ in stages) or 1
+    a1.text(0.5, 0.97, f"{n_models} AMR models  →", ha="center", va="center",
+            fontsize=12, fontweight="bold", color="#2c7fb8")
+    for i, (val, lab, col) in enumerate(stages):
+        w = max(0.16, val / top)
+        yy = 0.86 - (i + 0.5) / (len(stages) + 0.4)
+        a1.barh(yy, w, height=0.11, left=0, color=col, edgecolor="white")
+        inside = w > 0.42
+        a1.text(w - 0.02 if inside else w + 0.02, yy, f"{val:,}  {lab}",
+                ha="right" if inside else "left", va="center", fontsize=11,
+                color="white" if inside else "#333", fontweight="bold")
+    a1.set_xlim(0, 1.05); a1.set_ylim(0, 1.02)
+    a1.set_title("The knowledge base in numbers\n"
+                 "(bar length = count; these are overlapping attributes, not nested subsets)",
+                 fontsize=11)
 
     tiers = [t for t in TIER_ORDER if t in counts.index]
     vals = [int(counts[t]) for t in tiers]
