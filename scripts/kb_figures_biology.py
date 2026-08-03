@@ -56,15 +56,16 @@ def fig_novel(bio, out):
                      ("gain", "XGBoost gain")):
         v = pd.to_numeric(nov.get(col), errors="coerce")
         if v is not None and v.notna().any():
-            strength, s_label = v.fillna(0), lab
+            strength, s_label = v, lab          # keep NaN as NaN — see below
             break
     if strength is None:
-        strength, s_label = pd.Series(1.0, index=nov.index), "(no effect-size column)"
-    smax = float(strength.max()) or 1.0
+        strength, s_label = pd.Series(np.nan, index=nov.index), "(no effect-size column)"
+    n_missing = int(strength.isna().sum())
+    smax = float(strength.max()) if strength.notna().any() else 1.0
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.4),
                                  gridspec_kw={"width_ratios": [1.15, 1]})
-    sizes = 40 + 260 * (strength / smax)
+    sizes = 40 + 260 * (strength / smax).fillna(0)      # NaN -> smallest dot, not zero-value
     for org, g in nov.groupby("organism"):
         a1.scatter(g["selection_frequency"], g["neglogp"], s=sizes.loc[g.index],
                    color=_colour(org), edgecolor="k", lw=0.4, alpha=0.85,
@@ -76,17 +77,21 @@ def fig_novel(bio, out):
                  fontsize=10.5)
     a1.legend(fontsize=8, frameon=False, title="organism", title_fontsize=8)
 
-    lab = [f"{_short(r.antibiotic)} ({_abbr(r.organism)})" for r in nov.itertuples()]
-    v = strength.to_numpy()
-    order = np.argsort(v)
-    y = np.arange(len(nov))
-    a2.barh(y, v[order], color=[_colour(nov.iloc[i]["organism"]) for i in order],
-            edgecolor="k", lw=0.35)
-    a2.set_yticks(y); a2.set_yticklabels([lab[i] for i in order], fontsize=7)
+    # Bars only for biomarkers whose effect size is actually defined. Plotting a NaN as
+    # a zero-length bar would again show "not measured" as "no effect" — the same trap
+    # delta_prevalence set earlier in this figure.
+    lab_all = [f"{_short(r.antibiotic)} ({_abbr(r.organism)})" for r in nov.itertuples()]
+    have = np.where(strength.notna().to_numpy())[0]
+    order = have[np.argsort(strength.to_numpy()[have])]
+    y = np.arange(len(order))
+    a2.barh(y, strength.to_numpy()[order],
+            color=[_colour(nov.iloc[i]["organism"]) for i in order], edgecolor="k", lw=0.35)
+    a2.set_yticks(y); a2.set_yticklabels([lab_all[i] for i in order], fontsize=7)
     a2.set_xlabel(s_label)
-    a2.set_title(f"Effect size of each novel biomarker ({s_label})\n"
+    note = f" · {n_missing} of {len(nov)} have no {s_label} value (not shown)" if n_missing else ""
+    a2.set_title(f"Effect size of each novel biomarker ({s_label}){note}\n"
                  "prevalence stats are not computed for CPSS-only biomarkers",
-                 fontsize=10)
+                 fontsize=9.5)
     fig.tight_layout()
     _save(fig, out, "32_novel_candidates")
 
