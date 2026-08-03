@@ -230,6 +230,14 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
             )
         # Background frequency / discriminativeness (only present in 10's output)
         if has_bg:
+            # Derive the prevalence gap when the upstream CSV does not carry it. Step 10
+            # computed it internally but did not emit the column until 2026-08, so every
+            # KB written before that has delta_prevalence NULL; deriving it here means a
+            # re-populate fixes old runs without depending on which version of 10 ran.
+            _dp = _f(r.get("delta_prevalence"))
+            if _dp is None:
+                _pr, _ps = _f(r.get("prevalence_resistant")), _f(r.get("prevalence_susceptible"))
+                _dp = (_pr - _ps) if (_pr is not None and _ps is not None) else None
             conn.execute(
                 """INSERT OR REPLACE INTO unitig_background_frequency
                    (unitig_id, model_id, prevalence_resistant, prevalence_susceptible,
@@ -237,7 +245,7 @@ def populate_candidates(conn, model_id, run_id, k, cand_df, card_version):
                     discriminative) VALUES (?,?,?,?,?,?,?,?,?)""",
                 (kid, model_id, _f(r.get("prevalence_resistant")),
                  _f(r.get("prevalence_susceptible")), _f(r.get("prevalence_overall")),
-                 _f(r.get("delta_prevalence")), _f(r.get("odds_ratio")),
+                 _dp, _f(r.get("odds_ratio")),
                  _f(r.get("fisher_p")), _b(r.get("discriminative"))),
             )
             conn.execute(

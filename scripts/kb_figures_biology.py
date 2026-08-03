@@ -45,13 +45,15 @@ def fig_novel(bio, out):
         print("  (novel: no strong_novel rows — skipped)"); return
     nov["neglogp"] = -np.log10(pd.to_numeric(nov.get("pyseer_lrt_p"), errors="coerce")
                                .replace(0, np.nan))
-    # Effect size: prevalence stats (step 10) only cover step 09's candidate list, and
-    # the strong_novel set comes from CPSS (13) — so delta_prevalence is empty for
-    # exactly these biomarkers. Drawing it anyway produced a panel of zero-length bars
-    # that looked like "no effect" when it actually meant "not measured". Fall back to
-    # the strength that IS defined for every biomarker, and say which one is plotted.
+    # Effect size, in order of preference. delta_prevalence is the meaningful one and
+    # IS available for all 23 (they sit in both the gain and CPSS paths) — it only
+    # looked empty because step 10 never emitted the column, so the KB stored NULL;
+    # that is fixed at the source and derived in kb_tables. The fallbacks stay for KBs
+    # built before the fix, and a value that is genuinely missing is skipped, never
+    # drawn as a zero-length bar.
     strength, s_label = None, ""
-    for col, lab in (("mean_abs_shap", "mean |TreeSHAP|"),
+    for col, lab in (("delta_prevalence", "prevalence(R) − prevalence(S)"),
+                     ("mean_abs_shap", "mean |TreeSHAP|"),
                      ("composite_score", "composite score"),
                      ("gain", "XGBoost gain")):
         v = pd.to_numeric(nov.get(col), errors="coerce")
@@ -88,10 +90,9 @@ def fig_novel(bio, out):
             color=[_colour(nov.iloc[i]["organism"]) for i in order], edgecolor="k", lw=0.35)
     a2.set_yticks(y); a2.set_yticklabels([lab_all[i] for i in order], fontsize=7)
     a2.set_xlabel(s_label)
-    note = f" · {n_missing} of {len(nov)} have no {s_label} value (not shown)" if n_missing else ""
-    a2.set_title(f"Effect size of each novel biomarker ({s_label}){note}\n"
-                 "prevalence stats are not computed for CPSS-only biomarkers",
-                 fontsize=9.5)
+    note = f" · {n_missing} of {len(nov)} without a value (not shown)" if n_missing else ""
+    a2.set_title(f"Discriminative gap of each novel biomarker{note}\n"
+                 f"{s_label}", fontsize=9.5)
     fig.tight_layout()
     _save(fig, out, "32_novel_candidates")
 
@@ -142,11 +143,11 @@ def fig_prevalence(bio, out):
     ax.set_ylabel("prevalence in resistant genomes")
     ax.set_title("Biomarker prevalence, resistant vs susceptible\n"
                  "distance from the diagonal = discriminative power", fontsize=10.5)
-    # Step 10 scores step 09's candidate list, so CPSS-only biomarkers (including the
-    # strong_novel set) have no prevalence row. Say so rather than letting the reader
+    # Step 10 scores step 09's candidate list, so biomarkers found ONLY by CPSS have no
+    # prevalence row (1,162 of 3,571). State the coverage rather than letting a reader
     # read their absence as an absence of signal.
     ax.text(0.02, 0.96, f"{len(d):,} of {len(bio):,} biomarkers have prevalence stats\n"
-                        "(step 10 covers the step-09 candidate list; CPSS-only ones are absent)",
+                        "(step 10 scores the step-09 candidate list; biomarkers found ONLY by CPSS are not in it)",
             transform=ax.transAxes, fontsize=7.5, color="#666", va="top")
     ax.legend(fontsize=8, frameon=False, loc="lower right")
     fig.tight_layout()

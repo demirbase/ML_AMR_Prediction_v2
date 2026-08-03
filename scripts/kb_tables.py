@@ -122,7 +122,12 @@ def main():
              s.selection_frequency, s.stable, s.composite_score, s.selection_method,
              b.gene_symbol, b.tier, b.identity_pct, b.coverage, b.aro_accession,
              b.aro_gene_family, b.aro_drug_class, b.aro_resistance_mechanism,
-             f.prevalence_resistant, f.prevalence_susceptible, f.delta_prevalence,
+             f.prevalence_resistant, f.prevalence_susceptible,
+             -- Derive the gap when the KB has none: step 10 did not emit
+             -- delta_prevalence before 2026-08, so every KB written earlier stores NULL
+             -- even though both prevalences are there.
+             COALESCE(f.delta_prevalence,
+                      f.prevalence_resistant - f.prevalence_susceptible) AS delta_prevalence,
              f.odds_ratio, f.fisher_p, f.discriminative,
              et.evidence_tier, et.n_evidence_layers, et.evidence_layers, et.is_novel_candidate
       FROM (

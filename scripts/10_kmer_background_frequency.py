@@ -102,6 +102,14 @@ def compute_kmer_stats(present_r, n_r, present_s, n_s,
         'present_susceptible': present_s, 'n_susceptible': n_s,
         'prevalence_susceptible': prev_s,
         'prevalence_overall': prev_all,
+        # SIGNED prevalence gap. It was computed here (as `delta`, absolute) for the
+        # discriminative flag but never emitted, so populate_database's lookup of
+        # 'delta_prevalence' always returned None and the KB column was NULL for every
+        # biomarker — a whole evidence dimension silently absent from the KB.
+        # Signed, because the direction (enriched in R or in S) is the informative part;
+        # the flag below still thresholds on its magnitude.
+        'delta_prevalence': (prev_r - prev_s) if (prev_r == prev_r and prev_s == prev_s)
+                            else float('nan'),
         'odds_ratio': float(odds_ratio),
         'fisher_p': float(fisher_p),
         'enriched_in': ('resistant' if (prev_r == prev_r and prev_s == prev_s and prev_r > prev_s)
