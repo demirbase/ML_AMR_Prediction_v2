@@ -6,6 +6,7 @@
 ![Tests](https://img.shields.io/badge/tests-pytest-green.svg)
 ![Lint](https://img.shields.io/badge/lint-ruff-261230.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21789464.svg)](https://doi.org/10.5281/zenodo.21789464)
 
 ## Abstract
 
@@ -363,8 +364,9 @@ to the latest version; each version also gets its own DOI). The DOI is stored in
 `kb_metadata.zenodo_doi` and mirrored in [`CITATION.cff`](CITATION.cff) /
 [`.zenodo.json`](.zenodo.json).
 
-> **Zenodo DOI:** _reserved — added on first deposit_ (see
-> [`docs/RELEASE_ZENODO.md`](docs/RELEASE_ZENODO.md)).
+> **Zenodo DOI:** [`10.5281/zenodo.21789464`](https://doi.org/10.5281/zenodo.21789464) — the archived knowledge base
+> (KB + evidence tables + figures + run metadata). The concept DOI always resolves to
+> the latest version; see [`docs/RELEASE_ZENODO.md`](docs/RELEASE_ZENODO.md).
 
 Raw genome assemblies come from [BV-BRC](https://www.bv-brc.org); resistance
 gene annotations from [CARD](https://card.mcmaster.ca) (the exact snapshot is

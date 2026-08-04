@@ -36,8 +36,7 @@ keywords:
   - ARO ontology
   - reproducible research
   - FAIR
-# After the Zenodo deposit, add the minted DOI here, e.g.:
-# identifiers:
-#   - type: doi
-#     value: "10.5281/zenodo.XXXXXXX"
-#     description: "Archived AMRK-DB knowledge base (this version)"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21789464"
+    description: "Archived AMRK-DB knowledge base (45 models, 6 ESKAPEE organisms, schema 0.7.1)"
