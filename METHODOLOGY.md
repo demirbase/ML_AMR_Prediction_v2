@@ -2,18 +2,22 @@
 
 > **A rigorous technical exposition of the biological, mathematical, and statistical foundations of the AMR prediction pipeline.**
 
-> ⚠️ **Canonical pipeline (2026-07, schema 0.4.0) vs this document.** After the
+> ⚠️ **Canonical pipeline (schema 0.7.1) vs this document.** After the
 > literature-review pivot, the *canonical* feature unit is
-> the **unitig** (compacted de Bruijn graph, `bcalm2`/`unitig-caller`; step 03u),
-> the *canonical* validation is **lineage-aware CV** (PopPUNK + StratifiedGroupKFold,
-> step 07b), stability is **CPSS** (B=100, π≥0.6, PFER-bounded; step 13) with
-> **TreeSHAP** importance, and biomarkers additionally carry pyseer-LMM significance
-> (step 14), CARD SNP-allele checks (step 11), genome QC (CheckM2+QUAST; step 02d)
-> and external AMRFinderPlus/ResFinder concordance (step 16, M13). **Sections 1–3
-> below describe the raw-k-mer / Gain / single-split *baseline* (still a valid,
-> runnable path) — read them as the foundation, not the current canonical method;**
-> §4.4 is authoritative where they differ. A full rewrite
+> the **unitig** (compacted de Bruijn graph over k=21, `bcalm2`/`unitig-caller`;
+> step 03u), the *canonical* validation is **lineage-aware CV** (PopPUNK +
+> StratifiedGroupKFold, step 07b), stability is **CPSS** (B=100, π≥0.6,
+> PFER-bounded; step 13) with **TreeSHAP** importance, and biomarkers additionally
+> carry pyseer-LMM significance (step 14) and genome QC (CheckM2+QUAST; step 02d).
+> **Sections 1–3 below describe the raw-k-mer / Gain / single-split *baseline*
+> (still a valid, runnable path) — read them as the foundation, not the current
+> canonical method;** §4 and §5 are authoritative where they differ. A full rewrite
 > to unitig-first is tracked (audit Issue 1).
+>
+> **§5 records what the delivered 45-model run actually did**, including the two
+> validation layers that produced nothing (step 11 SNP, step 12 MDA) and the two
+> that never ran (step 16 M13, step 15 cross-antibiotic). Any Methods text drawn
+> from this document must reconcile with §5, not with the design intent in §4.
 
 ---
 
@@ -28,9 +32,13 @@
    - [3.4 Full-Data Boosting over a Streaming `QuantileDMatrix`](#34-full-data-boosting-over-a-streaming-quantiledmatrix)
 4. [Explainable AI and Biological Validation](#4-explainable-ai-and-biological-validation)
    - [4.1 Feature Importance Mapping](#41-feature-importance-mapping)
-   - [4.2 Automated Nextflow BLAST Pipeline](#42-automated-nextflow-blast-pipeline)
+   - [4.2 Dual BLAST Annotation (CARD local + NCBI remote)](#42-dual-blast-annotation-card-local--ncbi-remote)
    - [4.3 Automated Biological Reporting](#43-automated-biological-reporting)
    - [4.4 Statistical Signal ≠ Biological Causation (reification safeguard)](#44-statistical-signal--biological-causation-reification-safeguard)
+5. [What the delivered run actually did](#5-what-the-delivered-run-actually-did)
+   - [5.1 Panel and parameters as executed](#51-panel-and-parameters-as-executed)
+   - [5.2 The evidence ladder as executed](#52-the-evidence-ladder-as-executed)
+   - [5.3 Limitations that must be stated](#53-limitations-that-must-be-stated)
 
 ---
 
@@ -155,6 +163,18 @@ informative marker is discarded — only the noise/confounder tail. An explicit
 `preprocessing.min_support` integer overrides the formula when a fixed value is
 desired. This reduces $p$ from tens of millions to a smaller, more informative set
 while preserving discriminative features.
+
+> **What the delivered run used.** The formula above governs the **raw-k-mer**
+> path (`preprocessing.min_support: null` → auto-derive). The canonical **unitig**
+> path has its own knob, `unitig.min_support`, and it is set to a **fixed 10** —
+> so all 45 delivered models recorded `pipeline_runs.min_support = 10`, across
+> dataset sizes from $n=518$ to $n=4495$. The adaptive derivation was therefore
+> *not* in force for any delivered model. Two reasons the fixed floor is defensible
+> here: unitigs are already ~25× less redundant than raw 21-mers (a compacted
+> de Bruijn path replaces the dozens of overlapping k-mers a single SNP generates),
+> and the organism-level unitig store is built once at `db_min_support: 2` and then
+> subset per antibiotic, so the per-antibiotic floor must stay low enough not to
+> pre-drop what a subset would keep. Methods text must quote **10**, not the formula.
 
 ---
 
@@ -287,18 +307,26 @@ For maximum scientific transparency and reproducibility, all visualization modul
 
 ### 4.1 Feature Importance Mapping
 
-Our methodology ensures that the machine learning models remain entirely interpretable. Once the XGBoost model is trained, we extract the top k-mer sequences using the **Gain** metric. In tree-based models, Gain calculates the fractional contribution of each feature to the model's overall predictive power, essentially quantifying how much a specific 21-mer improves the classification of resistance. High-gain k-mers represent critical biological signals. These top features are subsequently converted back into the `.fasta` format to facilitate downstream biological querying.
+Our methodology ensures that the machine learning models remain entirely interpretable. Once the XGBoost model is trained, we extract the top features using the **Gain** metric. In tree-based models, Gain calculates the fractional contribution of each feature to the model's overall predictive power, essentially quantifying how much a specific sequence improves the classification of resistance. High-gain features represent critical biological signals. These top features are subsequently converted back into the `.fasta` format to facilitate downstream biological querying.
 
-### 4.2 Automated Nextflow BLAST Pipeline
+In the canonical pipeline the queried unit is the **unitig** (variable length; 31–1424 bp in the delivered run), not the fixed 21-mer — this is what makes BLAST meaningful at all, since a 21 bp query yields no interpretable E-value. Step 07 writes `02_top_{N}_features_{ab}.fasta` as the **union of two sets**: the single model's Gain top-$N$ ($N=50$), *plus* the seed-reproducible stable features from 07b that did not make that top-$N$. Both downstream annotators (step 08 BLAST, step 11 SNP check) read this one FASTA. Note that this union is **not** the same candidate set that the knowledge base scores and tiers — the KB's universe comes from step 10 (background frequency) plus step 13 (CPSS); see §5.2 for the consequence.
 
-To translate mathematical importance into biological relevance, we employ a dual-pronged biological validation strategy via an automated Nextflow pipeline:
+### 4.2 Dual BLAST Annotation (CARD local + NCBI remote)
 
-1. **CARD Local BLAST:** We query the top features against a rigorously curated local installation of the Comprehensive Antibiotic Resistance Database (CARD). This step rapidly identifies acquired resistance mechanisms such as horizontal gene transfer events, specific efflux pumps (e.g., *msbA*), and plasmid-mediated resistance determinants (e.g., *OXA* variants).
-2. **NCBI Remote BLAST (`nt` database):** For zero-alignment, reference-free discovery of chromosomal mutations, features are queried against the massive NCBI `nt` database. This alignment-free approach enables the autonomous discovery of core-genome point mutations (SNPs), seamlessly identifying phenomena such as the Quinolone Resistance-Determining Region (QRDR) mutations within the *gyrA* and *parC* genes.
+To translate mathematical importance into biological relevance, step 08 runs a dual-pronged annotation. Both passes are driven from plain Python via `subprocess` — an earlier Nextflow orchestration was removed in the M9 review, and the pipeline carries no JVM/Nextflow dependency. (The `.nf` file had been deleted while `main()` still shelled out to it, so step 08 could not run at all until this was fixed; the two facts are recorded together so the correction is not silently re-introduced.)
+
+1. **CARD Local BLAST:** We query the FASTA from §4.1 against a local installation of the Comprehensive Antibiotic Resistance Database (CARD). This identifies acquired resistance determinants — horizontally transferred genes, efflux components, and plasmid-mediated β-lactamases such as the *OXA* and *CTX-M* families. The BLAST task is chosen from the **median query length** (`blastn-short` with `word_size 7` below 50 bp, otherwise `blastn`), because the config's general `word_size` truncated or missed full-length hits on 30–50 bp unitigs.
+2. **NCBI Remote BLAST (`nt` database):** The same queries are searched against NCBI `nt`. This pass is **decoupled** from the local one: the public NCBI server kills `blastn-short` + `word_size 7` over `nt` with SIGXCPU, so it uses `blastn` + `word_size 11`, and it is **restricted to the study organism** via an `entrez_query` derived from the registry taxid, with `max_target_seqs = 50`.
+
+**These two passes do not have equal standing in the knowledge base, and Methods must say so.** Only the CARD pass enters the KB: `populate_database.py` writes `blast_annotations.source_db = 'card'` and nothing else, so all 3611 annotation rows in the delivered KB are CARD. The NCBI results (45 files, ~231k alignments) live on disk and feed the human-readable step-09 report and the step-18 novel-biomarker context analysis.
+
+This asymmetry is deliberate and should be defended, not apologised for: CARD is a *curated resistance catalogue* carrying the ARO ontology, so a CARD hit is evidence about resistance. Organism-restricted `nt` is a *sequence archive*, so an `nt` hit establishes where a sequence sits in that species — a locus, never a mechanism. Consequently the `blast` evidence layer means "known CARD determinant", and `strong_novel` means "no curated CARD determinant" — an explicit knowledge gap, with the `nt` placement supplied separately by step 18.
 
 ### 4.3 Automated Biological Reporting
 
-To bridge the gap between raw alignment metrics (BLAST `outfmt 6` TSV format) and final biological discovery, an automated reporting mechanism (`09_biological_summary.py`) distills the pipeline's outputs into a synthesized summary. By enforcing strict FASTA header ID matching (e.g., `Rank_1|Score_154.4288|Feature_...`) and implementing regex-based text mining, the script filters low-quality alignments and extracts precise AMR determinants. It cleanly isolates specific resistance symbols (like `OXA-909` or `msbA`) from CARD and unambiguous species/strain identifiers from NCBI, ultimately generating a human-readable, publication-ready Markdown report.
+To bridge the gap between raw alignment metrics (BLAST `outfmt 6` TSV format) and final biological discovery, an automated reporting mechanism (`09_biological_summary.py`) distills the pipeline's outputs into a synthesized summary. By enforcing strict FASTA header ID matching (e.g., `Rank_1|Score_154.4288|Feature_...`) and implementing regex-based text mining, the script filters low-quality alignments and extracts precise AMR determinants. It cleanly isolates specific resistance symbols (like `OXA-909` or `msbA`) from CARD and unambiguous species/strain identifiers from NCBI, ultimately generating a human-readable Markdown report.
+
+This report is a **convenience artefact, not a KB input** — nothing downstream consumes it, and the KB is unaffected by its state. In the delivered run the Markdown is incomplete for 7 of the 45 models because the NCBI Entrez `efetch` calls dropped mid-run. The underlying BLAST TSVs for those models are intact.
 
 ### 4.4 Statistical Signal ≠ Biological Causation (reification safeguard)
 
@@ -306,13 +334,129 @@ Every claim the knowledge base makes about a unitig is **associational, not caus
 
 Three structural safeguards operationalise this:
 
-1. **Layered, orthogonal evidence rather than a single score.** A biomarker is only elevated to a strong tier when independent lines agree: importance/stability (gain, CPSS π≥0.6, PFER bound), sequence identity to a curated determinant (CARD/ARO BLAST tier), discriminativeness (R-vs-S Δprevalence + Fisher/BH-FDR), allele-level confirmation for SNP mechanisms (step 11 variant model), population-structure-corrected association (pyseer LMM + Bonferroni), and external genotype–phenotype concordance (AMRFinderPlus/ResFinder, M13). Any one alone is treated as a hypothesis, not a fact.
+1. **Layered, orthogonal evidence rather than a single score.** A biomarker is only elevated to a strong tier when independent lines agree: importance/stability (gain, CPSS π≥0.6, PFER bound), sequence identity to a curated determinant (CARD/ARO BLAST tier), discriminativeness (R-vs-S Δprevalence + Fisher/BH-FDR), allele-level confirmation for SNP mechanisms (step 11 variant model), population-structure-corrected association (pyseer LMM + Bonferroni), and external genotype–phenotype concordance (AMRFinderPlus/ResFinder, M13). Any one alone is treated as a hypothesis, not a fact. **This is the design; §5.2 records which of these layers actually contributed to a tier in the delivered run — two of them did not, and one never ran.**
 
-2. **Confounding is measured, not assumed away.** Lineage-aware GroupKFold (PopPUNK) and pyseer's kinship random effect quantify how much of a signal is clonal/lineage co-carriage versus mechanism-driven. The cross-antibiotic H3 result is reported honestly as a *negative* finding (ampicillin=TEM vs cefotaxime=CTX-M/CMY share no gene family; the only β-lactamase overlap is cross-class CTX-M co-carriage) precisely because the method refuses to manufacture a mechanistic story the data does not support.
+2. **Confounding is measured, not assumed away.** Lineage-aware GroupKFold (PopPUNK) and pyseer's kinship random effect quantify how much of a signal is clonal/lineage co-carriage versus mechanism-driven. The starkest instance is *A. baumannii* ceftazidime: single-split ROC-AUC 0.985, random-CV 0.867, **lineage-CV 0.429** — held out across lineages the model is worse than chance, so what looked like a determinant was a memorised clone. Across the whole panel this inflation is systematic (45/45 models random > lineage; Wilcoxon $p = 5.7\times10^{-14}$; mean inflation $+0.088$) and scales with clonality.
+
+   The cross-antibiotic H3 analysis is reported at the level the data supports: same-class drug pairs share **more ARO gene families** than cross-class pairs (mean overlap 0.84 vs 0.29; Mann–Whitney $p = 0.0015$). The claim rests on that **contrast**, not on individual pairs — 0 of 138 pairs survive Benjamini–Yekutieli correction, and only 5 within-class pairs exist because the panel was curated for class coverage. Components are ARO gene families, not raw unitigs, with the universe defined as the families reachable by that organism.
 
 3. **Provenance over assertion.** Each `validation_evidence` row records the *evidence type, source (tool + version), score, and pipeline run* — so a KB consumer sees *why* a claim is tiered as it is and can re-derive it, rather than trusting an unqualified label. "Novel candidate" strictly means "no curated homolog found", an explicit knowledge gap, not a discovery claim.
 
 This makes the KB's epistemic status auditable: it is a ranked, confidence-tiered, reproducible catalogue of *statistical AMR signals with biological context*, not a claim of causal mechanism.
+
+---
+
+## 5. What the delivered run actually did
+
+Sections 1–4 describe design. This section records the **executed** 45-model run
+behind KB schema 0.7.1 (Zenodo DOI `10.5281/zenodo.21789464`). Every figure below
+was read back out of the shipped `amrk.db` or the run outputs. Where design and
+execution differ, **this section wins**, and thesis Methods must follow it.
+
+### 5.1 Panel and parameters as executed
+
+| Quantity | Value |
+|---|---|
+| Models · organisms · antibiotic classes | 45 · 6 · 14 |
+| Genome–phenotype pairs | 78,556 (per-model $n$ from 518 to 4495) |
+| Cross-validation | `lineage_group_kfold_5fold` on **45/45** models — no fallback to random CV anywhere |
+| Headline metric | `models.auc_mean_seeds` (lineage-CV, 5 seeds). `models.roc_auc` is a single split and is retained **only** as the contrast that exposes clonal inflation |
+| Panel mean lineage-CV ROC-AUC | 0.842 (min 0.429 *A. baumannii* ceftazidime; max 0.975 *E. faecium* teicoplanin) |
+| Per organism | *E. faecium* 0.933 (6) · *E. coli* 0.917 (8) · *S. aureus* 0.836 (8) · *K. pneumoniae* 0.834 (11) · *A. baumannii* 0.759 (8) · *P. aeruginosa* 0.755 (4) |
+| Unitig support floor | `min_support = 10`, fixed, on all 45 runs (see §2.4) |
+| de Bruijn $k$ | 21 for every unitig; unitig length 31–1424 bp |
+| Random seed | 42 on all 45 runs |
+| CARD snapshot | one version across all 45 runs |
+
+### 5.2 The evidence ladder as executed
+
+`classify_evidence_tier()` folds a CARD BLAST hit plus five statistical layers
+(`prevalence`, `snp`, `mda`, `cpss`, `pyseer`) into one grade per (unitig, model).
+Three different layer counts circulate in this project's documents and they must
+not be conflated:
+
+* **7** — the number of orthogonal analyses the pipeline *produces* (`blast`,
+  `background_frequency`, `permutation_mda`, `stability_selection`, `snp`,
+  `pyseer_lmm`, `label_permutation`), as listed in `docs/KB_KAVRAMLAR.md`.
+* **6** — the number the tier function *counts* (`label_permutation` is
+  model-level, not per-unitig, so it grades no biomarker).
+* **4** — the number that *actually fired* in the delivered KB. The maximum
+  observed `n_evidence_layers` is **4**, reached by 7 biomarkers, all `confirmed`.
+
+Delivered tier distribution over 3571 (unitig, model) pairs: `weak` 1920 ·
+`candidate` 942 · `confirmed` 349 · `none` 337 · **`strong_novel` 23**.
+
+Two designed layers contributed **nothing**, for entirely different reasons:
+
+**`snp` — a wiring gap (fixable).** Step 11 BLASTs the step-07 query FASTA
+(§4.1), whereas the KB's scored universe comes from step 10 plus step 13. In the
+delivered run these two sets are **disjoint**: all 953 `variant_snp_check` rows
+(335 distinct unitigs) have **zero** overlap with the 3509 scored unitigs, and
+none of them has a `unitig_evidence_tier` row at all. The `snp` layer therefore
+fires on 0 of 3571 pairs. This silently discards 21 confirmed `resistant_allele`
+calls (plus 60 `other_variant`) — precisely the evidence that would have
+distinguished target-SNP mechanisms (gyrA/parC, pbp5, porin) from acquired genes.
+Not a statistical result; a set-membership defect.
+
+**`mda` — a genuine null result (not fixable by rewiring).** Here the sets match
+perfectly (2409/2409 candidates overlap the scored set), the
+`permutation_significant` column is present in all 45 output files, and its sum
+across all 2409 rows is **0**: no unitig survives BH-FDR at $q<0.05$. This must be
+reported as a negative finding *with its power caveat* — the test uses $R=100$
+permutations against ~2400 candidates, so the attainable $q$ floor is coarse and
+the procedure is underpowered. "No MDA-significant unitigs" therefore does **not**
+license "no feature matters"; it means this particular test could not resolve one.
+
+Two further tables ship empty: `external_concordance` (step 16 / M13 external
+AMRFinderPlus–ResFinder concordance never ran, so there is no concordance figure)
+and `unitig_antibiotic_overlap` (step 15's cross-antibiotic output was never
+loaded into the KB; the API's `/overlap` route consequently returns nothing).
+
+For the annotation layer, all 3611 `blast_annotations` rows are CARD (§4.2), and
+they are **not interchangeable**: 3007 sit at `tier='none'` (mean query coverage
+0.38, E-values up to 9.3 — spurious homology from short queries), against 480
+`confirmed` (99.9% mean identity, full coverage), 117 `weak` and 7 `candidate`.
+All 2035 rows whose `gene_symbol` is the literal string `"nan"` fall in
+`tier='none'`. **Any biological statement drawn from this table must filter
+`tier IN ('confirmed','candidate')`**; without that filter the unfiltered join
+returns, for example, staphylococcal *mecA* under an *A. baumannii* model.
+Filtered, the panel reproduces textbook biology: *S. aureus* cefoxitin/oxacillin →
+*mecA*+*mecR1*; *E. faecium* teicoplanin → all seven *vanA*-cluster genes;
+*E. coli* cefotaxime → CTX-M; *K. pneumoniae* carbapenems → KPC/NDM;
+*A. baumannii* carbapenems → OXA; and the models with no CARD hit are exactly the
+mutation-driven/intrinsic ones.
+
+Finally, the 23 `strong_novel` biomarkers were placed against organism-restricted
+`nt` (step 18): **23/23 align at 100% identity over full query length**, so none is
+an assembly artefact. By replicon, using an ≥80% majority over all retained
+alignments: 10 chromosomal, 5 plasmid, 8 mixed. The mixed class is informative
+rather than a failed call — a sequence occurring at full identity on both
+replicon types within one species is a mobile-element signature.
+
+### 5.3 Limitations that must be stated
+
+1. **External validation is lineage hold-out only.** Temporal validation is
+   *impossible* with this data: BV-BRC AMR phenotypes end in 2021 (≥2023 isolates:
+   *E. coli* 28, *K. pneumoniae* 13, *A. baumannii* 11, *S. aureus* 0). Geographic
+   validation was *not performed*, and the collections are country-dominated
+   (*E. coli* 58% Norway, *A. baumannii* 63% USA). M13 concordance never ran.
+2. **Labels are BV-BRC as published.** No MIC re-interpretation was attempted —
+   raw MIC completeness is as low as 9% (*S. aureus*) and units are mixed.
+3. **PFER exceeds 1 in some models** (max ≈14): in those stable sets the expected
+   number of false positives is above one.
+4. **Co-carriage is linkage, not causation.** `sul`/`qacEdelta1` co-occurrence is a
+   class-1 integron; a novel *K. pneumoniae* gentamicin unitig maps to an
+   MCR-1-carrying plasmid without being *mcr-1*. All KB claims are associational.
+5. **`git_dirty = 1` on all 45 runs.** Each run records its commit, but the working
+   tree was modified at execution time, so the commit hash alone does not
+   reconstruct the exact code state. Seed, config hash, CARD version and tool
+   versions are recorded and consistent; `bcalm` reports an honest NULL version
+   (no version CLI).
+6. **`nt` proportions are bounded samples.** The remote pass used
+   `max_target_seqs = 50`, so replicon proportions in §5.2 are proportions of the
+   alignments BLAST retained, not a census of `nt`.
+7. **The `organisms` table holds 7 rows, the panel has 6.** *Enterobacter cloacae*
+   is registered in the reference table but has no trained model.
 
 ---
 
@@ -327,11 +471,11 @@ This makes the KB's epistemic status auditable: it is a ranked, confidence-tiere
 | Optuna TPE + early stopping | Conflicting HPO and early stopping | Fixed `num_boost_round`; `best_iteration` captured |
 | Stratified linspace chunk selection | Biased mini-batch resistance ratios | Sorted-by-ratio linspace chunk indexing |
 | Streaming `QuantileDMatrix` + full-data boosting | Matrix too large for RAM, yet per-chunk training is weak/inefficient | `ChunkDMatrixIter` streams chunks into one quantised DMatrix; standard boosting sees all train rows per tree |
-| Nextflow Dual-BLAST (CARD + NCBI) | Black-box ML lack of biological interpretability | Asynchronous pipeline mapping mathematical Gain scores back to known physical AMR mechanisms (SNPs & Plasmids). |
+| Dual BLAST (CARD local + NCBI remote), pure-Python `subprocess` | Black-box ML lack of biological interpretability | Maps Gain/CPSS-selected unitigs back to curated determinants (CARD/ARO → the KB) and to genomic locus (organism-restricted `nt` → context only). |
 | MLOps Artifact Versioning | Accidental loss of high-cost optimization and model binaries | Strict timestamp-based backup system protecting historical Optuna studies and models. |
 | Source Data Extraction | Opaque, irreproducible numerical plots | Automated parallel export of plot arrays to `.csv` for transparent third-party rendering. |
 | Automated Biological Reporting | Raw BLAST TSV outputs are unreadable and cluttered | Regex-based `09_biological_summary.py` script distills raw data into synthesized Markdown reports. |
 
 ---
 
-*Document version: July 2026 (§4.4 + canonical-pipeline banner added; KB schema 0.4.0). Sections 1–3 document the raw-k-mer baseline; the canonical unitig / lineage-CV / CPSS pipeline (§4.4) is authoritative. Maintained alongside `scripts/` as the mathematical reference for the pipeline.*
+*Document version: August 2026 (KB schema 0.7.1, 45-model delivered run). Sections 1–3 document the raw-k-mer baseline; the canonical unitig / lineage-CV / CPSS pipeline (§4) is authoritative for design, and §5 is authoritative for what was executed. Maintained alongside `scripts/` as the mathematical reference for the pipeline.*

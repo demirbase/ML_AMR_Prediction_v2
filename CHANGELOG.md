@@ -7,6 +7,71 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Step 18 — genomic context for `strong_novel` biomarkers.**
+  `scripts/18_novel_ncbi_context.py` joins the KB's novel set to the
+  organism-restricted NCBI `nt` alignments step 08 already produced but never
+  loaded (`populate_database.py` writes `source_db='card'` only). All **23/23**
+  novel biomarkers align at 100% identity over full query length, so none is an
+  assembly artefact. Replicon call over *all* retained alignments (≥80% majority,
+  not the single best hit): 10 chromosomal, 5 plasmid, 8 mixed — the mixed class
+  being a mobile-element signature. Read-only: the KB and its DOI are untouched.
+
+### Fixed (documentation — no code/KB change)
+- **`METHODOLOGY.md` reconciled with the delivered run.** Removed the stale
+  "Nextflow BLAST pipeline" description (step 08 has been pure-Python
+  `subprocess` since the M9 review); corrected the H3 result from *negative* to
+  the delivered positive contrast; recorded that the canonical unitig path used a
+  **fixed `min_support = 10`** on all 45 runs rather than the adaptive formula in
+  §2.4; separated CARD (enters the KB) from NCBI (context only); bumped schema
+  0.4.0 → 0.7.1. Added **§5 "What the delivered run actually did"** — panel and
+  parameters as executed, the evidence ladder as executed, and the limitations
+  that must be stated.
+- **Evidence-layer count pinned.** The project produces **7** orthogonal
+  analyses, `classify_evidence_tier()` counts **6**, and **4** actually fired in
+  the delivered KB (max observed `n_evidence_layers` = 4, reached by 7
+  biomarkers). Two designed layers contributed nothing, for different reasons:
+  `snp` **0/3571** because step 11 scans the step-07 FASTA while the KB's scored
+  universe comes from steps 10+13 — the two sets are disjoint (953 rows / 335
+  unitigs, zero overlap), silently stranding 21 `resistant_allele` calls; `mda`
+  **0/3571** as a genuine null (sets overlap 2409/2409, nothing survives BH-FDR
+  at q<0.05, with R=100 permutations underpowered at ~2400 candidates).
+  Corrected in `METHODOLOGY.md`, `docs/KB_ACIKLAMA.md`, `docs/KB_KAVRAMLAR.md`.
+- **`docs/KB_ACIKLAMA.md` / `docs/KB_KAVRAMLAR.md` brought to 0.7.1.** Both still
+  described the 21-model / 2-organism / 2363-unitig 0.6.0 KB. All row counts,
+  the CARD version string, the organism and drug-class lists, and the schema
+  version were corrected against the shipped database. The advisor-question
+  section quoted M13 concordance results (bACC 0.926 vs AMRFinderPlus 0.538) as
+  findings — `external_concordance` is **empty** in 0.7.1, so those are now
+  marked as superseded 0.6.0-era numbers that must not be used in the thesis.
+- **CARD tier filter documented.** 3007 of 3611 `blast_annotations` rows sit at
+  `tier='none'` (mean coverage 0.38, E-values to 9.3), including all 2035 rows
+  whose `gene_symbol` is the literal `"nan"`. Any biological claim must filter
+  `tier IN ('confirmed','candidate')`; unfiltered joins return, for example,
+  staphylococcal *mecA* under an *A. baumannii* model.
+
+---
+
+## [0.7.1] - 2026-08-04
+
+Archived on Zenodo: **[10.5281/zenodo.21789464](https://doi.org/10.5281/zenodo.21789464)**
+(Dataset, CC-BY-4.0). 45 models · 6 ESKAPEE organisms · 14 antibiotic classes ·
+78,556 genome–phenotype pairs · lineage-aware CV on 45/45 models (mean ROC-AUC
+0.842) · 3571 tiered biomarkers.
+
+> **How to read the entries below.** They accumulated across the project's whole
+> development, from the 1-antibiotic pilot through the 2- and 3-antibiotic KBs to
+> the final 45-model rebuild, and record *when each capability landed* — not that
+> every one of them contributed an artefact to the shipped database. Three
+> capabilities listed here produced results in earlier KB builds that are **absent
+> from the 0.7.1 database**: **M13 external concordance** (`external_concordance`
+> ships with 0 rows — the AMRFinderPlus/ResFinder numbers quoted below are from
+> the 2-organism build and must not be cited as 0.7.1 results), **step 15
+> cross-antibiotic overlap** (`unitig_antibiotic_overlap` ships with 0 rows), and
+> **step 11's SNP allele check** (953 rows land in `variant_snp_check` but share no
+> unitig with any scored model, so the `snp` evidence layer is never applied). See
+> `METHODOLOGY.md §5.2`.
+
+### Added
 - **M15 genome QC executed (CheckM2 + QUAST).** `02d_genome_qc.py` run on all 5470
   assemblies: **97.1% pass** (5312/5470) at completeness≥95 / contamination≤5 /
   N50≥50kb / contigs≤500; 158 fails (mostly low N50). Per-genome table + summary
@@ -22,7 +87,9 @@ All notable changes to this project are documented here. The format is based on
   `uvicorn scripts.kb_api:app`.
 - **Reification safeguard (S10).** `METHODOLOGY.md §4.4` — associational-not-causal
   wording policy + three structural safeguards (layered orthogonal evidence,
-  measured confounding incl. the H3 negative finding, provenance-over-assertion).
+  measured confounding, provenance-over-assertion). **Note:** the H3 example in
+  §4.4 was written against the 2-organism run and read as a negative finding; the
+  45-model re-analysis supersedes it (see below).
 - **M13 external-validation concordance.** `scripts/16_external_concordance.py`
   + `scripts/lib/concordance.py` (balanced accuracy, sensitivity, specificity,
   Cohen's κ, McNemar, FDA major/very-major error bands). AMRFinderPlus
@@ -37,9 +104,13 @@ All notable changes to this project are documented here. The format is based on
   cefotaxime (model_id 3, lineage-CV 0.9546±0.020, CTX-M-276/278 confirmed).
   `scripts/15_cross_antibiotic.py` (S1) computes cross-antibiotic stable-unitig
   overlap + the H3 within/cross contrast at both unitig and ARO gene-family
-  level. **H3 rejected**: within-β-lactam (ampicillin=TEM vs cefotaxime=CTX-M/CMY)
-  shares no gene family — same class, distinct enzymes — a biologically
-  substantive negative finding.
+  level. **H3 rejected at this scale**: within-β-lactam (ampicillin=TEM vs
+  cefotaxime=CTX-M/CMY) shares no gene family — same class, distinct enzymes.
+  **SUPERSEDED by the 45-model analysis** (`scripts/17_h3_gene_family_overlap.py`):
+  over 138 pairs, same-class pairs share more ARO gene families than cross-class
+  pairs (mean overlap 0.84 vs 0.29, Mann–Whitney p=0.0015, `H3_supported: true`).
+  The claim rests on that contrast — 0/138 individual pairs survive
+  Benjamini–Yekutieli, and only 5 within-class pairs exist by panel construction.
 - **M10 FAIR/Zenodo prep.** `populate_database.py` preserves `zenodo_doi` across
   re-populates and honours the `AMR_ZENODO_DOI` env override; added `.zenodo.json`,
   refreshed `CITATION.cff`, a README "Data availability & KB versioning" section,
