@@ -9,32 +9,48 @@ version gets its own DOI — so re-depositing after adding an antibiotic is chea
 
 ## What goes in the deposit
 
-The FAIR artifact is the KB + its evidence, **not** the multi-GB raw matrices
-(those are regenerated from BV-BRC assemblies by the pipeline). Bundle:
+The FAIR artifact is the KB + its evidence + the figures/tables that summarise it —
+**not** the multi-GB unitig matrices or the raw assemblies (both are regenerated from
+BV-BRC by the pipeline; `unitigs.rtab` alone is ~36 GB for E. coli).
 
-- `results/ecoli/kb/amrk.db` — the SQLite knowledge base (schema 0.4.0)
-- `results/ecoli/kb/15_cross_antibiotic_*` — cross-antibiotic overlap outputs
-- `results/ecoli/<antibiotic>/` — per-antibiotic candidate + evidence CSVs/JSON
-  (07/09/10/11/12/12b/13/14 outputs) and `runs/.../run_metadata.json`
-- `config/config.yaml` + `config/experiments/ecoli/config_*.yaml` (the tuned splits)
-- `CITATION.cff`, `README.md`, this file
+Contents (45 models · 6 ESKAPEE organisms · 14 drug classes · schema 0.7.1):
+
+- `results/kb/amrk.db` — the unified SQLite knowledge base (all organisms in one file;
+  `pipeline_runs.organism` separates them)
+- `results/tables/` — `models_summary.csv` (45 models, lineage-CV AUC + provenance),
+  `kb_overview.csv`, `biomarkers.csv` (3 571 biomarkers × 7 evidence layers),
+  `mechanisms.csv`, `cv_comparison.csv` (random-vs-lineage CV),
+  `h3_gene_family_overlap.csv` + `h3_summary.json`
+- `results/figures/` — the 36 figures (PNG + PDF)
+- `results/{organism}/{antibiotic}/` — per-model candidate/evidence outputs
+  (07/09/10/11/12/12b/13/14) and `04_evaluation/*.csv`
+- `runs/{organism}/{antibiotic}/*/run_metadata.json` — git commit, seed, tool versions
+- `config/config.yaml`, `config/registry/*.yaml`, `config/experiments/*/config_*.yaml`
+- `environment.lock.yml`, `environment-tools.lock.yml`, `environment-checkm2.lock.yml`
+  and `containers/*.def` — the pinned software that produced all of it
+- `CITATION.cff`, `README.md`, `METHODOLOGY.md`, this file
 
 ```bash
-# from repo root — build the bundle (adjust globs to the antibiotics present)
-tar czf amrk-db_v0.4.0.tar.gz \
-  results/ecoli/kb/amrk.db results/ecoli/kb/15_cross_antibiotic_* \
-  results/ecoli/*/07_* results/ecoli/*/09_* results/ecoli/*/1[0-4]_* \
-  runs/ecoli/*/run_metadata.json \
-  config/config.yaml config/experiments/ecoli/config_*.yaml \
-  CITATION.cff README.md docs/RELEASE_ZENODO.md
+# from the repo root (or $AMR_WORK on TRUBA, where results/ is populated)
+tar czf amrk-db_v0.7.1.tar.gz \
+  results/kb/amrk.db results/tables results/figures \
+  results/*/*/0[4-9]_* results/*/*/1[0-4]_* \
+  runs/*/*/*/run_metadata.json \
+  config/config.yaml config/registry/*.yaml config/experiments/*/config_*.yaml \
+  environment*.lock.yml containers/*.def \
+  CITATION.cff README.md METHODOLOGY.md docs/RELEASE_ZENODO.md
 ```
+
+> **Version:** the release version tracks `kb_schema_version` (**0.7.1**) — `tests/
+> test_version_alignment.py` fails the build if `.zenodo.json`, `CITATION.cff`,
+> `pyproject.toml` and `config.yaml` disagree with the schema constant. So tag
+> `v0.7.1`; do not invent a separate release number.
 
 ## Steps
 
-1. **Decide the version.** `kb_schema_version` = schema shape (0.4.0). The *release*
-   version tracks content too: schema-only-unchanged content growth (e.g. adding
-   cefotaxime) → bump the **release** to `v0.5.0` even though the schema stays
-   0.4.0. Set the same string in `.zenodo.json` (`version`) and `CITATION.cff`.
+1. **Decide the version.** the release version IS `kb_schema_version` (**0.7.1**) — the alignment test
+   requires every declared version to equal the schema constant, so a separate
+   release number would break the build. Bump the schema when the shape changes.
 2. **Create the Zenodo deposit** (https://zenodo.org → New upload). Upload the
    tarball. Zenodo reads `.zenodo.json`-style metadata; verify title, creators
    (add affiliation/ORCID), license = CC-BY-4.0, keywords, related identifier
@@ -46,9 +62,9 @@ tar czf amrk-db_v0.4.0.tar.gz \
    ```bash
    # via the env override on the next populate run …
    AMR_ZENODO_DOI="10.5281/zenodo.XXXXXXX" \
-     python scripts/populate_database.py --antibiotic <ab>
+     python scripts/populate_database.py --organism <org> --antibiotic <ab>
    # … or directly, without re-populating:
-   sqlite3 results/ecoli/kb/amrk.db \
+   sqlite3 results/kb/amrk.db \
      "UPDATE kb_metadata SET zenodo_doi='10.5281/zenodo.XXXXXXX' WHERE id=1;"
    ```
 5. **Write the DOI into the docs:** add it to `CITATION.cff` (`identifiers:` block,
@@ -56,8 +72,8 @@ tar czf amrk-db_v0.4.0.tar.gz \
    README *"reserved — added on first deposit"* line with the concept DOI badge.
 6. **Tag the release** (matches the version):
    ```bash
-   git tag -a v0.5.0 -m "AMRK-DB v0.5.0 — <antibiotics>, schema 0.4.0, Zenodo 10.5281/zenodo.XXXXXXX"
-   git push origin v0.5.0        # PAT, when ready
+   git tag -a v0.7.1 -m "AMRK-DB v0.7.1 — 45 models, 6 ESKAPEE organisms, 14 classes, Zenodo 10.5281/zenodo.XXXXXXX"
+   git push origin v0.7.1        # PAT, when ready
    ```
 7. **Publish** the Zenodo deposit → the DOI becomes permanent. Put the concept
    DOI in the thesis Methods (data availability) paragraph.
