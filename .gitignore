@@ -232,3 +232,13 @@ docs/review/
 
 # macOS KMC fallback binaries — removed locally, not part of the release
 bin/
+
+# Per-organism result trees pulled from the HPC for local inspection
+/acinetobacter_baumannii/
+/ecoli/
+/enterococcus_faecium/
+/kpneumoniae/
+/pseudomonas_aeruginosa/
+/staphylococcus_aureus/
+/figures_kb/
+/tez/
