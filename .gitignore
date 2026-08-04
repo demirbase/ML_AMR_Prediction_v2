@@ -229,3 +229,6 @@ docs/KB_AKIS_SEMASI.html
 docs/TRUBA_Kurulum_ve_Calistirma_Rehberi.md
 docs/literature/
 docs/review/
+
+# macOS KMC fallback binaries — removed locally, not part of the release
+bin/
