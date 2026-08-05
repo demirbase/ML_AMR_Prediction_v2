@@ -298,7 +298,9 @@ def fig_lineage_resistance(data, ms, orgs, out):
         if cl is None or sub.empty:
             ax.axis("off"); continue
         # the organism's largest model = the most representative phenotype
-        ab = sub.sort_values("n_genomes", ascending=False).iloc[0]["antibiotic"]
+        # Deterministic pick when two antibiotics have the same genome count.
+        ab = sub.sort_values(["n_genomes", "antibiotic"],
+                             ascending=[False, True]).iloc[0]["antibiotic"]
         gdir = Path(data) / org / ab / "matrix_unitig"
         gf, yf = gdir / f"genomes_{ab}.csv", gdir / f"y_{ab}.csv"
         if not (gf.exists() and yf.exists()):

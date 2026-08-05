@@ -92,7 +92,15 @@ def main():
     if not rows:
         sys.exit("ERROR: no model has BOTH a lineage and a random CV summary.")
 
-    df = pd.DataFrame(rows).sort_values("inflation", ascending=False).reset_index(drop=True)
+    # Tie-break on (organism, antibiotic). Sorting on inflation alone is stable, so a
+    # tie inherits the input order -- which comes from directory enumeration and differs
+    # between filesystems: K. pneumoniae ciprofloxacin and gentamicin both sit at
+    # inflation 0.0384 and swapped rows between the laptop and the HPC. Same numbers,
+    # different file, so the artefact stopped being byte-reproducible across machines.
+    df = (pd.DataFrame(rows)
+          .sort_values(["inflation", "organism", "antibiotic"],
+                       ascending=[False, True, True])
+          .reset_index(drop=True))
     tables.mkdir(parents=True, exist_ok=True)
     out_csv = tables / "cv_comparison.csv"
     df.to_csv(out_csv, index=False, quoting=csv.QUOTE_MINIMAL)

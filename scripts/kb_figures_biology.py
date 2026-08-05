@@ -151,7 +151,8 @@ def fig_novel_context(tables, out):
     a1.legend(fontsize=8, frameon=False, title="replicon (≥80% of hits)",
               title_fontsize=8)
 
-    d = d.sort_values(["replicon_call", "dominant_fraction"], ascending=[True, False])
+    d = d.sort_values(["replicon_call", "dominant_fraction", "organism", "antibiotic"],
+                      ascending=[True, False, True, True])
     y = np.arange(len(d))
     a2.barh(y, 100 * d["dominant_fraction"],
             color=[cols.get(c, "#888888") for c in d.replicon_call],

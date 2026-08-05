@@ -185,7 +185,8 @@ def main():
 
     df = pd.DataFrame(rows)
     df["fisher_p_BY"] = benjamini_yekutieli(df["fisher_p"].to_numpy())
-    df = df.sort_values(["organism", "fisher_p"]).reset_index(drop=True)
+    # (ab1, ab2) breaks ties in fisher_p so the row order is filesystem-independent.
+    df = df.sort_values(["organism", "fisher_p", "ab1", "ab2"]).reset_index(drop=True)
     tables = Path(args.tables); tables.mkdir(parents=True, exist_ok=True)
     df.to_csv(tables / "h3_gene_family_overlap.csv", index=False)
     print(f"  ✓ {tables/'h3_gene_family_overlap.csv'}  ({len(df)} pairs)")
@@ -280,7 +281,9 @@ def main():
     # ones. Taking the global top-18 by k let the abundant group crowd the panel — only
     # 1 of the 5 same-class pairs survived — so the figure beside the H3 title showed
     # almost nothing but cross-class bars, which reads as evidence against the claim.
-    srt = ["n_shared", "fold_enrichment"]
+    # Same reason as above: ties in (n_shared, fold_enrichment) decide which pairs make
+    # the top-18 cut, so they need a deterministic tail.
+    srt = ["n_shared", "fold_enrichment", "ab1", "ab2"]
     w_all = cand[cand.same_class.astype(bool)].sort_values(srt, ascending=False)
     x_all = cand[~cand.same_class.astype(bool)].sort_values(srt, ascending=False)
     top = pd.concat([w_all, x_all.head(max(0, 18 - len(w_all)))]).sort_values(
