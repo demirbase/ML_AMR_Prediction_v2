@@ -312,10 +312,17 @@ def fig_mda(results, ms, out):
         n_sig = int(df.significant.sum())
         a2.set_xlabel("AUC drop when a single feature is permuted")
         a2.set_ylabel("features (log)")
+        # The power caveat is not optional. Read without it, "0 pass FDR" invites the
+        # conclusion that no feature matters, when the honest reading is that this test
+        # cannot resolve one: R=100 permutations against ~2,400 candidates puts a coarse
+        # floor under the attainable q-value.
         a2.set_title("Almost no single unitig is individually indispensable\n"
                      f"{len(pooled):,} candidates tested · {n_sig} pass FDR in "
                      f"{int((df.significant > 0).sum())}/{len(df)} models — linked features "
-                     "substitute for each other (hence CPSS/pyseer)", fontsize=9)
+                     "substitute for each other (hence CPSS/pyseer)\n"
+                     "underpowered by design: 100 permutations vs "
+                     f"{len(pooled):,} candidates bounds how small q can get, so this is "
+                     "'not resolvable here', not 'no effect'", fontsize=8.5)
     fig.tight_layout()
     _save(fig, out, "28_mda_permutation")
 
@@ -337,11 +344,41 @@ def _pyseer_assoc(results, org, ab):
     return p[p > 0]
 
 
+def _lambda_gc(p):
+    """Genomic inflation factor: median observed chi-square over its null median.
+
+    lambda ~ 1 is calibrated; lambda >> 1 means the bulk of the distribution is
+    shifted, not just the tail.
+    """
+    p = np.asarray(p, dtype=float)
+    p = p[(p > 0) & (p <= 1)]
+    if p.size == 0:
+        return float("nan")
+    try:
+        from scipy.stats import chi2, norm
+        obs = float(np.median(chi2.isf(p, 1)))
+        return obs / float(chi2.ppf(0.5, 1))
+    except Exception:                                        # pragma: no cover
+        from math import sqrt
+        from statistics import NormalDist
+        nd = NormalDist()
+        z = np.array([nd.inv_cdf(max(pi / 2, 1e-300)) for pi in p])
+        return float(np.median(z ** 2)) / 0.4549364231195724
+
+
 def fig_pyseer_qq(results, ms, orgs, out):
-    """QQ of the LMM p-values. A well-calibrated mixed model tracks the diagonal in
-    the bulk and lifts only in the tail; a wholesale lift would mean the random
-    effect failed to absorb population structure."""
+    """QQ of the LMM p-values, with the genomic inflation factor per model.
+
+    A well-calibrated mixed model tracks the diagonal in the bulk and lifts only in
+    the tail. These curves lift throughout, so the figure must NOT be captioned as
+    evidence that the random effect absorbed population structure — it previously
+    was, which asserted the opposite of what it shows. Two things drive the lift and
+    the plot alone cannot separate them: genuine signal carried by thousands of
+    unitigs in tight LD across the same locus, and any stratification the kinship
+    term did not remove. Lambda is printed so the magnitude is at least quantified.
+    """
     fig, axes = _grid(len(orgs))
+    lambdas = []
     for ax, org in zip(axes, orgs):
         drawn, xmax = 0, 1.0
         for r in ms[ms.organism == org].itertuples():
@@ -350,7 +387,11 @@ def fig_pyseer_qq(results, ms, orgs, out):
                 continue
             obs = -np.log10(np.sort(p.to_numpy()))
             exp = -np.log10(np.linspace(1 / len(obs), 1, len(obs)))
-            ax.plot(exp, obs, lw=0.9, alpha=0.8, label=_short(r.antibiotic))
+            lam = _lambda_gc(p.to_numpy())
+            if np.isfinite(lam):
+                lambdas.append(lam)
+            ax.plot(exp, obs, lw=0.9, alpha=0.8,
+                    label=f"{_short(r.antibiotic)}  λ={lam:.1f}")
             xmax = max(xmax, float(exp.max()))
             drawn += 1
         # The expected axis can only reach log10(n_tested) ≈ 3.7 for 5 000 variants while
@@ -363,8 +404,14 @@ def fig_pyseer_qq(results, ms, orgs, out):
         ax.set_title(f"{_display(org)} ({drawn})", fontsize=9.5, style="italic")
         if drawn:
             ax.legend(fontsize=6, frameon=False)
-    fig.suptitle("pyseer LMM p-value calibration (QQ) — population structure absorbed "
-                 "by the random effect", fontsize=12)
+    rng_note = (f"  ·  genomic inflation λ = {min(lambdas):.1f}–{max(lambdas):.1f} "
+                f"(median {np.median(lambdas):.1f})" if lambdas else "")
+    fig.suptitle("pyseer LMM p-values, QQ vs the uniform null" + rng_note + "\n"
+                 "the lift is not confined to the tail: unitigs in tight LD tag the same "
+                 "locus thousands of times, and the plot cannot separate that from "
+                 "residual stratification —\nso this is a diagnostic of the association "
+                 "scan, not a certificate that the kinship term absorbed population "
+                 "structure", fontsize=10)
     fig.tight_layout()
     _save(fig, out, "29_pyseer_qq")
 

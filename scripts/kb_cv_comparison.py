@@ -109,10 +109,14 @@ def main():
     print(f"  mean inflation       : {infl.mean():+.3f} "
           f"(median {np.median(infl):+.3f}, max {infl.max():+.3f})")
     print(f"  random > lineage in  : {(infl > 0).sum()}/{len(df)} models")
+    wilcox_note = ""
     try:
         from scipy.stats import wilcoxon
-        stat, p = wilcoxon(df["random_cv_auc"], df["lineage_cv_auc"])
-        print(f"  Wilcoxon signed-rank : W={stat:.1f}, p={p:.2e}")
+        stat, p_w = wilcoxon(df["random_cv_auc"], df["lineage_cv_auc"])
+        print(f"  Wilcoxon signed-rank : W={stat:.1f}, p={p_w:.2e}")
+        # Carried onto the figure: this p-value IS the claim the figure makes, and a
+        # reader should not have to find it in a log or the running text.
+        wilcox_note = f" · Wilcoxon signed-rank p = {p_w:.1e}"
     except Exception as e:                                  # pragma: no cover
         print(f"  (Wilcoxon unavailable: {e})")
     worst = df.iloc[0]
@@ -142,12 +146,17 @@ def main():
     ax.set_xlim(min(0.40, float(df["lineage_cv_auc"].min()) - 0.04), 1.0)
     ax.set_title("Removing the lineage grouping inflates the AUC\n"
                  f"same folds, same models — mean inflation {infl.mean():+.3f} "
-                 f"across {len(df)} models (sorted by gap)", fontsize=11)
+                 f"in {(infl > 0).sum()}/{len(df)} models{wilcox_note}\n"
+                 "(sorted by gap)", fontsize=11)
+    # One legend entry per organism, so the colour actually resolves to a name. The
+    # legend used to say "dot coloured by organism" while offering no key for it.
+    org_handles = [Line2D([], [], marker="o", ls="", color=_colour(o), label=_abbr(o))
+                   for o in sorted(df["organism"].unique())]
     ax.legend(handles=[
         Line2D([], [], marker="o", ls="", color="#999999", label="random 5-fold CV (lineage-blind)"),
         Line2D([], [], marker="o", ls="", color="#444444",
-               label="lineage-aware CV (reported; dot coloured by organism)"),
-    ], fontsize=8.5, loc="lower left", frameon=False)
+               label="lineage-aware CV (reported)"),
+    ] + org_handles, fontsize=8, loc="lower left", frameon=False, ncol=2)
     ax.invert_yaxis()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

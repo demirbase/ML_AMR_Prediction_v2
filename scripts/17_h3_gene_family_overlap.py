@@ -253,7 +253,21 @@ def main():
     ttl = "H3: within-class pairs share more determinants"
     if "mannwhitney_p_within_gt_cross" in summary:
         ttl += f"\nMann-Whitney p = {summary['mannwhitney_p_within_gt_cross']:.3g}"
-    a1.set_title(ttl, fontsize=10)
+    # Both caveats belong ON the figure. The within-class group is tiny by construction
+    # (the panel was curated for class coverage, which trims redundant same-class drugs)
+    # and no individual pair survives multiple-testing correction — so the claim is the
+    # group contrast and nothing else. A reader who sees only "p = 0.00145" will
+    # reasonably assume otherwise.
+    n_w = summary.get("n_within_class")
+    n_c = summary.get("n_cross_class")
+    n_sig = summary.get("n_significant_BY_0.05")
+    n_pairs = summary.get("n_pairs")
+    if n_w is not None and n_c is not None:
+        ttl += f"\nwithin-class n={n_w} vs cross-class n={n_c}"
+    if n_sig is not None and n_pairs is not None:
+        ttl += (f" · {n_sig} of {n_pairs} individual pairs significant after "
+                "Benjamini–Yekutieli\nthe claim is the group contrast, not any one pair")
+    a1.set_title(ttl, fontsize=9)
 
     # Rank by how MANY families are shared, not by the coefficient: with sets of one or
     # two families k/min(K,n) is 1.0 for any overlap at all, so ranking on it produced 18
@@ -262,7 +276,15 @@ def main():
     cand = df.dropna(subset=["overlap_coefficient"]).copy()
     cand = cand[(cand[["n_families_ab1", "n_families_ab2"]].min(axis=1) >= 2)
                 & (cand["n_shared"] >= 1)]
-    top = cand.sort_values(["n_shared", "fold_enrichment"], ascending=False).head(18)
+    # Keep EVERY within-class pair, then fill the rest with the strongest cross-class
+    # ones. Taking the global top-18 by k let the abundant group crowd the panel — only
+    # 1 of the 5 same-class pairs survived — so the figure beside the H3 title showed
+    # almost nothing but cross-class bars, which reads as evidence against the claim.
+    srt = ["n_shared", "fold_enrichment"]
+    w_all = cand[cand.same_class.astype(bool)].sort_values(srt, ascending=False)
+    x_all = cand[~cand.same_class.astype(bool)].sort_values(srt, ascending=False)
+    top = pd.concat([w_all, x_all.head(max(0, 18 - len(w_all)))]).sort_values(
+        srt, ascending=False)
     if top.empty:
         a2.axis("off")
         a2.text(0.5, 0.5, "no pair has ≥2 families on both sides", ha="center", fontsize=10)
@@ -279,9 +301,14 @@ def main():
         a2.invert_yaxis()
         a2.set_xlim(0, top["n_shared"].max() * 1.55)
         a2.set_xlabel("shared gene families (k)")
+        n_w_shown = int(top.same_class.astype(bool).sum())
+        n_w_total = int(df.same_class.astype(bool).sum())
         a2.set_title("Pairs sharing the most gene families "
                      "(red = same class, blue = cross-class)\n"
-                     "OC = overlap coefficient, FE = fold enrichment", fontsize=9.5)
+                     "OC = overlap coefficient, FE = fold enrichment\n"
+                     f"all {n_w_shown} of {n_w_total} within-class pairs that have "
+                     "\u22652 families on both sides are shown, then the top "
+                     "cross-class pairs", fontsize=9)
     figs = Path(args.figures); figs.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(figs / "08_h3_overlap.png", dpi=200, bbox_inches="tight")

@@ -10,7 +10,14 @@ AB     ?= ampicillin
 
 .DEFAULT_GOAL := help
 .PHONY: help setup dev-install lint format typecheck test test-all \
-        pipeline data features train biology clean-pyc
+        pipeline data features train biology tables figures clean-pyc
+
+# Thesis artefact paths. Override on the command line if the KB lives elsewhere,
+# e.g. `make figures KB=$$AMR_WORK/results/kb/amrk.db`.
+KB      ?= results/kb/amrk.db
+RESULTS ?= results
+TABLES  ?= results/tables
+FIGURES ?= results/figures
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -52,6 +59,22 @@ train:  ## HPO + train + evaluate (04, 05, 06)
 
 biology:  ## Stability + explainability + BLAST + reports (07b..11)
 	$(PYTHON) scripts/run_pipeline.py --organism $(ORG) --only 07b 07 08 09 10 11
+
+tables:  ## Rebuild the tidy thesis tables from the KB (kb_tables + H3 + CV comparison)
+	$(PYTHON) scripts/kb_tables.py --db $(KB) --results $(RESULTS) --out $(TABLES)
+	$(PYTHON) scripts/17_h3_gene_family_overlap.py --db $(KB) --tables $(TABLES) --figures $(FIGURES)
+	$(PYTHON) scripts/kb_cv_comparison.py --tables $(TABLES) --results $(RESULTS) --out $(FIGURES)
+	$(PYTHON) scripts/18_novel_ncbi_context.py --kb $(KB) --results-root $(RESULTS) --out $(TABLES)
+
+figures: tables  ## Rebuild every thesis figure (run `make tables` implicitly)
+	# Each script takes a DIFFERENT set of flags -- kb_figures_model has no --db, and
+	# passing one makes argparse exit non-zero while a loop that only greps stdout for
+	# a checkmark reports success. That is how a corrected figure silently kept its old
+	# rendering for a whole review round. Spell the flags out, once, here.
+	$(PYTHON) scripts/kb_figures.py         --tables $(TABLES) --results $(RESULTS) --db $(KB) --out $(FIGURES)
+	$(PYTHON) scripts/kb_figures_data.py    --tables $(TABLES) --results $(RESULTS) --db $(KB) --out $(FIGURES)
+	$(PYTHON) scripts/kb_figures_model.py   --tables $(TABLES) --results $(RESULTS) --out $(FIGURES)
+	$(PYTHON) scripts/kb_figures_biology.py --tables $(TABLES) --db $(KB) --out $(FIGURES)
 
 clean-pyc:  ## Remove Python caches
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + ; \

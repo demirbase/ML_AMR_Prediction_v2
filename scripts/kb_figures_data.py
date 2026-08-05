@@ -130,7 +130,9 @@ def fig_pass_rates(results, orgs, out):
         rows.append({"organism": org, "n": s.get("n_genomes"), "pass": s.get("n_pass"),
                      "fail": s.get("n_fail"), "rate": s.get("pass_rate"),
                      "completeness": s.get("n_fail_completeness"),
-                     "contamination": s.get("n_fail_contamination")})
+                     "contamination": s.get("n_fail_contamination"),
+                     "n50": s.get("n_fail_n50"),
+                     "contigs": s.get("n_fail_contigs")})
     if not rows:
         print("  (pass-rate: no 02d summaries — skipped)"); return
     df = pd.DataFrame(rows)
@@ -142,15 +144,35 @@ def fig_pass_rates(results, orgs, out):
         a1.text(xi, 100 * r + 0.4, f"{100*r:.1f}%\n(n={n})", ha="center", fontsize=8)
     a1.set_xticks(x); a1.set_xticklabels([_abbr(o) for o in df.organism])
     a1.set_ylim(80, 103); a1.set_ylabel("genomes passing QC (%)")
-    a1.set_title("CheckM2 pass rate", fontsize=10)
-    b = a2.bar(x - 0.2, df["completeness"], width=0.4, color="#2c7fb8",
-               edgecolor="k", lw=0.4, label="completeness <95 %")
-    a2.bar(x + 0.2, df["contamination"], width=0.4, color="#d62728",
-           edgecolor="k", lw=0.4, label="contamination >5 %")
+    tot_p, tot_n = int(df["pass"].sum()), int(df["pass"].sum() + df["fail"].sum())
+    a1.set_title("CheckM2 pass rate — the ENFORCED gate\n"
+                 f"{tot_p:,}/{tot_n:,} = {100*tot_p/tot_n:.1f}% pass "
+                 "(note the truncated y-axis)", fontsize=9.5)
+    # Four criteria are COMPUTED; only two are ENFORCED. The assembly-contiguity pair
+    # was evaluated and then deliberately not applied, because an N50>=50 kb gate
+    # removed 63% of the E. faecium collection (1,305 of 2,078) — short-contig draft
+    # assemblies are the norm for that species in BV-BRC, so the gate was selecting on
+    # assembly provenance rather than on genome quality. Plotting only the two enforced
+    # reasons, with no trace of the other two, let the figure imply that contiguity was
+    # never a question. It has to be visible, and visibly not applied.
+    w = 0.2
+    a2.bar(x - 1.5 * w, df["completeness"], width=w, color="#2c7fb8",
+           edgecolor="k", lw=0.4, label="completeness <95 % (enforced)")
+    a2.bar(x - 0.5 * w, df["contamination"], width=w, color="#d62728",
+           edgecolor="k", lw=0.4, label="contamination >5 % (enforced)")
+    a2.bar(x + 0.5 * w, df["n50"], width=w, color="#bdbdbd", edgecolor="k", lw=0.4,
+           hatch="//", label="N50 <50 kb (computed, NOT enforced)")
+    a2.bar(x + 1.5 * w, df["contigs"], width=w, color="#f0f0f0", edgecolor="k", lw=0.4,
+           hatch="//", label="contigs >500 (computed, NOT enforced)")
+    a2.set_yscale("symlog", linthresh=10)
     a2.set_xticks(x); a2.set_xticklabels([_abbr(o) for o in df.organism])
-    a2.set_ylabel("genomes excluded"); a2.legend(fontsize=8, frameon=False)
-    a2.set_title("Why genomes were excluded", fontsize=10)
-    del b
+    a2.set_ylabel("genomes failing the criterion (symlog)")
+    a2.legend(fontsize=7, frameon=False, ncol=2)
+    worst = df.loc[df["n50"].idxmax()]
+    a2.set_title("Why genomes were excluded — and what was measured but not applied\n"
+                 f"an N50 gate would have removed {int(worst['n50']):,} of "
+                 f"{int(worst['n'])} {_abbr(worst['organism'])} genomes "
+                 f"({100*worst['n50']/worst['n']:.0f}%)", fontsize=9)
     fig.tight_layout()
     _save(fig, out, "12_qc_pass_rates")
 
@@ -230,12 +252,20 @@ def _clusters(data, org):
 def fig_lineage_sizes(data, orgs, out):
     """Rank-size curves: how much of each organism sits in its biggest lineage.
     This is the property lineage-aware CV exists to respect."""
+    # Bail out BEFORE creating the figure when no organism has cluster data. Skipping
+    # each organism individually and saving anyway wrote a fully empty pair of axes over
+    # a good figure — this file lives in data/processed/, which is routinely pruned from
+    # the laptop, so "regenerate everything" silently destroyed the artefact instead of
+    # leaving it alone. Every other generator here skips; this one has to as well.
+    have = [(org, _clusters(data, org)) for org in orgs]
+    have = [(org, cl) for org, cl in have if cl is not None]
+    if not have:
+        print("  (lineage sizes: no PopPUNK cluster files under "
+              f"{data} — skipped, existing figure left untouched)")
+        return
     fig, ax = plt.subplots(figsize=(8.5, 5))
     txt = []
-    for org in orgs:
-        cl = _clusters(data, org)
-        if cl is None:
-            continue
+    for org, cl in have:
         sizes = cl["Cluster"].value_counts().to_numpy()
         frac = 100 * sizes / sizes.sum()
         ax.plot(np.arange(1, len(frac) + 1), frac, marker="o", ms=2.5, lw=1.2,
@@ -255,6 +285,12 @@ def fig_lineage_resistance(data, ms, orgs, out):
     """Resistance rate INSIDE the largest lineages — clonal confounding, seen directly.
     A lineage that is ~all-resistant lets a model score by recognising the clone;
     holding that lineage out is precisely what lineage-aware CV does."""
+    # Same guard as fig_lineage_sizes: an all-blank grid is worse than no output,
+    # because _save overwrites whatever was there.
+    if all(_clusters(data, org) is None for org in orgs):
+        print("  (lineage resistance: no PopPUNK cluster files under "
+              f"{data} — skipped, existing figure left untouched)")
+        return
     fig, axes = _grid(len(orgs), ncols=3, w=4.6, h=3.4)
     for ax, org in zip(axes, orgs):
         cl = _clusters(data, org)
