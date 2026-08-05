@@ -72,11 +72,17 @@ Archived on Zenodo: **[10.5281/zenodo.21789464](https://doi.org/10.5281/zenodo.2
 > `METHODOLOGY.md §5.2`.
 
 ### Added
-- **M15 genome QC executed (CheckM2 + QUAST).** `02d_genome_qc.py` run on all 5470
-  assemblies: **97.1% pass** (5312/5470) at completeness≥95 / contamination≤5 /
-  N50≥50kb / contigs≤500; 158 fails (mostly low N50). Per-genome table + summary
-  JSON + advisory exclusion list. Fails <3% → not retrained (data-quality
-  statement for Methods). Also: `kb_report.py` one-command thesis results summary;
+- **M15 genome QC executed (CheckM2 + QUAST).** `02d_genome_qc.py` run on all
+  **17,742** assemblies of the final 6-organism panel: **98.7% pass**
+  (17,516/17,742). Per-genome table + summary JSON + advisory exclusion list.
+  Fails <2% → not retrained (data-quality statement for Methods).
+  **The enforced gate is completeness≥95 / contamination≤5 only.** N50≥50 kb and
+  contigs≤500 are computed and reported but deliberately NOT enforced: an N50 gate
+  removes **1,305 of 2,078 E. faecium genomes (63%)**, i.e. it selects on assembly
+  provenance rather than genome quality for a species whose BV-BRC entries are
+  routinely short-contig drafts. Figure 12 now plots all four criteria, marking
+  which two are enforced. (The earlier "97.1% pass (5312/5470), 158 fails mostly
+  low N50" line described the 2-organism era run and no longer holds.) Also: `kb_report.py` one-command thesis results summary;
   `kb_app.py` H3-overlap + M13-concordance tabs; S. aureus taxid fix (927→1280).
 - **KB REST API (S8) + FAIR metadata endpoint (S9).** `scripts/kb_api.py` (FastAPI,
   CORS, auto OpenAPI at `/docs`) over `scripts/lib/kb_queries.py` (pure sqlite3,

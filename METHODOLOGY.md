@@ -457,6 +457,20 @@ replicon types within one species is a mobile-element signature.
    alignments BLAST retained, not a census of `nt`.
 7. **The `organisms` table holds 7 rows, the panel has 6.** *Enterobacter cloacae*
    is registered in the reference table but has no trained model.
+8. **Genome QC enforces two of the four criteria it measures.** CheckM2/QUAST ran on
+   all 17,742 assemblies and 98.7% (17,516) pass, but the enforced gate is
+   completeness ≥95% and contamination ≤5% only. N50 ≥50 kb and contigs ≤500 are
+   computed and reported, then deliberately not applied: an N50 gate removes **1,305
+   of 2,078 *E. faecium* genomes (63%)**, which selects on assembly provenance rather
+   than genome quality for a species whose BV-BRC entries are routinely short-contig
+   drafts. Figure 12 plots all four and marks which two are enforced. The consequence
+   is that assembly fragmentation is an uncontrolled covariate, most heavily in
+   *E. faecium* — the organism with the highest panel AUC (0.933).
+9. **pyseer p-values are strongly inflated relative to a uniform null** (genomic
+   inflation λ = 0.7–79.3, median 2.6). Some of this is real: thousands of unitigs in
+   tight LD tag the same locus. The QQ plot cannot separate that from stratification
+   the kinship term did not absorb, so figure 29 is a diagnostic of the scan, not
+   evidence that population structure was fully controlled.
 
 ---
 
