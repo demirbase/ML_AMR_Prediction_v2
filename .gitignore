@@ -220,6 +220,7 @@ Danisman_Toplanti_Raporu_*.md
 # docs stay tracked: README.md, METHODOLOGY.md, QUICKSTART.md, CHANGELOG.md,
 # CONTRIBUTING.md, LICENSE, CITATION.cff, docs/RELEASE_ZENODO.md.
 HANDOFF.md
+HANDOFF_ARCHIVE.md
 docs/ROADMAP.md
 docs/SCALE_MLOPS_PLAN.md
 docs/TECHNICAL_REVIEW.md

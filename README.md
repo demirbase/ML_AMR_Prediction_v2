@@ -323,6 +323,19 @@ make lint                          # ruff
 make test                          # unit + smoke
 python scripts/run_pipeline.py --list                         # show the step plan
 python scripts/run_pipeline.py --organism ecoli --antibiotic ampicillin   # run the analysis core 01->10
+make tables                        # tidy thesis tables from the KB (+ H3, CV comparison, novel context)
+make figures                       # every thesis figure (runs `make tables` first)
+```
+
+Build the thesis artefacts through `make`, not by calling the figure scripts in a
+loop: each takes a different set of flags (`kb_figures_model.py` has no `--db`), so a
+loop that passes one set to all of them makes argparse exit while still looking like it
+succeeded. Override the paths when the results live elsewhere, e.g. on the HPC:
+
+```bash
+make figures KB=$AMR_WORK/results/kb/amrk.db RESULTS=$AMR_WORK/results \
+             TABLES=$AMR_WORK/results/tables FIGURES=$AMR_WORK/results/figures \
+             PYTHON="apptainer exec --no-home $AMR_WORK/containers/amr.sif /opt/amr-env/bin/python"
 ```
 
 CI (GitHub Actions, `.github/workflows/ci.yml`) runs ruff + the unit/smoke suite on Python 3.10–3.12.
