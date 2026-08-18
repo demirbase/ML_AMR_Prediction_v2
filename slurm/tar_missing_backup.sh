@@ -130,7 +130,7 @@ do_upload () {
     log "up    $(basename "$f")  $(( $(stat -c%s "$f") /1024/1024 )) MiB"
     rclone copy "$f" "$DEST/" "${opts[@]}"; rc=$?
     case $rc in
-      0) log "done  $(basename "$f")" ;;
+      0) log "done  $(basename "$f")" ;;   # rclone skips size+modtime matches; the md5 check below is the real gate
       7) log "CAP   daily 750 GB limit reached at $(basename "$f") — re-run this same command tomorrow"
          return 7 ;;
       *) log "FAIL  $(basename "$f") (rclone exit $rc)"; failed+=("$(basename "$f")") ;;
@@ -140,8 +140,12 @@ do_upload () {
 
   # Verify by hash, not by size: Drive returns MD5, so this is a real integrity
   # check of what landed, and it is the reason `clean` is allowed to delete.
-  log "verify (md5) $STAGE -> $DEST"
-  if rclone check "$STAGE" "$DEST" --checkers 2 --log-file "$LOG" --log-level INFO; then
+  # Scoped to this group with --include: the staging directory also holds the
+  # other group's archives, which are not uploaded yet, and an unscoped check
+  # reports those as missing and fails a run that actually succeeded.
+  log "verify (md5) $STAGE -> $DEST  [${GROUP}__*.${EXT}]"
+  if rclone check "$STAGE" "$DEST" --include "${GROUP}__*.${EXT}" \
+       --checkers 2 --log-file "$LOG" --log-level INFO; then
     log "VERIFIED  all staged archives match Drive by MD5"
     touch "$STAGE/.verified_$GROUP"
   else
