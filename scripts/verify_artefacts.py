@@ -45,6 +45,7 @@ EXPECTED_TABLES = {
     "h3_gene_family_overlap.csv": 138,
     "novel_ncbi_context.csv": 23,
     "novel_ncbi_hits.csv": None,
+    "fair_mapping.csv": 15,          # the 15 FAIR principles, one row each
 }
 
 # KB table -> expected row count. None = "must exist, count not pinned";
@@ -61,7 +62,7 @@ EXPECTED_KB = {
 EXPECTED_TIERS = {"confirmed": 349, "strong_novel": 23, "candidate": 942,
                   "weak": 1920, "none": 337}
 
-N_FIGURES = 37
+N_FIGURES = 39                  # 37 data figures + the two schematics (37 pipeline, 38 schema)
 MIN_PNG_BYTES = 20_000          # a blank matplotlib canvas lands far below this
 
 

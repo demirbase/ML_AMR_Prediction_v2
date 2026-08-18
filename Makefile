@@ -65,6 +65,7 @@ tables:  ## Rebuild the tidy thesis tables from the KB (kb_tables + H3 + CV comp
 	$(PYTHON) scripts/17_h3_gene_family_overlap.py --db $(KB) --tables $(TABLES) --figures $(FIGURES)
 	$(PYTHON) scripts/kb_cv_comparison.py --tables $(TABLES) --results $(RESULTS) --out $(FIGURES)
 	$(PYTHON) scripts/18_novel_ncbi_context.py --kb $(KB) --results-root $(RESULTS) --out $(TABLES)
+	$(PYTHON) scripts/kb_fair_mapping.py --db $(KB) --out $(TABLES)
 
 figures: tables  ## Rebuild every thesis figure (run `make tables` implicitly)
 	# Each script takes a DIFFERENT set of flags -- kb_figures_model has no --db, and
@@ -75,6 +76,7 @@ figures: tables  ## Rebuild every thesis figure (run `make tables` implicitly)
 	$(PYTHON) scripts/kb_figures_data.py    --tables $(TABLES) --results $(RESULTS) --db $(KB) --out $(FIGURES)
 	$(PYTHON) scripts/kb_figures_model.py   --tables $(TABLES) --results $(RESULTS) --out $(FIGURES)
 	$(PYTHON) scripts/kb_figures_biology.py --tables $(TABLES) --db $(KB) --out $(FIGURES)
+	$(PYTHON) scripts/kb_figures_schematic.py --db $(KB) --tables $(TABLES) --out $(FIGURES)
 
 clean-pyc:  ## Remove Python caches
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + ; \
