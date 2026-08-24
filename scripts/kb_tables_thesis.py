@@ -397,7 +397,16 @@ def main():
     tdir, out = Path(a.tables), Path(a.out or a.tables)
     out.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(a.db)
-    read = lambda n: pd.read_csv(tdir / n) if (tdir / n).exists() else None
+    # float_precision="round_trip" is not a nicety. pandas' default CSV float parser
+    # is accurate to within an ULP, not exact, and which ULP it lands on varies by
+    # version: on this laptop it read composite_score 23.890940407379954 back as
+    # 23.89094040737995, and in the HPC container it did not. One value out of 480 was
+    # enough to make headline_biomarkers.csv differ between the two machines while
+    # every other table matched byte for byte. round_trip parses to the float whose
+    # repr IS the source text, so a column copied from a tidy table is reproduced
+    # exactly, on any machine, by any pandas.
+    read = (lambda n: pd.read_csv(tdir / n, float_precision="round_trip")
+            if (tdir / n).exists() else None)
     ctx = {"conn": conn, "data": a.data, "runs": a.runs,
            "biomarkers": read("biomarkers.csv"),
            "models_summary": read("models_summary.csv"),

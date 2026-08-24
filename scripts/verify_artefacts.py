@@ -174,6 +174,33 @@ def verify_tables(root, rep, expect_md5=None):
         rep.check(blank == 0, "mechanisms on_target complete",
                   f"{blank} blank · {models} models on-target")
 
+    # A column copied from one tidy table into another must survive the trip as the
+    # SAME TEXT. pandas' default CSV float parser is accurate to an ULP, not exact, and
+    # which value it rounds differs by version: headline_biomarkers.csv differed between
+    # laptop and HPC because the laptop mangled one delta_prevalence and the container
+    # mangled one composite_score. Every other table matched, so nothing else caught it.
+    hb, bm = tdir / "headline_biomarkers.csv", tdir / "biomarkers.csv"
+    if hb.exists() and bm.exists():
+        src = {}
+        for r in csv.DictReader(open(bm, encoding="utf-8")):
+            src[(r["unitig_id"], r["model_id"])] = r
+        cols = ["delta_prevalence", "odds_ratio", "pyseer_lrt_p",
+                "selection_frequency", "composite_score", "identity_pct", "coverage"]
+        drift, checked = [], 0
+        for r in csv.DictReader(open(hb, encoding="utf-8")):
+            ref = src.get((r["unitig_id"], r["model_id"]))
+            if not ref:
+                continue
+            for c in cols:
+                if c in r and c in ref:
+                    checked += 1
+                    if r[c] != ref[c]:
+                        drift.append(f"{c} {ref[c]!r}->{r[c]!r}")
+        rep.check(not drift, "headline floats byte-identical to biomarkers.csv",
+                  f"{checked} values checked" if not drift
+                  else f"{len(drift)} differ, e.g. {drift[0]} "
+                       f"(read_csv needs float_precision='round_trip')")
+
     if expect_md5:
         ref = {}
         for line in Path(expect_md5).read_text(encoding="utf-8").splitlines():
