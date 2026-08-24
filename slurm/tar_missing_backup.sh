@@ -93,8 +93,19 @@ do_tar () {
   for sub in "${SUBS[@]}"; do
     if [[ $FLAT -eq 1 ]]; then src="$ROOT"; else src="$ROOT/$sub"; fi
     out="$STAGE/${GROUP}__${sub}.${EXT}"
+    # Skip only what is genuinely current. "Already built" was the wrong test: after
+    # results/tables and results/figures were regenerated on this machine, a re-run
+    # skipped both and the backup would have silently kept the stale archives. Compare
+    # against the source instead -- one file newer than the archive means rebuild.
     if [[ -s "$out" ]] && grep -q "^$(basename "$out")	" "$MANIFEST"; then
-      log "skip  $(basename "$out") (already built)"; continue
+      if [[ -z "$(find "$src" -type f -newer "$out" -print -quit 2>/dev/null)" ]]; then
+        log "skip  $(basename "$out") (archive newer than every source file)"; continue
+      fi
+      log "stale $(basename "$out") — source changed since it was built; rebuilding"
+      # Drop the old row first: appending would leave two rows for one archive and
+      # `rclone check` would then compare against whichever the reader hit first.
+      grep -v "^$(basename "$out")	" "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+      rm -f "$STAGE/.verified_$GROUP"     # a rebuilt archive is not a verified archive
     fi
     n=$(find "$src" -type f | wc -l)
     sb=$(du -sb "$src" | cut -f1)
