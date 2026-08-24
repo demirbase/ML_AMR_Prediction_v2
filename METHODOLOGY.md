@@ -442,8 +442,11 @@ replicon types within one species is a mobile-element signature.
    (*E. coli* 58% Norway, *A. baumannii* 63% USA). M13 concordance never ran.
 2. **Labels are BV-BRC as published.** No MIC re-interpretation was attempted —
    raw MIC completeness is as low as 9% (*S. aureus*) and units are mixed.
-3. **PFER exceeds 1 in some models** (max ≈14): in those stable sets the expected
-   number of false positives is above one.
+3. **PFER exceeds 1 in 21 of the 45 models** (max 12.9): in those stable sets the
+   expected number of false positives is above one. Both numbers are read from
+   `kb_overview.csv` at draw time by figure 02 and by `limitations.csv`, so the
+   claim and the artefacts cannot drift apart. (This item previously read "max ≈14",
+   which no delivered artefact supported — figure 02 has always rendered 12.9.)
 4. **Co-carriage is linkage, not causation.** `sul`/`qacEdelta1` co-occurrence is a
    class-1 integron; a novel *K. pneumoniae* gentamicin unitig maps to an
    MCR-1-carrying plasmid without being *mcr-1*. All KB claims are associational.

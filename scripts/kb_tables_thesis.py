@@ -319,12 +319,13 @@ def t_limitations(ctx):
          "and units are mixed.",
          "not recomputable locally — raw MIC fields are not in the KB.",
          "from METHODOLOGY 5.3", "3.x methods"),
-        (3, "PFER exceeds 1 in some models",
+        (3, f"PFER exceeds 1 in {pfer_over} of the {len(k)} models",
          "In those stable sets the expected number of false positives is above one.",
          f"recomputed: pfer_bound max = {pfer_max} over {pfer_over} of {len(k)} models above 1. "
-         f"NOTE: METHODOLOGY 5.3 states 'max ~14'; the delivered kb_overview.csv maxes at "
-         f"{pfer_max}. Use the measured value.",
-         "recomputed (and corrects the doc)", "4.4 stability results"),
+         f"METHODOLOGY 5.3 read 'max ~14' until this table was built and is now corrected; "
+         f"figure 02 had rendered {pfer_max} correctly all along, so the prose was the only "
+         f"place the wrong number survived.",
+         "recomputed", "4.4 stability results"),
         (4, "Co-carriage is linkage, not causation",
          "sul/qacEdelta1 co-occurrence is a class-1 integron; a novel K. pneumoniae gentamicin "
          "unitig maps to an MCR-1-carrying plasmid without being mcr-1. All KB claims are "
