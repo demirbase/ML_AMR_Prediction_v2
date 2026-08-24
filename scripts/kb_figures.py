@@ -6,7 +6,7 @@ kb_tables.py exports (+ raw 12b null CSVs for the permutation histogram).
 
 Run kb_tables.py FIRST, then:
     python scripts/kb_figures.py --tables results/tables --results results \
-        --out figures [--only performance,cpss_pfer,cross_org,mechanism,null_hist]
+        --out figures [--only performance,cpss_pfer,cross_org,mechanism,null_hist,combos]
 
 Each figure is saved as PNG (200 dpi) + PDF. Colours come from PALETTE (registry slugs); any organism not listed there gets an
 auto-assigned colour, and display names come from the registry. Edit CLASS_ORDER /
@@ -44,6 +44,11 @@ _EXTRA = ["#666666", "#1b9e77", "#d95f02"]
 # by the token it writes into unitig_evidence_tier.evidence_layers. NOT the seven
 # evidence_type values in validation_evidence: `label_permutation` is model-level and
 # grades no biomarker, so it belongs to figure 05, not to this per-biomarker grid.
+# Same palette and order as kb_figures_biology, so a tier is one colour across the set.
+TIER_COLOURS = {"confirmed": "#238b45", "strong_novel": "#d62728",
+                "candidate": "#74c476", "weak": "#c6dbef", "none": "#eeeeee"}
+TIER_ORDER = ["confirmed", "strong_novel", "candidate", "weak", "none"]
+
 TIER_LAYER_ORDER = [
     ("blast",      "BLAST\n(CARD)"),
     ("prevalence", "Prevalence\nR vs S"),
@@ -501,6 +506,133 @@ def fig_evidence_layers(tables, out, db):
     _save(fig, out, "06_evidence_layers")
 
 
+def fig_evidence_combinations(tables, out, db):
+    """Which evidence layers fire TOGETHER, and what grade each combination earns.
+
+    Figure 06 counts each layer separately, per model. That marginal view cannot show
+    co-occurrence: it says prevalence fired 2,055 times and pyseer 1,172 times without
+    saying that 558 biomarkers rest on those two and nothing else. This is the UpSet of
+    the same ladder, over all 3,571 graded (unitig, model) pairs.
+
+    Worth drawing because the mapping turns out to be deterministic: every one of the 14
+    observed combinations earns exactly one tier, so colouring the bars by tier makes
+    `classify_evidence_tier()` readable without opening the code. Two things become
+    visible that prose keeps having to assert:
+
+      * `blast` alone earns `candidate` while a lone statistical layer earns `weak` --
+        a CARD hit outweighs one statistical signal.
+      * `strong_novel` is not a separate test. It is exactly the cell where three
+        statistical layers fire and BLAST does not: 23 biomarkers with real evidence and
+        no known CARD gene behind them.
+
+    The `snp` and `mda` rows are empty across every column, and are drawn greyed with
+    the reason rather than omitted -- a missing row reads as "not measured" when the
+    honest statement is "measured, never fires". See METHODOLOGY.md 5.2.
+    """
+    import sqlite3
+    from matplotlib.patches import Rectangle
+    conn = sqlite3.connect(str(db))
+    raw = conn.execute("SELECT COALESCE(evidence_layers,''), evidence_tier, COUNT(*) "
+                       "FROM unitig_evidence_tier GROUP BY 1,2").fetchall()
+    conn.close()
+
+    combos = {}
+    for layers, tier, n in raw:
+        toks = tuple(t for t in (layers or "").split(",") if t.strip())
+        combos.setdefault(toks, {})[tier] = combos.get(toks, {}).get(tier, 0) + n
+    # If a combination ever earned two grades the colour would be a lie, so say so.
+    ambiguous = {k: v for k, v in combos.items() if len(v) > 1}
+    items = sorted(((k, max(v, key=v.get), sum(v.values())) for k, v in combos.items()),
+                   key=lambda x: -x[2])
+    total = sum(n for _, _, n in items)
+
+    keys = [k for k, _ in TIER_LAYER_ORDER]
+    marg = {k: sum(n for toks, _, n in items if k in toks) for k in keys}
+    row_order = ([kv for kv in TIER_LAYER_ORDER if marg[kv[0]]]
+                 + [kv for kv in TIER_LAYER_ORDER if not marg[kv[0]]])
+    n_live = sum(1 for kv in TIER_LAYER_ORDER if marg[kv[0]])
+
+    fig, (ax, axm) = plt.subplots(
+        2, 1, figsize=(12.4, 7.4), sharex=True,
+        gridspec_kw={"height_ratios": [3, 2], "hspace": 0.06})
+
+    xs = range(len(items))
+    for x, (toks, tier, n) in zip(xs, items):
+        ax.bar(x, n, width=0.62, color=TIER_COLOURS.get(tier, "#888888"),
+               edgecolor="k", lw=0.4, zorder=3)
+        ax.annotate(f"{n:,}", (x, n), textcoords="offset points", xytext=(0, 3),
+                    ha="center", fontsize=8, zorder=4)
+    ax.set_yscale("log")
+    ax.set_ylim(0.7, max(n for _, _, n in items) * 2.4)
+    ax.set_ylabel("biomarkers (log)")
+    ax.grid(axis="y", ls=":", lw=0.5, alpha=0.5, zorder=0)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+
+    handles = [plt.Rectangle((0, 0), 1, 1, fc=TIER_COLOURS.get(t, "#888"), ec="k", lw=0.4)
+               for t in TIER_ORDER]
+    ax.legend(handles, TIER_ORDER, ncol=5, fontsize=8, frameon=False,
+              loc="upper right", title="evidence tier earned", title_fontsize=8)
+
+    # The novel cell is the whole point of the KB; point at it.
+    for x, (toks, tier, n) in zip(xs, items):
+        if tier == "strong_novel":
+            ax.add_patch(Rectangle((x - 0.46, 0.7), 0.92, n / 0.7, fill=False,
+                                   ec=TIER_COLOURS["strong_novel"], lw=1.4, ls="--",
+                                   zorder=5, clip_on=False))
+            ax.annotate("three statistical layers,\nno CARD hit = novel",
+                        (x, n), textcoords="offset points", xytext=(0, 52),
+                        ha="center", fontsize=8, color=TIER_COLOURS["strong_novel"],
+                        arrowprops=dict(arrowstyle="->", lw=1.0, shrinkB=16,
+                                        color=TIER_COLOURS["strong_novel"]))
+
+    dead = []
+    for y, (k, lab) in enumerate(row_order):
+        alive = marg[k] > 0
+        if not alive:
+            dead.append(lab.replace("\n", " "))
+        axm.axhline(y, color="#eeeeee", lw=8, zorder=0)
+        for x, (toks, _, _) in zip(xs, items):
+            on = k in toks
+            axm.scatter(x, y, s=54, zorder=3,
+                        color="#333333" if on else ("#dddddd" if alive else "#f2f2f2"))
+    for x, (toks, _, _) in zip(xs, items):
+        ys = [i for i, (kk, _) in enumerate(row_order) if kk in toks]
+        if len(ys) > 1:
+            axm.plot([x, x], [min(ys), max(ys)], color="#333333", lw=1.6, zorder=2)
+
+    axm.set_yticks(range(len(row_order)))
+    axm.set_yticklabels(
+        [f"{lab.replace(chr(10), ' ')}  ({marg[k]:,})" if marg[k]
+         else f"{lab.replace(chr(10), ' ')}  (0 — never fires)"
+         for k, lab in row_order], fontsize=8.5)
+    for tick, (k, _) in zip(axm.get_yticklabels(), row_order):
+        if not marg[k]:
+            tick.set_color("#b00020")
+    if n_live < len(row_order):        # rule off the layers that never fire
+        axm.axhline(n_live - 0.5, color="#b00020", lw=0.8, ls=":", zorder=4)
+    axm.set_ylim(len(row_order) - 0.5, -0.5)
+    axm.set_xlim(-0.7, len(items) - 0.3)
+    axm.set_xticks(list(xs))
+    axm.set_xticklabels([f"{len(t)}" if t else "0" for t, _, _ in items], fontsize=8)
+    axm.set_xlabel("layers firing in the combination  ·  one column per observed combination")
+    for side in ("top", "right", "left"):
+        axm.spines[side].set_visible(False)
+    axm.tick_params(axis="y", length=0)
+
+    sub = (f"{total:,} graded (unitig, model) pairs · {len(items)} observed combinations · "
+           f"each earns exactly one tier, so the colour IS the grading rule")
+    if ambiguous:
+        sub = (f"{total:,} pairs · WARNING: {len(ambiguous)} combination(s) span more than "
+               f"one tier; bar colour shows the majority grade")
+    if dead:
+        sub += "\nmeasured but never fires: " + ", ".join(dead)
+    fig.suptitle("How the evidence layers combine, and what each combination is worth\n"
+                 + sub, fontsize=11.5)
+    fig.subplots_adjust(top=0.84)
+    _save(fig, out, "39_evidence_combinations")
+
+
 def fig_significance(tables, out, db):
     """05 — model-level significance: the observed AUC of step 12b's label-permutation
     test vs its shuffled-label null, per model.
@@ -593,6 +725,7 @@ FIGS = {"overview": lambda t, r, o, db: fig_overview(t, o, db),
         "cross_org": lambda t, r, o, db: fig_cross_org(t, o),
         "mechanism": lambda t, r, o, db: fig_mechanism(t, o),
         "evidence": lambda t, r, o, db: fig_evidence_layers(t, o, db),
+        "combos": lambda t, r, o, db: fig_evidence_combinations(t, o, db),
         "significance": lambda t, r, o, db: fig_significance(t, o, db),
         "null_hist": lambda t, r, o, db: fig_null_hist(t, r, o)}
 

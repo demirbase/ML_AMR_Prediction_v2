@@ -10,7 +10,7 @@ kb_figures.py covers the model/KB end; this covers the beginning of the pipeline
 Usage:
     python scripts/kb_figures_data.py --results results --data data/processed \
         --tables results/tables --db results/kb/amrk.db --out results/figures \
-        [--only qc,contiguity,passrate,composition,balance,lineage,clonality,resistance,features,lengths]
+        [--only qc,contiguity,passrate,composition,balance,lineage,clonality,structure,resistance,features,lengths]
 
 Figures (results/figures/):
     10_genome_qc_scatter          CheckM2 completeness x contamination, per organism
@@ -369,6 +369,93 @@ def fig_clonality_vs_inflation(data, tables, orgs, out):
 
 
 # ----------------------------------------------------------------- C1 / C2
+MEASURE_LABELS = [
+    ("clonality_pct",        "largest lineage (% of genomes)"),
+    ("simpson_diversity",    "Simpson diversity of lineages"),
+    ("shannon_diversity",    "Shannon diversity of lineages"),
+    ("n_lineages",           "number of PopPUNK lineages"),
+    ("n_singleton_lineages", "singleton lineages"),
+]
+
+
+def fig_structure_vs_inflation(tables, out):
+    """All five structure measures against CV inflation -- deliberately all five.
+
+    Figure 17 plots one measure, largest-lineage share, and reports r and rho beside it.
+    That is the measure the production run happened to pick, and it is significant under
+    Pearson (r +0.914, p 0.011) but NOT under Spearman (rho +0.771, p 0.072). Simpson
+    diversity is significant under both (r -0.944 p 0.005, rho -0.829 p 0.042).
+
+    Publishing Simpson alone would be selection on the outcome: five measures, six
+    organisms, no pre-registration. So this figure shows the whole set, marks which
+    survive a rank test, and says the count out loud in the title. A reader can then see
+    that the direction is consistent across every measure -- more clonal, more inflation
+    -- while no single p-value here carries weight on its own.
+
+    Reads lineage_summary.csv / lineage_summary_stats.json so the figure and the table
+    can never disagree; kb_tables_thesis.py computes both.
+    """
+    tf, sf = Path(tables) / "lineage_summary.csv", Path(tables) / "lineage_summary_stats.json"
+    if not tf.exists():
+        print("  (structure: lineage_summary.csv missing — run kb_tables_thesis.py — skipped)")
+        return
+    d = pd.read_csv(tf)
+    stats = json.loads(sf.read_text()) if sf.exists() else {"correlations": {}}
+    cor = stats.get("correlations", {})
+
+    fig, axes = _grid(6, ncols=3, w=4.5, h=3.6)
+    n_sig = 0
+    for ax, (col, lab) in zip(axes, MEASURE_LABELS):
+        if col not in d.columns:
+            ax.axis("off"); continue
+        x, y = d[col].to_numpy(float), d["mean_inflation"].to_numpy(float)
+        for _, t in d.iterrows():
+            ax.scatter(t[col], t["mean_inflation"], s=95, zorder=3,
+                       color=_colour(t["organism"]), edgecolor="k", lw=0.5)
+            ax.annotate(_abbr(t["organism"]), (t[col], t["mean_inflation"]),
+                        textcoords="offset points", xytext=(6, 4), fontsize=8)
+        if len(x) > 2:
+            ax.plot(np.sort(x), np.polyval(np.polyfit(x, y, 1), np.sort(x)),
+                    ls="--", c="grey", lw=1, zorder=1)
+        c = cor.get(col)
+        if c:
+            sig = c["spearman_p"] < 0.05
+            n_sig += bool(sig)
+            ax.set_title(
+                f"r = {c['pearson_r']:+.3f} (p {c['pearson_p']:.3f})\n"
+                f"rho = {c['spearman_rho']:+.3f} (p {c['spearman_p']:.3f})"
+                + ("  \u2713 rank test" if sig else ""),
+                fontsize=9, color="#238b45" if sig else "#444444")
+        ax.set_xlabel(lab, fontsize=9)
+        ax.set_ylabel("mean AUC inflation", fontsize=9)
+        ax.margins(x=0.18, y=0.22)
+        ax.tick_params(labelsize=8)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+
+    ax = axes[5]
+    ax.axis("off")
+    ax.text(0.0, 0.98,
+            "Why all five are shown\n\n"
+            f"n = {len(d)} organisms. Five measures were tested against the same target "
+            "without pre-registration, so the best p-value among them is not evidence.\n\n"
+            "Only Simpson diversity survives a rank test; largest-lineage share, the "
+            "measure figure 17 plots, does not (p 0.072).\n\n"
+            "What is robust is the direction, which every measure agrees on: the less "
+            "diverse the population, the more a lineage-blind split flatters the model.\n\n"
+            "Report this as a trend, not an estimate.",
+            transform=ax.transAxes, fontsize=8.6, va="top", ha="left", wrap=True,
+            bbox=dict(boxstyle="round,pad=0.6", fc="#f7f7f7", ec="#cccccc", lw=0.8))
+
+    fig.suptitle(
+        "Population structure vs cross-validation inflation — five measures, all reported\n"
+        f"{n_sig} of {len(MEASURE_LABELS)} reach p < 0.05 under Spearman; with n = {len(d)} "
+        "and five measures tried, treat the direction as the finding, not the coefficients",
+        fontsize=11.5)
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    _save(fig, out, "40_structure_vs_inflation")
+
+
 def fig_feature_counts(db, ms, out):
     """Unitigs retained per model (post support-filter) — the feature space size."""
     if not Path(db).exists():
@@ -458,6 +545,7 @@ def main():
         ("lineage",     lambda: fig_lineage_sizes(args.data, orgs, out)),
         ("resistance",  lambda: fig_lineage_resistance(args.data, ms, orgs, out)),
         ("clonality",   lambda: fig_clonality_vs_inflation(args.data, args.tables, orgs, out)),
+        ("structure",   lambda: fig_structure_vs_inflation(args.tables, out)),
         ("features",    lambda: fig_feature_counts(args.db, ms, out)),
         ("lengths",     lambda: fig_unitig_lengths(args.data, ms, out)),
     ]

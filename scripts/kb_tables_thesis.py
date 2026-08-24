@@ -109,8 +109,12 @@ def _lineage_inflation_stats(d):
                 "n_lineages", "n_singleton_lineages"]:
         r, pr = stats.pearsonr(d[col], d.mean_inflation)
         rho, ps = stats.spearmanr(d[col], d.mean_inflation)
-        res[col] = {"pearson_r": round(float(r), 4), "pearson_p": round(float(pr), 4),
-                    "spearman_rho": round(float(rho), 4), "spearman_p": round(float(ps), 4)}
+        # p-values keep six decimals: rounded to four, Simpson's 0.004543 becomes
+        # 0.0045, and a downstream "%.3f" then renders it 0.004 (round-half-even) while
+        # the same p computed from raw renders 0.005. The figure and the text would
+        # disagree on a number the thesis quotes.
+        res[col] = {"pearson_r": round(float(r), 4), "pearson_p": round(float(pr), 6),
+                    "spearman_rho": round(float(rho), 4), "spearman_p": round(float(ps), 6)}
     return {
         "n_organisms": int(len(d)),
         "target": "mean_inflation (random-CV AUC minus lineage-CV AUC, averaged per organism)",

@@ -72,7 +72,8 @@ EXPECTED_KB = {
 EXPECTED_TIERS = {"confirmed": 349, "strong_novel": 23, "candidate": 942,
                   "weak": 1920, "none": 337}
 
-N_FIGURES = 39                  # 37 data figures + the two schematics (37 pipeline, 38 schema)
+N_FIGURES = 41                  # 37 data + 2 schematics (37 pipeline, 38 KB schema)
+                                # + 39 evidence combinations, 40 structure vs inflation
 MIN_PNG_BYTES = 20_000          # a blank matplotlib canvas lands far below this
 
 
