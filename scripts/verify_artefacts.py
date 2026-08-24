@@ -46,6 +46,16 @@ EXPECTED_TABLES = {
     "novel_ncbi_context.csv": 23,
     "novel_ncbi_hits.csv": None,
     "fair_mapping.csv": 15,          # the 15 FAIR principles, one row each
+    # kb_tables_thesis.py. The counts below are structural, not sample-dependent:
+    # 6 organisms, 7 evidence layers, 9+2+4 provenance items, 45 models, 9 limitations.
+    # headline_biomarkers is left unpinned for the same reason as mechanisms.csv --
+    # it moves with the CARD snapshot.
+    "lineage_summary.csv": 6,
+    "evidence_accounting.csv": 7,
+    "provenance_tools.csv": 15,
+    "hyperparameters.csv": 45,
+    "limitations.csv": 9,
+    "headline_biomarkers.csv": None,
 }
 
 # KB table -> expected row count. None = "must exist, count not pinned";

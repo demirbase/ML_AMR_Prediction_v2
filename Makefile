@@ -18,6 +18,11 @@ KB      ?= results/kb/amrk.db
 RESULTS ?= results
 TABLES  ?= results/tables
 FIGURES ?= results/figures
+# kb_tables_thesis reads these two as well: the PopPUNK cluster CSVs for the lineage
+# summary, and run_metadata.json for the per-model hyperparameters. Both tables are
+# skipped (never written empty) when the inputs are absent.
+DATA    ?= data/processed
+RUNS    ?= runs
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -66,6 +71,7 @@ tables:  ## Rebuild the tidy thesis tables from the KB (kb_tables + H3 + CV comp
 	$(PYTHON) scripts/kb_cv_comparison.py --tables $(TABLES) --results $(RESULTS) --out $(FIGURES)
 	$(PYTHON) scripts/18_novel_ncbi_context.py --kb $(KB) --results-root $(RESULTS) --out $(TABLES)
 	$(PYTHON) scripts/kb_fair_mapping.py --db $(KB) --out $(TABLES)
+	$(PYTHON) scripts/kb_tables_thesis.py --db $(KB) --tables $(TABLES) --data $(DATA) --runs $(RUNS)
 
 figures: tables  ## Rebuild every thesis figure (run `make tables` implicitly)
 	# Each script takes a DIFFERENT set of flags -- kb_figures_model has no --db, and
