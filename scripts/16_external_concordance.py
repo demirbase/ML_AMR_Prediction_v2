@@ -164,6 +164,15 @@ def parse_amrfinder(tsv_path, antibiotics=DEFAULT_ANTIBIOTICS, keywords=AFP_KEYW
         for row in reader:
             if (row.get("Type") or row.get("Element type") or "").strip().upper() != "AMR":
                 continue
+            # `--plus` adds elements NCBI flags as of interest -- stress response,
+            # efflux, virulence -- which are not by themselves resistance
+            # determinants. Counting them as calls inflates the tool's false
+            # positives: mepA, the chromosomal MATE pump carried by 2501 of 2505
+            # S. aureus genomes here, is a `plus` element, and taking it at face
+            # value called tetracycline in 100% of them against a 23.2%
+            # phenotype rate. Only the curated `core` set is scored.
+            if (row.get("Scope") or "core").strip().lower() != "core":
+                continue
             toks = _tokens(row.get("Class")) | _tokens(row.get("Subclass"))
             for ab in calls:
                 if toks & keywords.get(ab, set()):
