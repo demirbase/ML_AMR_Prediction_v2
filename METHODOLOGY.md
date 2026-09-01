@@ -380,23 +380,33 @@ not be conflated:
   `pyseer_lmm`, `label_permutation`), as listed in `docs/KB_KAVRAMLAR.md`.
 * **6** — the number the tier function *counts* (`label_permutation` is
   model-level, not per-unitig, so it grades no biomarker).
-* **4** — the number that *actually fired* in the delivered KB. The maximum
-  observed `n_evidence_layers` is **4**, reached by 7 biomarkers, all `confirmed`.
+* **5** — the number that *actually fires* in the delivered KB (`blast`,
+  `prevalence`, `snp`, `cpss`, `pyseer`). The maximum observed
+  `n_evidence_layers` is **4**, reached by 9 biomarkers.
 
-Delivered tier distribution over 3571 (unitig, model) pairs: `weak` 1920 ·
-`candidate` 942 · `confirmed` 349 · `none` 337 · **`strong_novel` 23**.
+Delivered tier distribution over 3571 (unitig, model) pairs: `weak` 1915 ·
+`candidate` 947 · `confirmed` 349 · `none` 337 · **`strong_novel` 23**.
 
-Two designed layers contributed **nothing**, for entirely different reasons:
+One designed layer contributes **nothing**:
 
-**`snp` — a wiring gap (fixable).** Step 11 BLASTs the step-07 query FASTA
-(§4.1), whereas the KB's scored universe comes from step 10 plus step 13. In the
-delivered run these two sets are **disjoint**: all 953 `variant_snp_check` rows
-(335 distinct unitigs) have **zero** overlap with the 3509 scored unitigs, and
-none of them has a `unitig_evidence_tier` row at all. The `snp` layer therefore
-fires on 0 of 3571 pairs. This silently discards 21 confirmed `resistant_allele`
-calls (plus 60 `other_variant`) — precisely the evidence that would have
-distinguished target-SNP mechanisms (gyrA/parC, pbp5, porin) from acquired genes.
-Not a statistical result; a set-membership defect.
+**`snp` — was a load-time defect, repaired 2026-09-01.** Step 11 reports its hits
+by the FASTA header it queried (`Rank_n|Score_x|Feature_f...`), not by sequence.
+`populate_database.populate_snp` fell back to that header column when no `kmer`
+column was present and passed it to `unitig_id()`, which registered the
+identifier string itself as a unitig. The consequence was **not** that the two
+candidate sets were disjoint — they overlap — but that every SNP row was attached
+to a freshly minted pseudo-unitig, so the layer joined to nothing while appearing
+to have run, and 335 non-DNA rows accumulated in `unitigs`.
+
+The loader now resolves the header back to its k-mer through the same FASTA step
+11 queried, and refuses any value that is not DNA. After the repair all 21
+`resistant_allele` calls reach the graded universe, the layer fires on **18** of
+3571 pairs, and 5 biomarkers move `weak` → `candidate`. `unitigs` drops from 3844
+to **3509**. The 18 are the canonical target-site substitutions the homolog-model
+BLAST cannot distinguish: *gyrA* S83L (*E. coli*), *gyrA* T83I (*P. aeruginosa*),
+*gyrA* S84L and *parC* S80F (*S. aureus*), *parC* S84L (*A. baumannii*).
+Step 11 itself was **not** re-run; its outputs were correct all along.
+⚠️ The KB therefore differs from the archived v0.7.1 and needs a new version.
 
 **`mda` — a genuine null result (not fixable by rewiring).** Here the sets match
 perfectly (2409/2409 candidates overlap the scored set), the

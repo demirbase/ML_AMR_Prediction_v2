@@ -122,3 +122,47 @@ def test_populate_evidence_tier_idempotent(tmp_path):
     populate_evidence_tier(c, 1, "R1", None)   # re-populate must not duplicate (PK upsert)
     assert c.execute("SELECT COUNT(*) FROM unitig_evidence_tier WHERE unitig_id=1").fetchone()[0] == 1
     c.close()
+
+
+# ---- step 11 SNP rows must join to real unitigs ---------------------------
+# Regression: populate_snp used to fall back to step 11's `kmer_qseqid` column
+# when no `kmer` column was present. That column holds the queried FASTA header
+# (`Rank_n|Score_x|Feature_f...`), not a sequence, so every SNP row registered
+# its own identifier string as a unitig. The layer then joined to nothing and
+# graded 0 biomarkers while looking like it had run.
+def test_attach_snp_sequences_maps_headers_to_kmers(tmp_path):
+    from populate_database import _attach_snp_sequences
+
+    d = tmp_path / "05_explainability"
+    d.mkdir(parents=True)
+    (d / "02_top_50_features_cipro.fasta").write_text(
+        ">Rank_1|Score_9.0|Feature_f1\nACGTACGTAC\n"
+        ">Rank_2|Score_8.0|Feature_f2\nTTTTGGGGCC\n", encoding="utf-8")
+    df = pd.DataFrame({"kmer_qseqid": ["Rank_2|Score_8.0|Feature_f2",
+                                       "Rank_9|Score_1.0|Feature_f9"],
+                       "allele_class": ["resistant_allele", "wildtype"]})
+
+    out = _attach_snp_sequences(df, tmp_path, "cipro")
+    assert out.loc[0, "kmer"] == "TTTTGGGGCC"   # header resolved to its sequence
+    assert pd.isna(out.loc[1, "kmer"])          # unmatched header stays unmapped
+
+
+def test_populate_snp_never_registers_a_non_dna_unitig():
+    from populate_database import populate_snp
+
+    conn = sqlite3.connect(":memory:")
+    create_schema(conn)
+    conn.executescript("""
+        INSERT INTO pipeline_runs(run_id, organism, antibiotic)
+            VALUES ('R1','ecoli','ciprofloxacin');
+        INSERT INTO antibiotics(antibiotic) VALUES ('ciprofloxacin');
+        INSERT INTO models(model_id, run_id, antibiotic) VALUES (1,'R1','ciprofloxacin');
+    """)
+    snp = pd.DataFrame({"kmer": ["Rank_1|Score_9.0|Feature_f1", "ACGTACGTAC"],
+                        "variant_gene": ["Ecol_gyrA_FLO"] * 2,
+                        "snp": ["S83L"] * 2,
+                        "allele_class": ["resistant_allele"] * 2})
+
+    populate_snp(conn, 1, "R1", 31, snp)
+    seqs = [r[0] for r in conn.execute("SELECT sequence FROM unitigs")]
+    assert seqs == ["ACGTACGTAC"]   # the identifier string is skipped, not stored

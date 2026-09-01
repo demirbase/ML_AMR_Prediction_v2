@@ -28,6 +28,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -53,6 +54,40 @@ def _find(root, filename):
     """Return the most recent file named `filename` anywhere under `root`."""
     hits = sorted(Path(root).rglob(filename), key=lambda p: p.stat().st_mtime)
     return hits[-1] if hits else None
+
+
+_DNA = re.compile(r"^[ACGTN]+$", re.I)
+
+
+def _attach_snp_sequences(snp_df, results_root, antibiotic):
+    """Add a ``kmer`` column to step 11's output by resolving its ``kmer_qseqid``
+    FASTA headers against the FASTA the step queried.
+
+    Step 11 BLASTs ``02_top_{n}_features_{ab}.fasta`` and reports the query by
+    header, so its CSV carries no sequence. Without this mapping the loader has
+    nothing to join on and the SNP evidence layer reaches no unitig.
+    """
+    fastas = sorted(Path(results_root).rglob(f"02_top_*_features_{antibiotic}.fasta"),
+                    key=lambda p: p.stat().st_mtime)
+    if not fastas:
+        print(f"  ⚠ step 11 output present but no candidate FASTA under {results_root};"
+              " SNP rows cannot be mapped to sequences")
+        return snp_df
+    id2seq, header = {}, None
+    with open(fastas[-1], encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith(">"):
+                header = line[1:]
+            elif line and header:
+                id2seq[header] = line
+                header = None
+    snp_df = snp_df.copy()
+    snp_df["kmer"] = snp_df["kmer_qseqid"].astype(str).str.strip().map(id2seq)
+    missed = int(snp_df["kmer"].isna().sum())
+    if missed:
+        print(f"  ⚠ {missed}/{len(snp_df)} SNP rows had no match in {fastas[-1].name}")
+    return snp_df
 
 
 def _read_json(path):
@@ -265,8 +300,11 @@ def populate_snp(conn, model_id, run_id, k, snp_df):
         return 0
     n = 0
     for _, r in snp_df.iterrows():
-        seq = str(r.get("kmer", r.get("kmer_qseqid", ""))).strip()
-        if not seq:
+        seq = str(r.get("kmer", "")).strip()
+        # Guard: step 11 reports a FASTA header, not a sequence. Registering that
+        # header as a unitig silently fills `unitigs` with identifier strings and
+        # detaches the whole SNP layer, so anything that is not DNA is skipped.
+        if not seq or not _DNA.match(seq):
             continue
         kid = unitig_id(conn, seq, k)
         conn.execute(
@@ -631,6 +669,12 @@ def main():
     if cand is None:
         cand = _read_csv(_find(results_root, f"07_kb_candidates_{antibiotic}.csv"))
     snp = _read_csv(_find(results_root, f"11_variant_snp_check_{antibiotic}.csv"))
+    # Step 11 identifies its hits by the FASTA header it queried
+    # (``Rank_n|Score_x|Feature_f...``), not by sequence. Resolve those headers
+    # back to the k-mer via the same FASTA, so the SNP rows join to the graded
+    # unitigs instead of registering their own identifier strings as sequences.
+    if snp is not None and not snp.empty and "kmer" not in snp.columns:
+        snp = _attach_snp_sequences(snp, results_root, antibiotic)
     # Permutation significance (step 12 MDA + step 12b label-permutation null).
     perm_df = _read_csv(_find(results_root, f"12_permutation_test_{antibiotic}.csv"))
     labelperm = _read_json(_find(results_root, f"12b_label_permutation_summary_{antibiotic}.json"))
