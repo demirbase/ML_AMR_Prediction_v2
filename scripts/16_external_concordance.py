@@ -39,6 +39,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -152,11 +153,44 @@ def parse_amrfinder(tsv_path, antibiotics=DEFAULT_ANTIBIOTICS, keywords=AFP_KEYW
     return calls
 
 
+# ResFinder writes antibiotic names as free text with '+' and spaces
+# ("amoxicillin+clavulanic acid"), while this project keys them with underscores
+# ("amoxicillin_clavulanic_acid"). A literal lower-case comparison therefore
+# matched neither, and every combination agent silently produced no ResFinder
+# call at all. Matching is done on the token SET so separator style stops
+# mattering, and never on a substring: "ampicillin_sulbactam" must NOT match
+# ResFinder's plain "ampicillin", because the inhibitor changes the phenotype.
+def _ab_tokens(name):
+    return frozenset(t for t in re.split(r"[^a-z0-9]+", str(name).strip().lower()) if t)
+
+
+# Combinations ResFinder reports one component at a time. It publishes no row
+# for the combination itself, so the call has to be assembled from the parts.
+# Rule: resistant if EITHER component is called resistant — a genotypic
+# convention, since a single acquired sul or dfr determinant is enough to
+# abolish the synergy the combination depends on. This is a decision taken here,
+# not something ResFinder reports, and it is stated in the thesis as such.
+RF_COMPONENTS = {
+    "trimethoprim_sulfamethoxazole": ("trimethoprim", "sulfamethoxazole"),
+}
+
+
 def parse_resfinder(pheno_table_path, antibiotics=DEFAULT_ANTIBIOTICS):
     """One ResFinder pheno_table -> {antibiotic: 0/1}. Reads the '# Antimicrobial
-    <TAB> Class <TAB> WGS-predicted phenotype …' rows directly."""
-    wanted = {ab.lower(): ab for ab in antibiotics}
-    calls = {}
+    <TAB> Class <TAB> WGS-predicted phenotype …' rows directly.
+
+    Antibiotics ResFinder does not report at all (e.g. ampicillin_sulbactam,
+    oxacillin) are simply absent from the returned dict, so downstream code
+    scores them as 'no ResFinder call' rather than as a susceptible call.
+    """
+    wanted = {_ab_tokens(ab): ab for ab in antibiotics}
+    comp_of = {}
+    for ab, parts in RF_COMPONENTS.items():
+        if ab in antibiotics:
+            for part in parts:
+                comp_of.setdefault(_ab_tokens(part), []).append(ab)
+
+    calls, component_hits = {}, {}
     with open(pheno_table_path, encoding="utf-8") as fh:
         for line in fh:
             if line.startswith("#") or not line.strip():
@@ -164,9 +198,17 @@ def parse_resfinder(pheno_table_path, antibiotics=DEFAULT_ANTIBIOTICS):
             parts = line.rstrip("\n").split("\t")
             if len(parts) < 3:
                 continue
-            name = parts[0].strip().lower()
-            if name in wanted:
-                calls[wanted[name]] = 1 if parts[2].strip().lower().startswith("resistant") else 0
+            toks = _ab_tokens(parts[0])
+            is_r = 1 if parts[2].strip().lower().startswith("resistant") else 0
+            if toks in wanted:
+                calls[wanted[toks]] = is_r
+            for ab in comp_of.get(toks, ()):
+                component_hits.setdefault(ab, []).append(is_r)
+
+    # Assemble component-built combinations, but never overwrite a direct row.
+    for ab, hits in component_hits.items():
+        if ab not in calls:
+            calls[ab] = 1 if any(hits) else 0
     return calls
 
 

@@ -247,6 +247,26 @@ amrfinder_keywords:
   erythromycin:                  [ERYTHROMYCIN, MACROLIDE]
   clindamycin:                   [CLINDAMYCIN, LINCOSAMIDE]
 
+  # Added 2026-09-01 for the 45-model panel (the block above was written for the
+  # 17-model one). Tokens are deliberately NARROW, for the reason the caveat
+  # above gives: a broad class token makes an unrelated determinant imply
+  # resistance. Two cases where that matters here:
+  #   tigecycline  — NOT given TETRACYCLINE. tet(A)/tet(M) do not confer
+  #                  tigecycline resistance; the glycylcycline was designed to
+  #                  evade them, so the broad token would manufacture false
+  #                  genotypic calls in exactly the model that needs care.
+  #   aztreonam    — NOT given BETA-LACTAM. A narrow TEM-1 does not confer
+  #                  aztreonam resistance; only the monobactam token applies.
+  # ⚠️ STILL TO VERIFY against real AMRFinderPlus output (see the note above):
+  # these are Class/Subclass approximations and the M13 run now produces the
+  # actual strings to check them against.
+  aztreonam:                     [AZTREONAM, MONOBACTAM]
+  chloramphenicol:               [CHLORAMPHENICOL, PHENICOL]
+  colistin:                      [COLISTIN, POLYMYXIN]
+  vancomycin:                    [VANCOMYCIN, GLYCOPEPTIDE]
+  teicoplanin:                   [TEICOPLANIN, GLYCOPEPTIDE]
+  tigecycline:                   [TIGECYCLINE]
+
 # ============================================================================
 # DOMINANT RESISTANCE MECHANISM per class — acquired gene vs target-gene SNP.
 # The thesis "acquired vs target-SNP" showcase axis; consumed by
