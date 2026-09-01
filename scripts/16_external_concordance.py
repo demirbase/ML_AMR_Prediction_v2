@@ -150,6 +150,11 @@ AFP_NOT_ASSESSABLE = {
     # publishes no SULBACTAM subclass, so it cannot say whether sulbactam
     # restores activity against the enzymes it did find.
     "ampicillin_sulbactam",
+    # No MONOBACTAM or AZTREONAM subclass appears anywhere in the delivered
+    # output, so aztreonam draws no call at all: 0% called against an 88.7%
+    # phenotype rate in K. pneumoniae. Scoring that as an all-negative predictor
+    # would report the tool as failing a question it was never able to answer.
+    "aztreonam",
 }
 
 
