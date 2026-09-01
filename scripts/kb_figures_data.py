@@ -287,6 +287,24 @@ def fig_lineage_resistance(data, ms, orgs, out):
     holding that lineage out is precisely what lineage-aware CV does."""
     # Same guard as fig_lineage_sizes: an all-blank grid is worse than no output,
     # because _save overwrites whatever was there.
+    # The per-panel branch below blanks a panel when the label/genome CSVs are
+    # absent, and _save then overwrites a good figure with an empty grid — the
+    # exact failure this guard exists to prevent, so it has to test the label
+    # files too, not just the cluster assignments.
+    def _panel_has_data(org):
+        if _clusters(data, org) is None:
+            return False
+        sub = ms[ms.organism == org]
+        if sub.empty:
+            return False
+        ab = sub.sort_values(["n_genomes", "antibiotic"],
+                             ascending=[False, True]).iloc[0]["antibiotic"]
+        gdir = Path(data) / org / ab / "matrix_unitig"
+        return (gdir / f"genomes_{ab}.csv").exists() and (gdir / f"y_{ab}.csv").exists()
+
+    if not any(_panel_has_data(org) for org in orgs):
+        print("  (lineage resistance: no genomes_*/y_* CSVs — skipped, existing figure kept)")
+        return
     if all(_clusters(data, org) is None for org in orgs):
         print("  (lineage resistance: no PopPUNK cluster files under "
               f"{data} — skipped, existing figure left untouched)")
@@ -483,21 +501,32 @@ def fig_feature_counts(db, ms, out):
 
 
 def fig_unitig_lengths(data, ms, out, sample=40000, stride=25):
-    """Unitig length distribution — why 'blastn-short' is the right BLAST task."""
+    """Unitig length distribution — why 'blastn-short' is the right BLAST task.
+
+    Prefers the full features.txt. Where only ``features_sample.txt`` is present
+    — the systematic 1-in-25 extract taken on the HPC because the full feature
+    files total ~3.8 GB — that file is read with stride 1, since it has already
+    been strided. The sampling is stated on the figure so the two cases are not
+    confused.
+    """
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    drawn, all_lens = 0, []
+    drawn, all_lens, from_sample = 0, [], False
     for org, g in ms.groupby("organism"):
         lens = []
         for r in g.itertuples():
-            f = Path(data) / r.organism / r.antibiotic / "matrix_unitig" / "features.txt"
+            mdir = Path(data) / r.organism / r.antibiotic / "matrix_unitig"
+            f, step = mdir / "features.txt", stride
             if not f.exists():
-                continue
+                f, step = mdir / "features_sample.txt", 1   # already 1-in-25
+                if not f.exists():
+                    continue
+                from_sample = True
             # Stride through the file instead of reading its head: features.txt is
             # written in matrix-column order, so the first N lines are one contiguous
             # slice of the feature space, not a sample of it.
             with open(f, encoding="utf-8", errors="replace") as fh:
                 for i, line in enumerate(fh):
-                    if i % stride:
+                    if i % step:
                         continue
                     lens.append(len(line.split("\t")[0]))
                     if len(lens) >= sample:
@@ -510,11 +539,12 @@ def fig_unitig_lengths(data, ms, out, sample=40000, stride=25):
                 density=True, color=_colour(org), label=f"{_display(org)} (n={len(lens):,})")
         drawn += 1
     if not drawn:
-        plt.close(fig); print("  (lengths: no features.txt — skipped)"); return
+        plt.close(fig); print("  (lengths: no features.txt/features_sample.txt — skipped)"); return
     hi = float(np.percentile(all_lens, 99.5)) if all_lens else 120
     ax.set_xlim(min(all_lens) - 2, max(35, hi) + 5)
     ax.set_xlabel("unitig length (bp)"); ax.set_ylabel("density")
-    ax.set_title("Unitig length distribution (sampled)\n"
+    src = "systematic 1-in-25 sample" if from_sample else "1-in-%d sample" % stride
+    ax.set_title(f"Unitig length distribution ({src})\n"
                  "short unitigs are why BLAST runs in 'blastn-short' mode", fontsize=10.5)
     ax.legend(fontsize=8, frameon=False)
     fig.tight_layout()
