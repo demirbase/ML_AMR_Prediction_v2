@@ -151,7 +151,7 @@ def test_write_kb_evidence(mod, tmp_path):
                    "resfinder": C.score_pair(yt, [1, 1, 0, 0])}},
                "head_to_head_model_test_genomes": {"ampicillin": {
                    "n_common_test_genomes": 4, "model": C.score_pair(yt, [1, 1, 0, 0])}}}
-    mod.write_kb_evidence(db, summary, get_logger("test"))
+    mod.write_kb_evidence(db, summary, get_logger("test"), "ecoli")
 
     conn = sqlite3.connect(str(db))
     rows = conn.execute("SELECT evidence_type, pipeline_run_id FROM validation_evidence "
@@ -162,7 +162,7 @@ def test_write_kb_evidence(mod, tmp_path):
     assert "head_to_head_model" in types
     assert all(r[1] == "R1" for r in rows)          # linked to the model's run
     # idempotent: second call does not duplicate
-    mod.write_kb_evidence(db, summary, get_logger("test"))
+    mod.write_kb_evidence(db, summary, get_logger("test"), "ecoli")
     n = conn.execute("SELECT COUNT(*) FROM validation_evidence").fetchone()[0]
     assert n == 3
     conn.close()
@@ -201,3 +201,40 @@ def test_missing_tool_reports_unknown_not_an_error_message(monkeypatch):
     assert "unknown" in m.RF_SOURCE.lower()
     assert "No module named" not in m.RF_SOURCE
     assert "unknown" in m.AFP_SOURCE.lower()
+
+
+def test_write_kb_evidence_is_organism_scoped(mod, tmp_path):
+    """Two organisms sharing an antibiotic must both survive. The lookup used to
+    key runs by antibiotic alone and delete every concordance row on each call,
+    so a six-organism sweep left only the last organism in the KB."""
+    import sqlite3
+    from lib.kb_schema import create_schema
+    from lib import concordance as C
+    from lib.logging_utils import get_logger
+    db = tmp_path / "amrk.db"
+    conn = sqlite3.connect(str(db))
+    create_schema(conn)
+    conn.execute("INSERT INTO antibiotics(antibiotic) VALUES ('ampicillin')")
+    for i, org in enumerate(("ecoli", "kpneumoniae"), start=1):
+        conn.execute("INSERT INTO pipeline_runs(run_id, organism, antibiotic)"
+                     " VALUES (?,?,'ampicillin')", (f"R{i}", org))
+        conn.execute("INSERT INTO models(model_id, run_id, antibiotic)"
+                     " VALUES (?,?,'ampicillin')", (i, f"R{i}"))
+    conn.commit(); conn.close()
+
+    yt = [1, 1, 0, 0]
+    summary = {"antibiotics": {"ampicillin": {
+                   "amrfinderplus": C.score_pair(yt, [1, 0, 0, 0]),
+                   "resfinder": C.score_pair(yt, [1, 1, 0, 0])}},
+               "head_to_head_model_test_genomes": {}}
+    for org in ("ecoli", "kpneumoniae"):
+        mod.write_kb_evidence(db, summary, get_logger("test"), org)
+
+    conn = sqlite3.connect(str(db))
+    runs = {r[0] for r in conn.execute(
+        "SELECT pipeline_run_id FROM validation_evidence "
+        "WHERE evidence_type LIKE 'concordance%'")}
+    models = {r[0] for r in conn.execute("SELECT model_id FROM external_concordance")}
+    conn.close()
+    assert runs == {"R1", "R2"}      # the first organism was not wiped by the second
+    assert models == {1, 2}          # and the purpose-built table carries both

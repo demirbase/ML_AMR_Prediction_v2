@@ -425,20 +425,49 @@ def _r(x):
     return "NA" if x is None else f"{x:.3f}"
 
 
-def write_kb_evidence(db_path, summary, logger):
+def write_kb_evidence(db_path, summary, logger, organism):
     """Persist the concordance result into amrk.db `validation_evidence` (M11):
     one row per (antibiotic, caller) vs phenotype + the model head-to-head, linked
     to that antibiotic's model run. Idempotent (clears prior concordance rows)."""
     import sqlite3
     conn = sqlite3.connect(str(db_path))
     try:
-        runs = dict(conn.execute("SELECT antibiotic, run_id FROM models").fetchall())
+        # Key the run lookup by (organism, antibiotic), not by antibiotic alone:
+        # the same agent is modelled in several organisms, so an antibiotic-only
+        # map collapses six runs into one and attributes every organism's
+        # concordance to whichever run happened to be last.
+        runs, models = {}, {}
+        for mid, ab, org in conn.execute(
+                "SELECT m.model_id, m.antibiotic, r.organism FROM models m "
+                "JOIN pipeline_runs r ON r.run_id = m.run_id"):
+            models[(org, ab)] = mid
+        for rid, ab, org in conn.execute(
+                "SELECT m.run_id, m.antibiotic, r.organism FROM models m "
+                "JOIN pipeline_runs r ON r.run_id = m.run_id"):
+            runs[(org, ab)] = rid
         etypes = ("concordance_amrfinderplus", "concordance_resfinder", "head_to_head_model")
-        conn.execute(f"DELETE FROM validation_evidence WHERE evidence_type IN "
-                     f"({','.join('?' * len(etypes))})", etypes)
+        # Clear only THIS organism's rows. Deleting every concordance row on each
+        # call meant a six-organism sweep left only the last organism behind.
+        own_runs = [r for (o, _), r in runs.items() if o == organism]
+        if own_runs:
+            conn.execute(
+                f"DELETE FROM validation_evidence WHERE evidence_type IN "
+                f"({','.join('?' * len(etypes))}) AND pipeline_run_id IN "
+                f"({','.join('?' * len(own_runs))})", (*etypes, *own_runs))
+        own_models = [m for (o, _), m in models.items() if o == organism]
+        if own_models:
+            conn.execute("DELETE FROM external_concordance WHERE model_id IN "
+                         f"({','.join('?' * len(own_models))})", own_models)
         n = 0
         for ab, doc in summary["antibiotics"].items():
-            rid = runs.get(ab)
+            rid = runs.get((organism, ab))
+            mid = models.get((organism, ab))
+            # An antibiotic with no model in this organism has nothing to attach
+            # a concordance row to. Writing one anyway left a NULL run_id that no
+            # organism-scoped delete could clear, so re-running the sweep grew the
+            # table instead of replacing it.
+            if rid is None:
+                continue
             for caller, et, src in (
                     ("amrfinderplus", "concordance_amrfinderplus", AFP_SOURCE),
                     ("resfinder", "concordance_resfinder", RF_SOURCE)):
@@ -449,7 +478,20 @@ def write_kb_evidence(db_path, summary, logger):
                     (et, f"{src} vs EUCAST/CLSI (bACC={_r(s['balanced_accuracy'])}, "
                      f"kappa={_r(s['cohen_kappa'])}, n={s['n']})", s["cohen_kappa"], rid))
                 n += 1
+                # The purpose-built table: one row per (model, caller) with the
+                # full clinical metric set, which validation_evidence cannot hold.
+                if mid is not None and s.get("n"):
+                    conn.execute(
+                        "INSERT INTO external_concordance(model_id, caller, reference, "
+                        "n_test, sensitivity, specificity, balanced_accuracy, cohen_kappa, "
+                        "major_error_rate, very_major_error_rate) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (mid, caller, "EUCAST/CLSI phenotype (BV-BRC)", s["n"],
+                         s.get("sensitivity"), s.get("specificity"),
+                         s.get("balanced_accuracy"), s.get("cohen_kappa"),
+                         s.get("major_error_rate"), s.get("very_major_error_rate")))
         for ab, h in summary.get("head_to_head_model_test_genomes", {}).items():
+            if (organism, ab) not in runs:
+                continue
             m = h["model"]
             conn.execute(
                 "INSERT INTO validation_evidence(unitig_id, evidence_type, "
@@ -457,7 +499,7 @@ def write_kb_evidence(db_path, summary, logger):
                 ("head_to_head_model",
                  f"unitig model vs AMRFinderPlus/ResFinder on held-out test "
                  f"(bACC={_r(m['balanced_accuracy'])}, kappa={_r(m['cohen_kappa'])}, "
-                 f"n={h['n_common_test_genomes']})", m["cohen_kappa"], runs.get(ab)))
+                 f"n={h['n_common_test_genomes']})", m["cohen_kappa"], runs[(organism, ab)]))
             n += 1
         conn.commit()
         logger.info("  ✓ wrote %d concordance evidence rows to KB (%s)", n, db_path)
@@ -490,7 +532,7 @@ def main():
             db_path = Path(args.db) if args.db else (
                 PROJECT_ROOT / "results" / organism / "kb" / "amrk.db")
             if db_path.exists():
-                write_kb_evidence(db_path, summary, logger)
+                write_kb_evidence(db_path, summary, logger, organism)
             else:
                 logger.warning("--write-kb: KB not found at %s (skipped)", db_path)
 
