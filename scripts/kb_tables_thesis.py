@@ -293,6 +293,7 @@ def t_limitations(ctx):
     pfer_max = round(float(k.pfer_bound.max()), 1)
     pfer_over = int((k.pfer_bound > 1).sum())
     n_conc = q("select count(*) from external_concordance")
+    n_conc_models = q("select count(distinct model_id) from external_concordance")
     n_overlap = q("select count(*) from unitig_antibiotic_overlap")
     dirty = q("select count(*) from pipeline_runs where git_dirty = 1")
     n_runs = q("select count(*) from pipeline_runs")
@@ -307,15 +308,18 @@ def t_limitations(ctx):
     mixed = int((nov.replicon_call == "mixed").sum()) if nov is not None else None
 
     L = [
-        (1, "External validation is lineage hold-out only",
-         "Temporal validation is impossible (BV-BRC AMR phenotypes end in 2021; ≥2023 isolates: "
-         "E. coli 28, K. pneumoniae 13, A. baumannii 11, S. aureus 0). Geographic validation was "
-         "not performed and collections are country-dominated (E. coli 58% Norway, A. baumannii "
-         "63% USA). M13 concordance never ran.",
-         f"recomputed: external_concordance holds {n_conc} rows, so figure 07 does not exist. "
-         f"Collection dates and country shares are NOT recomputable from the delivered "
-         f"artefacts — they come from METHODOLOGY 5.3.",
-         "partly recomputed", "3.x methods + 5.x discussion"),
+        (1, "No temporal or geographic hold-out",
+         "Concordance against AMRFinderPlus and ResFinder ran on 2026-09-01 and covers the panel, "
+         "but it scores the tools on the model's OWN held-out split, which is a chunk split rather "
+         "than a lineage-aware one — a design that favours the model by the margin section 4.3 "
+         "measures. Temporal validation remains impossible (BV-BRC AMR phenotypes end in 2021; "
+         "≥2023 isolates: E. coli 28, K. pneumoniae 13, A. baumannii 11, S. aureus 0). Geographic "
+         "validation was not performed and collections are country-dominated (E. coli 58% Norway, "
+         "A. baumannii 63% USA).",
+         f"recomputed: external_concordance holds {n_conc} rows over "
+         f"{n_conc_models} of 45 models. Collection dates and country shares are NOT recomputable "
+         f"from the delivered artefacts — they come from METHODOLOGY 5.3.",
+         "partly recomputed", "3.x methods + 5.1 discussion"),
         (2, "Labels are BV-BRC as published",
          "No MIC re-interpretation was attempted: raw MIC completeness falls to 9% (S. aureus) "
          "and units are mixed.",
