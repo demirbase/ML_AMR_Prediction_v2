@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **`kb_overview.cpss_n_stable` counted more than CPSS.** `kb_tables.py` counted
+  every `unitig_model_scores` row with `stable=1`, without filtering
+  `selection_method` and without deduplicating, so the column — and the axis of
+  figure 02, labelled "CPSS stable unitigs (π≥0.6)" — reported **2,060** rows
+  over 2,045 distinct pairs, of which **856 came from the `gain_seed` path**.
+  The CPSS figure is **1,204**, which is what all 45 `13_stability_summary`
+  JSONs and the `cpss` row of `evidence_accounting.csv` report. Now filtered to
+  `selection_method='cpss'` and deduplicated; `kb_overview.csv` and figure 02
+  regenerated, and the column agrees with the per-model summaries in 45/45.
+- **`limitations.csv` row 9 carried a pre-rebuild claim** that the `snp` layer
+  grades 0 biomarkers. It now reports the graded count from the KB (18).
+- **`snp` evidence layer reached no biomarker — a load-time defect, not a
+  set-membership one.** Step 11 reports its hits by the FASTA header it queried
+  (`Rank_n|Score_x|Feature_f...`), not by sequence.
+  `populate_database.populate_snp` fell back to that header column whenever no
+  `kmer` column was present and handed it to `unitig_id()`, which registered the
+  identifier string itself as a unitig. The layer therefore joined to nothing
+  while appearing to have run, and 335 non-DNA rows accumulated in `unitigs`.
+  The previous diagnosis in METHODOLOGY/HANDOFF — that step 11's candidate set
+  and the graded universe are disjoint — was **wrong**; the two sets overlap.
+  `_attach_snp_sequences()` now resolves the header back to its k-mer through
+  the same FASTA, and `populate_snp` refuses any value that is not DNA.
+  Step 11 was **not** re-run: its outputs were correct throughout.
+  Effect on the delivered KB: `snp` fires on **18** of 3571 (unitig, model)
+  pairs · all 21 `resistant_allele` calls now reach the graded universe ·
+  5 biomarkers move `weak` → `candidate` (`candidate` 942→947, `weak`
+  1920→1915; `confirmed`, `strong_novel` and `none` unchanged) · `unitigs`
+  3844→**3509** · the accounting becomes **7 produced / 6 counted / 5 firing**,
+  leaving `mda` as the only dead layer (a genuine underpowered null).
+  The 18 are the canonical target-site substitutions a homolog-model BLAST
+  cannot distinguish: *gyrA* S83L (*E. coli*), *gyrA* T83I (*P. aeruginosa*),
+  *gyrA* S84L and *parC* S80F (*S. aureus*), *parC* S84L (*A. baumannii*).
+  Regression tests added in `tests/test_evidence_tier.py`.
+  ⚠️ The KB now differs from the archived v0.7.1 and requires a new Zenodo
+  version; `amrk.db`, `results/tables/` and figures 06/35/39 were regenerated.
+  `models.n_trees`/`n_features` were carried over from the pre-rebuild database
+  because the production `manifest.json` files are not available locally.
+  `kb_metadata.zenodo_doi` is deliberately left NULL: the previous value
+  (`10.5281/zenodo.21789464`) identifies an archive that no longer holds this
+  content, so it must be repopulated when the new version is minted.
+
 ### Added
 - **Step 18 — genomic context for `strong_novel` biomarkers.**
   `scripts/18_novel_ncbi_context.py` joins the KB's novel set to the
