@@ -65,11 +65,22 @@ def facts(db):
 
 def rows(f):
     return [
+        # F1/F3 are asserted from the KB, not from intent: if zenodo_doi is empty
+        # the delivered file does not in fact carry its own identifier, and saying
+        # "met" would be the claim the principle exists to prevent. The field is
+        # deliberately empty between a content change and the next release (see
+        # thesis §5.6.1), so the status follows the field.
         ("F1", "(Meta)data are assigned a globally unique and persistent identifier",
          "Zenodo concept DOI, minted for the dataset and stamped into the KB itself",
-         f"kb_metadata.zenodo_doi = {f['doi']}; the concept DOI resolves to the newest "
-         f"version, so citations survive re-release. Records inside the KB use local "
-         f"surrogate keys (unitig_id, model_id), not global PIDs.", "met"),
+         (f"kb_metadata.zenodo_doi = {f['doi']}; the concept DOI resolves to the newest "
+          f"version, so citations survive re-release. Records inside the KB use local "
+          f"surrogate keys (unitig_id, model_id), not global PIDs."
+          if f['doi'] else
+          "kb_metadata.zenodo_doi is EMPTY. The knowledge base changed after the last "
+          "archived version, so the previous version DOI no longer describes this content "
+          "and was not carried forward; a new release must be minted and the field "
+          "repopulated. The concept DOI remains the identifier the thesis cites."),
+         "met" if f['doi'] else "not met"),
 
         ("F2", "Data are described with rich metadata",
          "Per-run provenance table plus a KB-level metadata row",
@@ -80,8 +91,13 @@ def rows(f):
 
         ("F3", "Metadata clearly and explicitly include the identifier of the data",
          "The DOI lives inside the database, not only beside it",
-         f"kb_metadata.zenodo_doi is a column of amrk.db, so a copy of the file "
-         f"identifies its own published archive with no external manifest.", "met"),
+         (f"kb_metadata.zenodo_doi is a column of amrk.db, so a copy of the file "
+          f"identifies its own published archive with no external manifest."
+          if f['doi'] else
+          "kb_metadata.zenodo_doi is a column of amrk.db but is currently empty, so a "
+          "copy of the file does not identify its own archive until the next release "
+          "repopulates it."),
+         "met" if f['doi'] else "not met"),
 
         ("F4", "(Meta)data are registered or indexed in a searchable resource",
          "Zenodo record; DataCite metadata; GitHub repository",

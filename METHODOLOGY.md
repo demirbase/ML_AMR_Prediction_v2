@@ -417,10 +417,12 @@ permutations against ~2400 candidates, so the attainable $q$ floor is coarse and
 the procedure is underpowered. "No MDA-significant unitigs" therefore does **not**
 license "no feature matters"; it means this particular test could not resolve one.
 
-Two further tables ship empty: `external_concordance` (step 16 / M13 external
-AMRFinderPlus–ResFinder concordance never ran, so there is no concordance figure)
-and `unitig_antibiotic_overlap` (step 15's cross-antibiotic output was never
-loaded into the KB; the API's `/overlap` route consequently returns nothing).
+Both tables that once shipped empty have since been filled, without a schema
+change. `external_concordance` holds the step 16 / M13 comparison against
+AMRFinderPlus 4.2.7 and ResFinder 4.5.0: 83 rows over 44 of the 45 models, run
+2026-09-01. `unitig_antibiotic_overlap` holds step 15's cross-antibiotic output,
+29 (unitig, pair) records over 160 organism-internal pairs, so the API's
+`/overlap` route now returns data.
 
 For the annotation layer, all 3611 `blast_annotations` rows are CARD (§4.2), and
 they are **not interchangeable**: 3007 sit at `tier='none'` (mean query coverage
@@ -449,7 +451,10 @@ replicon types within one species is a mobile-element signature.
    *impossible* with this data: BV-BRC AMR phenotypes end in 2021 (≥2023 isolates:
    *E. coli* 28, *K. pneumoniae* 13, *A. baumannii* 11, *S. aureus* 0). Geographic
    validation was *not performed*, and the collections are country-dominated
-   (*E. coli* 58% Norway, *A. baumannii* 63% USA). M13 concordance never ran.
+   (*E. coli* 58% Norway, *A. baumannii* 63% USA). M13 concordance HAS now run
+   (2026-09-01), but it scores the tools on the model's own held-out split, which
+   is a chunk split rather than a lineage-aware one — a design that favours the
+   model by the margin §5.3 item 4 measures.
 2. **Labels are BV-BRC as published.** No MIC re-interpretation was attempted —
    raw MIC completeness is as low as 9% (*S. aureus*) and units are mixed.
 3. **PFER exceeds 1 in 21 of the 45 models** (max 12.9): in those stable sets the

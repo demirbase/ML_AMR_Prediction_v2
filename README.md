@@ -179,7 +179,7 @@ a clone-specific pattern and collapses when that clone is held out. A random spl
 would have published a near-perfect headline for a phenotype the features cannot
 actually generalise to.
 
-**Evidence tiers across the KB:** confirmed 349 · candidate 942 · weak 1920 ·
+**Evidence tiers across the KB:** confirmed 349 · candidate 947 · weak 1915 ·
 none 337 · **`strong_novel` 23** (CPSS-stable + pyseer-significant + no CARD hit).
 
 Validation stack: lineage-aware CV, CPSS stability selection + PFER bound,
