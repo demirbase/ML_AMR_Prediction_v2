@@ -264,7 +264,17 @@ amrfinder_keywords:
   chloramphenicol:               [CHLORAMPHENICOL, PHENICOL]
   colistin:                      [COLISTIN, POLYMYXIN]
   vancomycin:                    [VANCOMYCIN, GLYCOPEPTIDE]
-  teicoplanin:                   [TEICOPLANIN, GLYCOPEPTIDE]
+  # teicoplanin gets NO glycopeptide token, and so gets no AMRFinderPlus call.
+  # Verified against the delivered output: AMRFinderPlus labels every van
+  # determinant `GLYCOPEPTIDE | VANCOMYCIN` and publishes no TEICOPLANIN
+  # subclass, so a class-level token cannot separate vanA (vancomycin AND
+  # teicoplanin) from vanB (vancomycin only). The E. faecium panel carries both
+  # -- 846 vanA against 73 vanB -- so matching on GLYCOPEPTIDE would score the
+  # vanB genomes teicoplanin-resistant when they are not, manufacturing false
+  # positives against the tool. The limit belongs to the tool's own resolution,
+  # so teicoplanin is left out of the AMRFinderPlus comparison and reported as
+  # such. ResFinder publishes a teicoplanin row and is compared normally.
+  teicoplanin:                   [TEICOPLANIN]
   tigecycline:                   [TIGECYCLINE]
 
 # ============================================================================

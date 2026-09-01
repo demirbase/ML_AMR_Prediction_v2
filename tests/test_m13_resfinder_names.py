@@ -62,3 +62,20 @@ def test_inhibitor_combination_never_matches_the_bare_drug(tmp_path):
 @pytest.mark.parametrize("name", ["Ciprofloxacin", "CIPROFLOXACIN", " ciprofloxacin "])
 def test_case_and_whitespace_are_ignored(tmp_path, name):
     assert m13.parse_resfinder(_table(tmp_path, [(name, "Resistant")]))["ciprofloxacin"] == 1
+
+
+def test_phenotype_columns_match_across_separator_styles(tmp_path):
+    """BV-BRC writes "trimethoprim/sulfamethoxazole"; the project keys it with
+    underscores. A literal lookup returned None, so every combination agent was
+    scored against no phenotype at all and reported n=0."""
+    md = tmp_path / "amr_phenotypes.csv"
+    md.write_text("Genome ID,ampicillin,trimethoprim/sulfamethoxazole,"
+                  "amoxicillin/clavulanic acid\n"
+                  "562.1,1,0,1\n562.2,0,1,\n", encoding="utf-8")
+    pheno = m13.load_phenotype(md, ["ampicillin", "trimethoprim_sulfamethoxazole",
+                                    "amoxicillin_clavulanic_acid", "oxacillin"])
+    assert pheno["562.1"]["trimethoprim_sulfamethoxazole"] == 0
+    assert pheno["562.2"]["trimethoprim_sulfamethoxazole"] == 1
+    assert pheno["562.1"]["amoxicillin_clavulanic_acid"] == 1
+    assert pheno["562.2"]["amoxicillin_clavulanic_acid"] is None   # blank stays unknown
+    assert pheno["562.1"]["oxacillin"] is None                     # no such column

@@ -219,12 +219,23 @@ def load_phenotype(metadata_file, antibiotics):
     # 562.1 would mismatch the {gid}.fna filename and the model_preds join.
     gid_col = pd.read_csv(metadata_file, nrows=0).columns[0]
     df = pd.read_csv(metadata_file, encoding="utf-8", dtype={gid_col: str})
+    # BV-BRC writes combination agents with a slash ("trimethoprim/
+    # sulfamethoxazole"); this project keys them with underscores. A literal
+    # r.get(ab) therefore returned None for every combination, so those models
+    # were scored against no phenotype at all and reported n=0. Same token-set
+    # match as parse_resfinder, for the same reason.
+    col_of = {_ab_tokens(c): c for c in df.columns}
+    cols = {ab: col_of.get(_ab_tokens(ab)) for ab in antibiotics}
+    missing = sorted(ab for ab, c in cols.items() if c is None)
+    if missing:
+        print(f"  note: no phenotype column for {', '.join(missing)}")
     pheno = {}
     for _, r in df.iterrows():
         gid = str(r[gid_col])
         row = {}
         for ab in antibiotics:
-            v = r.get(ab)
+            col = cols.get(ab)
+            v = r.get(col) if col else None
             row[ab] = None if (v is None or (isinstance(v, float) and v != v)) else int(v)
         pheno[gid] = row
     return pheno
