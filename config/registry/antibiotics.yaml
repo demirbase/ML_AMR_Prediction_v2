@@ -229,7 +229,13 @@ amrfinder_keywords:
   ampicillin:                    [AMPICILLIN, BETA-LACTAM]
   amoxicillin_clavulanic_acid:   [AMOXICILLIN, BETA-LACTAM]
   piperacillin_tazobactam:       [PIPERACILLIN, BETA-LACTAM]
-  ampicillin_sulbactam:          [AMPICILLIN, SULBACTAM, BETA-LACTAM]
+  # No BETA-LACTAM token: sulbactam inhibits many of the enzymes that token
+  # matches, so "some beta-lactamase is present" does not imply resistance to
+  # the combination. Measured on the 1159 A. baumannii genomes: with it,
+  # AMRFinderPlus called 98.4% resistant against a 48.6% phenotype rate.
+  # AMRFinderPlus publishes no SULBACTAM subclass, so the narrow form makes it
+  # unassessable here rather than wrong -- which is the honest outcome.
+  ampicillin_sulbactam:          [AMPICILLIN_SULBACTAM, SULBACTAM]
   cefotaxime:                    [CEFOTAXIME, CEPHALOSPORIN]
   ceftazidime:                   [CEFTAZIDIME, CEPHALOSPORIN]
   cefepime:                      [CEFEPIME, CEPHALOSPORIN]
@@ -237,9 +243,16 @@ amrfinder_keywords:
   meropenem:                     [MEROPENEM, CARBAPENEM]
   imipenem:                      [IMIPENEM, CARBAPENEM]
   ciprofloxacin:                 [CIPROFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
-  gentamicin:                    [GENTAMICIN, AMINOGLYCOSIDE]
-  tobramycin:                    [TOBRAMYCIN, AMINOGLYCOSIDE]
-  amikacin:                      [AMIKACIN, AMINOGLYCOSIDE]
+  # No AMINOGLYCOSIDE class token on the individual aminoglycosides. Measured on
+  # the 1865 E. faecium genomes of the M13 run: with it, AMRFinderPlus called
+  # gentamicin resistant in 99.7% of genomes against a 30.2% phenotype rate,
+  # because the class token fires on every aminoglycoside determinant including
+  # streptomycin-only ones -- a constant predictor, balanced accuracy 0.500.
+  # The subclass strings carry the specific agent ("AMIKACIN/GENTAMICIN/
+  # KANAMYCIN/TOBRAMYCIN"), so the narrow token still matches what it should.
+  gentamicin:                    [GENTAMICIN]
+  tobramycin:                    [TOBRAMYCIN]
+  amikacin:                      [AMIKACIN]
   levofloxacin:                  [LEVOFLOXACIN, FLUOROQUINOLONE, QUINOLONE]
   tetracycline:                  [TETRACYCLINE]
   trimethoprim_sulfamethoxazole: [TRIMETHOPRIM, SULFAMETHOXAZOLE, SULFONAMIDE]

@@ -137,17 +137,35 @@ def _tokens(field):
     return {t.strip().upper() for t in field.replace(",", "/").split("/") if t.strip()}
 
 
+# Agents AMRFinderPlus cannot resolve, so it is not scored on them at all.
+# Without this they come out as an all-negative predictor at balanced accuracy
+# 0.500, which reads as "the tool performed at chance" when the truth is "the
+# tool was not asked", and that is unfair to the tool in a head-to-head table.
+AFP_NOT_ASSESSABLE = {
+    # AMRFinderPlus labels every van determinant `GLYCOPEPTIDE | VANCOMYCIN` and
+    # publishes no TEICOPLANIN subclass, so it cannot separate vanA (vancomycin
+    # and teicoplanin) from vanB (vancomycin only).
+    "teicoplanin",
+    # AMRFinderPlus resolves beta-lactamases but not inhibitor combinations: it
+    # publishes no SULBACTAM subclass, so it cannot say whether sulbactam
+    # restores activity against the enzymes it did find.
+    "ampicillin_sulbactam",
+}
+
+
 def parse_amrfinder(tsv_path, antibiotics=DEFAULT_ANTIBIOTICS, keywords=AFP_KEYWORDS):
     """One AMRFinderPlus TSV -> {antibiotic: 0/1}. R if any AMR-type row's
-    Class/Subclass tokens intersect the antibiotic's keyword set."""
-    calls = {ab: 0 for ab in antibiotics}
+    Class/Subclass tokens intersect the antibiotic's keyword set. Agents in
+    AFP_NOT_ASSESSABLE are omitted, so downstream code reports no call rather
+    than a spurious susceptible one."""
+    calls = {ab: 0 for ab in antibiotics if ab not in AFP_NOT_ASSESSABLE}
     with open(tsv_path, encoding="utf-8") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for row in reader:
             if (row.get("Type") or row.get("Element type") or "").strip().upper() != "AMR":
                 continue
             toks = _tokens(row.get("Class")) | _tokens(row.get("Subclass"))
-            for ab in antibiotics:
+            for ab in calls:
                 if toks & keywords.get(ab, set()):
                     calls[ab] = 1
     return calls
