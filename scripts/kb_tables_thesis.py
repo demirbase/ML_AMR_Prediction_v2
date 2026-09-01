@@ -300,6 +300,8 @@ def t_limitations(ctx):
     n_org_panel = q("select count(distinct organism) from pipeline_runs")
     efm = round(float(ms[ms.organism == "enterococcus_faecium"].lineage_cv_auc.mean()), 3)
     snp_rows = q("select count(*) from variant_snp_check")
+    snp_graded = q("select count(*) from unitig_evidence_tier"
+                   " where evidence_layers like '%snp%'")
     nov = ctx["novel_ctx"]
     plasmid = int((nov.replicon_call == "plasmid").sum()) if nov is not None else None
     mixed = int((nov.replicon_call == "mixed").sum()) if nov is not None else None
@@ -365,8 +367,9 @@ def t_limitations(ctx):
          "the kinship term did not absorb. Figure 29 is a diagnostic of the scan, not evidence "
          "that population structure was controlled.",
          f"not recomputed here (λ is computed inside figure 29 from the per-model pyseer "
-         f"outputs). Related and recomputed: variant_snp_check holds {snp_rows} rows yet the snp "
-         f"layer grades 0 biomarkers, and unitig_antibiotic_overlap holds {n_overlap} rows.",
+         f"outputs). Related and recomputed: variant_snp_check holds {snp_rows} rows, of which "
+         f"{snp_graded} reach a tier since the 2026-09-01 loader fix, and "
+         f"unitig_antibiotic_overlap holds {n_overlap} rows.",
          "from METHODOLOGY 5.3 + figure 29", "4.4 significance + 5.x"),
     ]
     return pd.DataFrame(L, columns=["n", "limitation", "detail", "evidence",
